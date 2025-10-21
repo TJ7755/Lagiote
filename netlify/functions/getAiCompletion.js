@@ -13,7 +13,7 @@ exports.handler = async function (event, context) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     
     // Use the updated, faster model
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-latest" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Parse the documents sent from the front-end
     const { documents } = JSON.parse(event.body);
