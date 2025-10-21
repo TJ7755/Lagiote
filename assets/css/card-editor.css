@@ -1,0 +1,38 @@
+.archetype-select {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 2px solid var(--border-color);
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    font-size: 14px;
+    margin-bottom: 15px;
+    cursor: pointer;
+}
+
+.archetype-select:focus {
+    border-color: var(--primary-color);
+    outline: none;
+}
+
+.sequence-inputs textarea {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.sequence-inputs textarea:focus {
+    border-color: var(--primary-color);
+    outline: none;
+}
+
+.hidden {
+    display: none;
+}

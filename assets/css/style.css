@@ -1,0 +1,48 @@
+/*
+ * StudyStack Main Stylesheet
+ */
+
+/* Inter Light (font-weight: 300) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('../fonts/Inter_18pt-Light.ttf') format('truetype');
+}
+
+/* Inter Regular (font-weight: 400) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/Inter_18pt-Regular.ttf') format('truetype');
+}
+
+/* Inter Medium (font-weight: 500) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/Inter_18pt-Medium.ttf') format('truetype');
+}
+
+/* Inter SemiBold (font-weight: 600) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/Inter_18pt-SemiBold.ttf') format('truetype');
+}
+
+/* Inter Bold (font-weight: 700) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/Inter_18pt-Bold.ttf') format('truetype');
+}

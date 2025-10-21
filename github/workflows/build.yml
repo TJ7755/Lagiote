@@ -1,0 +1,42 @@
+# .github/workflows/build.yml
+name: Build Electron App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: 1. Check out git repository
+        uses: actions/checkout@v3
+
+      - name: 2. Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 3. Install dependencies
+        run: npm install
+
+      - name: 4. Build/make application
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            npm run make -- --platform win32
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            npm run make -- --platform darwin
+          fi
+
+      - name: 5. Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: LagioteRevise-${{ matrix.os }}
+          path: out/make
