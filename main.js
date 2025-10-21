@@ -40,3 +40,24 @@ ipcMain.handle('generate-deck', async (event, { documents }) => {
     throw new Error("Failed to generate flashcards from the cloud service.");
   }
 });
+
+ipcMain.handle('generate-distractors', async (event, { question, answer }) => {
+  try {
+    const response = await fetch('https://lagiote-revise.netlify.app/.netlify/functions/generateDistractors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, answer }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Distractor function failed with status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.distractors; // Return just the array of strings
+
+  } catch (error) {
+    console.error("Error calling distractor function from Electron:", error);
+    throw new Error("Failed to generate distractors from the cloud service.");
+  }
+});

@@ -5557,8 +5557,8 @@
         }
         async function preGenerateAdaptiveQuestions(roundCards, progressCallback) {
             if (!isOnline) {
-                console.log("Offline mode: Skipping pre-generation.");
-                progressCallback(1, 1);
+                console.log("Offline mode: Skipping pre-generation of distractors.");
+                if (progressCallback) progressCallback(1, 1);
                 return;
             }
 
@@ -5567,19 +5567,37 @@
             const cardsToGenerate = roundCards.filter(card => card.questionTypeToShow === 'MultipleChoice');
             
             if (cardsToGenerate.length === 0) {
-                progressCallback(1, 1);
+                if (progressCallback) progressCallback(1, 1);
                 return;
             }
 
             let completedJobs = 0;
             const totalJobs = cardsToGenerate.length;
-            progressCallback(completedJobs, totalJobs);
+            if (progressCallback) progressCallback(completedJobs, totalJobs);
 
             const generationPromises = cardsToGenerate.map(card => {
-                return window.electronAPI.generateDistractors({
+                let apiPromise;
+
+                const requestBody = {
                     question: card.question,
                     answer: card.answer
-                }).then(distractors => {
+                };
+
+                if (isElectron) {
+                    apiPromise = window.electronAPI.generateDistractors(requestBody);
+                } else {
+                    apiPromise = fetch('/.netlify/functions/generateDistractors', {
+                        method: 'POST',
+                        body: JSON.stringify(requestBody)
+                    })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Server function for distractors failed.');
+                        return response.json();
+                    })
+                    .then(result => result.distractors); 
+                }
+
+                return apiPromise.then(distractors => {
                     if (distractors && distractors.length >= 3) {
                         studyState.preGeneratedDistractors.set(card.id, distractors);
                     }
@@ -5587,7 +5605,7 @@
                     console.error(`Failed to pre-generate for card: ${card.question}`, error);
                 }).finally(() => {
                     completedJobs++;
-                    progressCallback(completedJobs, totalJobs);
+                    if (progressCallback) progressCallback(completedJobs, totalJobs);
                 });
             });
 
