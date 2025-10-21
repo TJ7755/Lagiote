@@ -1,0 +1,38 @@
+# .github/workflows/build.yml
+name: Build Electron App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    # This matrix is set to only run on the latest version of Windows.
+    runs-on: windows-latest
+
+    steps:
+      - name: 1. Check out git repository
+        uses: actions/checkout@v3
+
+      - name: 2. Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 3. Install dependencies
+        run: npm install
+
+      - name: 4. Build/make application
+        # Since this job only runs on Windows, we don't need to check the OS.
+        # We can run the make command directly.
+        run: npm run make
+
+      - name: 5. Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          # A more descriptive name for the downloadable file
+          name: LagioteRevise-Windows-Installer
+          # The path where Electron Forge places the final installer
+          path: out/make/squirrel.windows/x64/*.exe
