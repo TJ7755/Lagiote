@@ -6423,13 +6423,17 @@
             const totalDaysRemaining = Math.max(1, (examDate - now) / (1000 * 3600 * 24));
 
             const prioritizedCards = allCards.map(card => {
-                const state = knowledgeMap.get(card.id) || { masteryScore: 0.5, sm2Data: { dueDate: new Date(0).toISOString() } };
-                const dueDate = new Date(state.sm2Data.dueDate);
-                
+                const state = knowledgeMap.get(card.id) || { masteryScore: 0.5 };
+
+                const cardDueDate = (card.sm2Data && card.sm2Data.dueDate)
+                    ? card.sm2Data.dueDate
+                    : new Date(0).toISOString(); 
+                const dueDate = new Date(cardDueDate);
+
                 const daysOverdue = (now - dueDate) / (1000 * 3600 * 24);
                 const dueFactor = daysOverdue > 0 ? 1 + Math.log(1 + daysOverdue) : 0;
 
-                const masteryFactor = 1 - (state.masteryScore || 0.5);
+                const masteryFactor = 1 - state.masteryScore;
 
                 const urgencyFactor = 1 / totalDaysRemaining;
 
@@ -6440,7 +6444,7 @@
 
             prioritizedCards.sort((a, b) => b.priorityScore - a.priorityScore);
             
-            const sessionSize = 50; 
+            const sessionSize = 50; // This could be a user setting later
             return prioritizedCards.slice(0, sessionSize);
         }
 
