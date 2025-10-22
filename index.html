@@ -3924,9 +3924,16 @@
                 }
                 studyState.roundCards = sortedCards;
             } else if (currentMode === 'exam') {
-                const roundSize = studyState.settings.cardsPerRound || 7;
+                let roundSize = 7; 
+                if (dailyPriorityQueue.length > 0) {
+                    const firstCardDeckId = dailyPriorityQueue[0].deckId;
+                    if (decks[firstCardDeckId] && decks[firstCardDeckId].settings) {
+                        roundSize = decks[firstCardDeckId].settings.cardsPerRound || 7;
+                    }
+                }
                 studyState.roundCards = dailyPriorityQueue.splice(0, roundSize);
             }
+            
             studyState.currentCardIndex = 0;
 
             studyState.roundCards.forEach(card => {
@@ -4070,7 +4077,7 @@
                 case 'MultipleChoice':
                     document.getElementById('mcqView').classList.remove('hidden');
                     document.getElementById('mcqQuestion').innerHTML = card.question;
-                    generateAndDisplayMCQ(card, decks[currentDeckId].cards);
+                    generateAndDisplayMCQ(card); 
                     simpleButtons.classList.add('hidden');
                     break;
                 
@@ -5731,16 +5738,24 @@
             return 'Flashcard';
         }
 
-        async function generateAndDisplayMCQ(correctCard, allCardsInDeck) {
+        async function generateAndDisplayMCQ(correctCard) {
             const optionsContainer = document.getElementById('mcqOptions');
             
+            const deckForThisCard = decks[correctCard.deckId];
+            if (!deckForThisCard) {
+                console.error("Could not find deck for MCQ generation.");
+                showAnswer();
+                return;
+            }
+            const allCardsInDeck = deckForThisCard.cards;
+
             const preGeneratedDistractors = studyState.preGeneratedDistractors.get(correctCard.id);
 
             if (preGeneratedDistractors && preGeneratedDistractors.length >= 3) {
                 const finalOptions = shuffleArray([correctCard.answer, ...preGeneratedDistractors.slice(0, 3)]);
                 displayMCQButtons(finalOptions, correctCard);
             } else {
-                if (isOnline) {
+                if (isOnline && preGeneratedDistractors !== undefined) { // Check if it tried and failed
                     showToast("Couldn't generate smart options, using random.", "error");
                 }
                 console.warn("No pre-generated distractors found in cache (or offline), falling back to random.");
@@ -5755,6 +5770,7 @@
                 displayMCQButtons(finalOptions, correctCard);
             }
         }
+
 
         function displayMCQButtons(options, correctCard) {
             const optionsContainer = document.getElementById('mcqOptions');
