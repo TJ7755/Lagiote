@@ -714,7 +714,43 @@
                 <button id="internalDashboardBtn" class="btn btn-secondary" onclick="showInternalAnalytics()" style="margin-left: 10px;">Internal Dashboard</button>
             </div>
         </div>
-    </div> 
+    </div>
+    
+    <div id="planDetailView" class="container view-container">
+        <div class="deck-detail-view" style="margin-top: 20px;">
+            <div class="deck-detail-header">
+                <div>
+                    <span class="deck-detail-category" style="background-color: var(--success-color); color: white;">Exam Plan</span>
+                    <h2 class="deck-detail-title" id="planDetailTitle"></h2>
+                    <p id="planDetailCountdown" style="color: var(--secondary-text); margin-top: 5px;"></p>
+                </div>
+                <div id="planDetailActions" class="deck-detail-actions">
+                    <button class="btn btn-prominent" id="planDetailStartBtn">Start Today's Session</button>
+                    <button class="btn btn-secondary" id="planDetailEditBtn">Edit Plan</button>
+                    <button class="btn btn-danger" id="planDetailDeleteBtn">Delete Plan</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-container" style="margin-top: 30px;">
+            <h3 class="section-title">Plan Analytics</h3>
+            <div id="planAnalyticsContent">
+                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px; align-items: center;">
+                    <div>
+                        <h4>Mastery Breakdown</h4>
+                        <canvas id="planMasteryChart"></canvas>
+                        <div id="planMasteryLegend" style="margin-top: 15px; font-size: 0.9rem;"></div>
+                    </div>
+                    <div>
+                        <h4>Progress by Deck</h4>
+                        <canvas id="planDeckProgressChart"></canvas>
+                    </div>
+                </div>
+                <h4 style="margin-top: 40px;">Hardest Cards in this Plan</h4>
+                <div class="deck-cards-list" id="planHardestCardsList" style="margin-top: 15px;"></div>
+            </div>
+        </div>
+    </div>
 <div id="insightsView" class="container view-container">
     <div class="section-title" style="padding-top: 20px;">Memory Insights</div>
     <div class="settings-container">
@@ -1580,6 +1616,8 @@
     
     const isElectron = typeof window.electronAPI !== 'undefined';
     let toastQueue = [];
+    let currentEditingPlanId = null;
+    let dailyPriorityQueue = [];
     let isToastVisible = false;
     let sortableInstance = null; 
     let documentsForAi = [];
@@ -2889,22 +2927,25 @@
                 const planCard = document.createElement('div');
                 planCard.className = 'exam-plan-card';
                 planCard.innerHTML = `
-                    <div class="plan-card-header">
-                        <div class="plan-card-title">${plan.name}</div>
-                        <div class="plan-card-countdown">${countdownText}</div>
-                    </div>
-                    <div class="deck-progress-container" style="margin-top: 15px;">
-                        <div class="deck-progress-label">
-                            <span>Overall Progress</span>
-                            <span>${Math.round(progressPercent)}%</span>
+                    <div class="deck-card-main-clickable" onclick="showPlanDetails('${plan.id}')">
+                        <div class="plan-card-header">
+                            <div class="plan-card-title">${plan.name}</div>
+                            <div class="plan-card-countdown">${countdownText}</div>
                         </div>
-                        <div class="deck-progress-bar-outer">
-                            <div class="deck-progress-bar-inner" style="width: ${progressPercent}%; background-color: var(--success-color);"></div>
+                        <div class="deck-progress-container" style="margin-top: 15px;">
+                            <div class="deck-progress-label">
+                                <span>Overall Progress</span>
+                                <span>${Math.round(progressPercent)}%</span>
+                            </div>
+                            <div class="deck-progress-bar-outer">
+                                <div class="deck-progress-bar-inner" style="width: ${progressPercent}%; background-color: var(--success-color);"></div>
+                            </div>
                         </div>
                     </div>
-                    <div class="plan-card-footer">
-                        <button class="btn btn-prominent" style="width: 100%;" onclick="startExamPlanSession('${plan.id}')">
-                            Start Today's Study Session
+                    <div class="deck-actions" style="grid-template-columns: 1fr 1fr; margin-top: 15px;">
+                        <button class="btn btn-secondary" onclick="showPlanDetails('${plan.id}')">View Details</button>
+                        <button class="btn btn-prominent" onclick="startExamPlanSession('${plan.id}')">
+                            Start Session
                         </button>
                     </div>
                 `;
@@ -3611,6 +3652,7 @@
             studyState.settings = deck.settings;
             studyState.currentRound = 1;
             studyState.startTime = new Date();
+            studyState.originPlanId = null;
             
             showView('studyMode');
             document.getElementById('studyTitle').textContent = 'Learning Mode';
@@ -3672,6 +3714,7 @@
             studyState.currentRound = deck.reviewState?.currentRound || 1;
             studyState.lastRoundIncorrect = [...(deck.reviewState?.lastRoundIncorrect || [])];
             studyState.startTime = new Date();
+            studyState.originPlanId = null;
             showView('studyMode');
             document.getElementById('studyTitle').textContent = 'Review Mode';
             document.getElementById('studySubtitle').textContent = deck.name;
@@ -3718,6 +3761,9 @@
             }
             if(currentMode === 'learn') updateLearnProgress();
             else if (currentMode === 'review') updateReviewProgress();
+            else if (currentMode === 'exam') {
+                updateExamProgress();
+            }
             else if (currentMode === 'spaced') updateSpacedProgress();
         }
         
@@ -3836,7 +3882,7 @@
 
         async function continueStudy() {
             const continueBtn = document.getElementById('continueBtn');
-            continueBtn.disabled = true; // Disable the button immediately.
+            continueBtn.disabled = true; 
             continueBtn.innerHTML = '<span class="spinner" style="border-width:2px; width:16px; height:16px;"></span> Loading...';
 
             if (currentMode === 'learn') {
@@ -3877,6 +3923,9 @@
                     sortedCards = shuffleArray(prioritized).concat(shuffleArray(others));
                 }
                 studyState.roundCards = sortedCards;
+            } else if (currentMode === 'exam') {
+                const roundSize = studyState.settings.cardsPerRound || 7;
+                studyState.roundCards = dailyPriorityQueue.splice(0, roundSize);
             }
             studyState.currentCardIndex = 0;
 
@@ -4538,10 +4587,8 @@
                 const deck = decks[currentDeckId];
                 const cardIdsInDeck = new Set(deck.cards.map(c => c.id));
                 const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
-                // Calculate how many cards were mastered *before* this session's final updates.
                 const masteryCountBefore = knowledgeStates.filter(s => cardIdsInDeck.has(s.cardID) && s.masteryScore >= 0.95).length;
                 
-                // Now, call the coach with this crucial "before" data.
                 await runSmartCoachChecks('sessionEnd', {
                     deckId: currentDeckId,
                     masteryCountBefore: masteryCountBefore 
@@ -4561,11 +4608,20 @@
                 await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
             }
             
+            const originPlanId = studyState.originPlanId; 
+            if (currentMode === 'exam') {
+                dailyPriorityQueue = [];
+            }
             await saveStudyProgress();
             await updateUserBaseline();
             
             studyState.isRetypingIncorrect = false;
-            backToDashboard();
+            studyState.originPlanId = null;
+            if (currentMode === 'exam' && originPlanId) {
+                showPlanDetails(originPlanId);
+            } else {
+                backToDashboard();
+            }
         }
 
         function resetProgress() {
@@ -5611,6 +5667,7 @@
             studyState.sequenceCards = sequenceCards;
             studyState.currentRound = 1;
             studyState.startTime = new Date();
+            studyState.originPlanId = null;
 
             if (deck.sequenceState && deck.sequenceState.currentChunkIndex < studyState.sequenceChunks.length) {
                 studyState.currentChunkIndex = deck.sequenceState.currentChunkIndex;
@@ -6472,6 +6529,7 @@
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('examPlanDate').setAttribute('min', today);
 
+            currentEditingPlanId = null; 
             document.getElementById('examPlanModal').classList.add('show');
         }
 
@@ -6487,28 +6545,30 @@
             const examDate = document.getElementById('examPlanDate').value;
             const selectedDecks = Array.from(document.querySelectorAll('#examPlanDeckSelector input:checked')).map(el => el.value);
 
-            if (!name) {
-                showToast('Please enter a name for your plan.', 'error');
-                return;
-            }
-            if (!examDate) {
-                showToast('Please select an exam date.', 'error');
-                return;
-            }
-            if (selectedDecks.length === 0) {
-                showToast('Please select at least one deck for the plan.', 'error');
+            if (!name || !examDate || selectedDecks.length === 0) {
+                showToast('Please fill out all fields.', 'error');
                 return;
             }
 
-            const newPlan = {
-                id: Date.now().toString(),
-                name: name,
-                examDate: examDate,
-                deckIds: selectedDecks
-            };
-
-            await saveDataToDB('examPlans', newPlan);
-            showToast(`Exam Plan "${name}" created!`, 'success');
+            if (currentEditingPlanId) {
+                const updatedPlan = {
+                    id: currentEditingPlanId, 
+                    name: name,
+                    examDate: examDate,
+                    deckIds: selectedDecks
+                };
+                await saveDataToDB('examPlans', updatedPlan);
+                showToast(`Plan "${name}" updated!`, 'success');
+            } else {
+                const newPlan = {
+                    id: Date.now().toString(),
+                    name: name,
+                    examDate: examDate,
+                    deckIds: selectedDecks
+                };
+                await saveDataToDB('examPlans', newPlan);
+                showToast(`Exam Plan "${name}" created!`, 'success');
+            }
             
             closeExamPlanModal();
             await updateDashboard(); 
@@ -6517,19 +6577,21 @@
         async function startExamPlanSession(planId) {
             showToast('Building your optimal study session...', 'info');
             
-            currentMode = 'exam'; 
+            currentMode = 'exam';
             
-            const sessionCards = await generateDailySessionForPlan(planId);
+            dailyPriorityQueue = await generateDailySessionForPlan(planId);
 
-            if (sessionCards.length === 0) {
+            if (dailyPriorityQueue.length === 0) {
                 showToast("You're all caught up on this plan for today! Great work.", 'success');
                 return;
             }
 
-            studyState.roundCards = sessionCards;
             studyState.currentCardIndex = 0;
-            studyState.currentRound = 1; 
+            studyState.currentRound = 1;
             studyState.startTime = new Date();
+            studyState.incorrectInThisRound = [];
+            studyState.roundCards = []; 
+            studyState.originPlanId = planId;
 
             const allPlans = await getAllDataFromDB('examPlans');
             const currentPlan = allPlans.find(p => p.id === planId);
@@ -6538,9 +6600,9 @@
             document.getElementById('studyTitle').textContent = 'Exam Plan Session';
             document.getElementById('studySubtitle').textContent = currentPlan ? currentPlan.name : 'Studying';
             
-            transitionSubView(null, document.getElementById('cardView'));
-            showNextCard();
+            showProgress();
         }
+
 
         async function hideExamPlanBanner(event) {
             event.stopPropagation();
@@ -6553,6 +6615,188 @@
             document.getElementById('createExamPlanFooterBtn').classList.remove('hidden');
 
             showToast('Banner hidden. You can create plans from the button below.', 'info');
+        }
+
+        async function showPlanDetails(planId) {
+            const allPlans = await getAllDataFromDB('examPlans');
+            const plan = allPlans.find(p => p.id === planId);
+            if (!plan) { console.error("Plan not found"); return; }
+
+            const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
+            const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
+
+            document.getElementById('planDetailTitle').textContent = plan.name;
+            const now = new Date();
+            const examDate = new Date(plan.examDate);
+            const timeDiff = examDate.getTime() - now.getTime();
+            const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
+            document.getElementById('planDetailCountdown').textContent = `${daysRemaining} days remaining until exam.`;
+
+            document.getElementById('planDetailStartBtn').onclick = () => startExamPlanSession(plan.id);
+            document.getElementById('planDetailEditBtn').onclick = () => editPlan(plan.id);
+            document.getElementById('planDetailDeleteBtn').onclick = () => deletePlan(plan.id);
+
+            renderPlanAnalytics(plan, knowledgeMap);
+
+            showView('planDetailView');
+        }
+
+        function renderPlanAnalytics(plan, knowledgeMap) {
+            const allCardsInPlan = [];
+            plan.deckIds.forEach(deckId => {
+                if (decks[deckId]) {
+                    allCardsInPlan.push(...decks[deckId].cards);
+                }
+            });
+            if (allCardsInPlan.length === 0) {
+                const analyticsContent = document.getElementById('planAnalyticsContent');
+                analyticsContent.innerHTML = `
+                    <div class="no-decks" style="padding: 40px;">
+                        <p>This plan has no cards to analyze.</p>
+                        <p style="font-size: 0.9rem; margin-top: 10px;">Edit the plan to add some decks.</p>
+                    </div>
+                `;
+                if (chartInstances['planMasteryChart']) chartInstances['planMasteryChart'].destroy();
+                if (chartInstances['planDeckProgressChart']) chartInstances['planDeckProgressChart'].destroy();
+                return; 
+            }
+            const cardStatesInPlan = allCardsInPlan.map(card => {
+                return knowledgeMap.get(card.id) || { cardID: card.id, masteryScore: 0.5 };
+            });
+
+            let counts = { novice: 0, learning: 0, mastered: 0 };
+            cardStatesInPlan.forEach(state => {
+                if (state.masteryScore < 0.6) counts.novice++;
+                else if (state.masteryScore < 0.95) counts.learning++;
+                else counts.mastered++;
+            });
+
+            const masteryCanvasId = 'planMasteryChart';
+            if (chartInstances[masteryCanvasId]) chartInstances[masteryCanvasId].destroy();
+            const ctxMastery = document.getElementById(masteryCanvasId).getContext('2d');
+            chartInstances[masteryCanvasId] = new Chart(ctxMastery, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Novice', 'Learning', 'Mastered'],
+                    datasets: [{
+                        data: [counts.novice, counts.learning, counts.mastered],
+                        backgroundColor: ['#fc8181', '#f6ad55', '#68d391'],
+                        borderColor: 'var(--card-bg)',
+                        borderWidth: 4
+                    }]
+                },
+                options: { responsive: true, cutout: '70%', plugins: { legend: { display: false } } }
+            });
+            document.getElementById('planMasteryLegend').innerHTML = `
+                <div style="display:flex; align-items:center; margin-bottom: 5px;"><div style="width:12px; height:12px; background-color:#fc8181; border-radius:50%; margin-right:8px;"></div>Novice: ${counts.novice} cards</div>
+                <div style="display:flex; align-items:center; margin-bottom: 5px;"><div style="width:12px; height:12px; background-color:#f6ad55; border-radius:50%; margin-right:8px;"></div>Learning: ${counts.learning} cards</div>
+                <div style="display:flex; align-items:center;"><div style="width:12px; height:12px; background-color:#68d391; border-radius:50%; margin-right:8px;"></div>Mastered: ${counts.mastered} cards</div>
+            `;
+
+            const deckProgressData = { labels: [], data: [] };
+            plan.deckIds.forEach(deckId => {
+                const deck = decks[deckId];
+                if (deck) {
+                    deckProgressData.labels.push(deck.name);
+                    let deckMasterySum = 0;
+                    deck.cards.forEach(card => {
+                        deckMasterySum += (knowledgeMap.get(card.id)?.masteryScore || 0.5);
+                    });
+                    const deckProgress = deck.cards.length > 0 ? (deckMasterySum / deck.cards.length) * 100 : 0;
+                    deckProgressData.data.push(deckProgress);
+                }
+            });
+
+            const deckCanvasId = 'planDeckProgressChart';
+            if (chartInstances[deckCanvasId]) chartInstances[deckCanvasId].destroy();
+            const ctxDeck = document.getElementById(deckCanvasId).getContext('2d');
+            chartInstances[deckCanvasId] = new Chart(ctxDeck, {
+                type: 'bar',
+                data: {
+                    labels: deckProgressData.labels,
+                    datasets: [{
+                        label: 'Mastery %',
+                        data: deckProgressData.data,
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)'
+                    }]
+                },
+                options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
+            });
+
+            const hardestCardsList = document.getElementById('planHardestCardsList');
+            const sortedCards = allCardsInPlan
+                .map(card => ({ ...card, masteryScore: (knowledgeMap.get(card.id)?.masteryScore || 0.5) }))
+                .sort((a, b) => a.masteryScore - b.masteryScore)
+                .slice(0, 10); 
+
+            hardestCardsList.innerHTML = sortedCards.map(card => `
+                <div class="deck-card-item">
+                    <div>${card.question}</div>
+                    <div style="color:var(--danger-color); font-weight:500;">${Math.round(card.masteryScore * 100)}% Mastery</div>
+                </div>
+            `).join('');
+        }
+
+        function updateExamProgress() {
+            const totalInQueue = dailyPriorityQueue.length + studyState.roundCards.length;
+            const completedThisSession = totalInQueue - dailyPriorityQueue.length;
+            const progressPercent = totalInQueue > 0 ? (completedThisSession / totalInQueue) * 100 : 0;
+
+            document.getElementById('progressTitle').textContent = `Today's Session Progress`;
+            
+            document.getElementById('deckMasteryProgress').style.width = `${progressPercent}%`;
+            document.getElementById('deckMasteryValue').textContent = `${Math.round(progressPercent)}%`;
+            document.getElementById('masteredCardCount').textContent = dailyPriorityQueue.length;
+            document.getElementById('learningCardCount').textContent = completedThisSession;
+            document.querySelector('#masteredCardCount + .stat-label').textContent = "Cards Remaining";
+            document.querySelector('#learningCardCount + .stat-label').textContent = "Cards Reviewed";
+
+            const poolList = document.getElementById('activePoolList');
+            poolList.innerHTML = `<p style="text-align: center; color: var(--secondary-text);">Click 'Continue' to start the next round!</p>`;
+
+            const continueBtn = document.getElementById('continueBtn');
+            if (dailyPriorityQueue.length === 0 && studyState.roundCards.length === 0) {
+                document.getElementById('progressTitle').textContent = "Today's Session Complete!";
+                continueBtn.textContent = 'Finish Session';
+                continueBtn.classList.add('btn-success');
+                continueBtn.onclick = endSession;
+            } else {
+                continueBtn.textContent = studyState.currentRound === 1 ? 'Start First Round' : 'Start Next Round';
+                continueBtn.classList.remove('btn-success');
+                continueBtn.onclick = continueStudy;
+            }
+        }
+
+        async function deletePlan(planId) {
+            const allPlans = await getAllDataFromDB('examPlans');
+            const plan = allPlans.find(p => p.id === planId);
+            if (!plan) return;
+
+            showConfirmModal(`Are you sure you want to permanently delete the plan "${plan.name}"?`, async () => {
+                await deleteDataFromDB('examPlans', planId);
+                showToast(`Plan "${plan.name}" deleted.`);
+                backToDashboard();
+            });
+        }
+
+        async function editPlan(planId) {
+            const allPlans = await getAllDataFromDB('examPlans');
+            const plan = allPlans.find(p => p.id === planId);
+            if (!plan) return;
+
+            currentEditingPlanId = planId;
+
+            document.getElementById('examPlanName').value = plan.name;
+            document.getElementById('examPlanDate').value = plan.examDate;
+
+            showExamPlanModal(); 
+
+            plan.deckIds.forEach(deckId => {
+                const checkbox = document.getElementById(`deck-check-${deckId}`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+            });
         }
     </script>
 </body>
