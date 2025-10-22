@@ -522,6 +522,96 @@
         #dynamicToast.error { background-color: var(--danger-color); color: white; }
         #dynamicToast.info { background-color: var(--primary-color); color: white; }
         #aiTabCustomise { color: white;}
+
+        .exam-plans-container {
+            margin-bottom: 40px;
+        }
+
+        .exam-plan-card {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 8px 30px var(--shadow-color);
+            border-left: 6px solid var(--success-color); /* A distinct highlight color */
+            margin-bottom: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .plan-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+
+        .plan-card-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+
+        .plan-card-countdown {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--success-color);
+            background-color: #f0fff4;
+            padding: 5px 12px;
+            border-radius: 20px;
+        }
+
+        .dark-mode .plan-card-countdown {
+            background-color: #2c7a7b;
+        }
+
+        .plan-card-footer {
+            margin-top: 10px;
+        }
+
+        .exam-plan-cta-container {
+            position: relative;
+            text-align: center;
+            margin-bottom: 35px;
+            padding: 25px;
+            background: var(--card-bg);
+            border-radius: 20px;
+            border: 2px dashed var(--border-dashed);
+            transition: all 0.3s ease;
+        }
+
+        .exam-plan-cta-container:hover {
+            border-color: var(--primary-color);
+            background: var(--input-focus-bg);
+        }
+
+        #examPlanDeckSelector .checkbox-group {
+            padding: 10px;
+            border-radius: 8px;
+            transition: background-color 0.2s ease;
+        }
+
+        #examPlanDeckSelector .checkbox-group:hover {
+            background-color: var(--input-bg);
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: none;
+            border: none;
+            font-size: 2rem;
+            font-weight: 300;
+            color: var(--secondary-text);
+            cursor: pointer;
+            padding: 0 10px;
+            line-height: 1;
+            transition: color 0.2s ease;
+        }
+
+        .close-btn:hover {
+            color: var(--text-color);
+        }
     </style>
 </head>
 <body>
@@ -564,6 +654,16 @@
         <div class="main-content">
             <div id="decksSection">
                 <p id="subtitle" style="color: var(--secondary-text); font-size: 1.1rem; margin-bottom: 25px;"></p>
+                <div id="examPlanCtaContainer" class="exam-plan-cta-container">
+                    <button class="close-btn" onclick="hideExamPlanBanner(event)" title="Hide this banner">&times;</button>
+                    <button class="btn btn-prominent" onclick="showExamPlanModal()">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0h18M12 12.75h.008v.008H12v-.008Z" />
+                        </svg>
+                        Create New Exam Plan
+                    </button>
+                </div>
+
                 <div id="decksContainer"></div><br><br>
             </div>
             <div id="deckDetailView" class="deck-detail-view hidden">
@@ -606,14 +706,11 @@
                 </div>
             </div>
             <div style="text-align: center; padding-top: 20px; border-top: 1px solid var(--border-color); margin-top: 40px;">
-                <button class="btn" onclick="showDownloadsModal()">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20" style="margin-right: 8px;"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-                    Download Desktop App
-                </button>
             </div>
             <div class="dashboard-footer">
                 <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
                 <button class="btn btn-secondary" onclick="showAnalyticsModal()">Show Analytics</button>
+                <button id="createExamPlanFooterBtn" class="btn btn-secondary hidden" onclick="showExamPlanModal()">Create Exam Plan</button>
                 <button id="internalDashboardBtn" class="btn btn-secondary" onclick="showInternalAnalytics()" style="margin-left: 10px;">Internal Dashboard</button>
             </div>
         </div>
@@ -860,6 +957,10 @@
             <div class="checkbox-group">
                 <input type="checkbox" id="enableToastsToggle">
                 <label for="enableToastsToggle">Enable motivational messages</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="toggleExamPlanBanner">
+                <label for="toggleExamPlanBanner">Show the "Create Exam Plan" banner on the dashboard</label>
             </div>
              <!--<div class="form-group">
                  <label for="newCardsPerDay">New Cards Per Day (Spaced Learning)</label>
@@ -1208,7 +1309,30 @@
         </div>
     </div>
 </div>
-
+<div id="examPlanModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <span class="close" onclick="closeExamPlanModal()">&times;</span>
+        <h2>Create a New Exam Plan</h2>
+        <p>Bundle decks and set a date to create an automated study schedule.</p>
+        <div class="form-group">
+            <label for="examPlanName">Plan Name</label>
+            <input type="text" id="examPlanName" placeholder="e.g., Biology Midterm">
+        </div>
+        <div class="form-group">
+            <label for="examPlanDate">Exam Date</label>
+            <input type="date" id="examPlanDate">
+        </div>
+        <div class="form-group">
+            <label>Select Decks to Include</label>
+            <div id="examPlanDeckSelector" class="deck-cards-list" style="max-height: 200px; padding: 10px;">
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeExamPlanModal()">Cancel</button>
+            <button class="btn btn-success" onclick="saveExamPlan()">Save Exam Plan</button>
+        </div>
+    </div>
+</div>
 <div id="confirmActionModal" class="modal">
     <div class="modal-content text-center">
         <h2 id="confirmActionTitle">Confirm Action</h2>
@@ -1217,6 +1341,17 @@
             <button id="confirmActionCancelBtn" class="btn btn-secondary" onclick="cancelAction()">Cancel</button>
             <button id="confirmActionConfirmBtn" class="btn btn-danger">Confirm</button>
         </div>
+    </div>
+</div>
+
+<div id="welcomeBackModal" class="modal">
+    <div class="modal-content text-center">
+         <h2>Welcome Back!</h2>
+         <p>Let's pick up where you left off. Ready to continue?</p>
+         <div class="modal-actions">
+            <button id="resumeStudyBtn" class="btn btn-success">Continue</button>
+            <button id="restartCardBtn" class="btn btn-secondary">Restart This Card</button>
+         </div>
     </div>
 </div>
 
@@ -1624,7 +1759,7 @@
     
     function initDB() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open('LagioteDB', 5);
+            const request = indexedDB.open('LagioteDB', 6);
 
             request.onerror = event => reject("Error opening DB: " + event.target.errorCode);
             
@@ -1655,6 +1790,10 @@
                     logStore.createIndex('by_timestamp', 'timestamp', { unique: false });
                     console.log("Created 'interactionLogs' object store.");
                 }
+                if (!db.objectStoreNames.contains('examPlans')) {
+                    db.createObjectStore('examPlans', { keyPath: 'id' });
+                }
+
 
                 if (event.oldVersion > 0 && event.oldVersion < 5) {
                     console.log("Starting database migration for cognitive engine...");
@@ -2260,7 +2399,19 @@
                 if (focusLossStartTime) {
                     const awayDuration = Date.now() - focusLossStartTime;
                     accumulatedAwayDuration += awayDuration;
-                    focusLossStartTime = null; 
+                    focusLossStartTime = null;
+
+                    if (activeView === 'studyMode' && !document.getElementById('cardView').classList.contains('hidden') && awayDuration > 30000) { // 30 seconds
+                        const modal = document.getElementById('welcomeBackModal');
+                        modal.classList.add('show');
+
+                        document.getElementById('resumeStudyBtn').onclick = () => modal.classList.remove('show');
+                        document.getElementById('restartCardBtn').onclick = () => {
+                            modal.classList.remove('show');
+                            studyState.currentCardIndex--; 
+                            showNextCard(); 
+                        };
+                    }
                 }
             }
         });
@@ -2556,10 +2707,10 @@
 
     async function showSettings() {
         const settings = await getDataFromDB('appData', 'userSettings');
-         document.getElementById('usernameInput').value = settings?.username || '';
-         document.getElementById('enableInStudyEditing').checked = settings?.enableInStudyEditing || false;
-         
-         showView('settingsView');
+        document.getElementById('usernameInput').value = settings?.username || '';
+        document.getElementById('enableInStudyEditing').checked = settings?.enableInStudyEditing || false;
+        document.getElementById('toggleExamPlanBanner').checked = !settings?.hideExamPlanBanner;
+        showView('settingsView');
     }
 
     async function backToDashboard(isFromLogo = false) {
@@ -2647,43 +2798,125 @@
     }
     
     async function exportDeck(deckId, event) {
-            event.stopPropagation();
-            const deck = decks[deckId];
-            if (!deck) return;
-            showToast('Preparing complete export...', 'info', 2000);
+        event.stopPropagation();
+        const deck = decks[deckId];
+        if (!deck) return;
+        showToast('Preparing complete export...', 'info', 2000);
 
-            const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
-            const cardIdsInDeck = new Set(deck.cards.map(c => c.id));
-            
-            const knowledgeStateForDeck = allKnowledgeStates.filter(state => cardIdsInDeck.has(state.cardID));
+        const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
+        const cardIdsInDeck = new Set(deck.cards.map(c => c.id));
+        
+        const knowledgeStateForDeck = allKnowledgeStates.filter(state => cardIdsInDeck.has(state.cardID));
 
-            const exportPayload = {
-                deck: JSON.parse(JSON.stringify(deck)), 
-                knowledgeStateData: knowledgeStateForDeck
-            };
+        const exportPayload = {
+            deck: JSON.parse(JSON.stringify(deck)), 
+            knowledgeStateData: knowledgeStateForDeck
+        };
 
-            const dataStr = JSON.stringify(exportPayload, null, 2); 
-            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            const exportFileDefaultName = `${deck.name.replace(/ /g, '_')}_export.json`;
-            
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', exportFileDefaultName);
-            linkElement.click();
-            
-            showToast('Complete export started successfully!');
-        }
+        const dataStr = JSON.stringify(exportPayload, null, 2); 
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        const exportFileDefaultName = `${deck.name.replace(/ /g, '_')}_export.json`;
+        
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        linkElement.click();
+        
+        showToast('Complete export started successfully!');
+    }
 
     async function updateDashboard() {
         const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
         const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
+        const allPlans = await getAllDataFromDB('examPlans');
 
         const decksContainer = document.getElementById('decksContainer');
-        const deckCount = Object.keys(decks).length;
         const subtitle = document.getElementById('subtitle');
+        const ctaContainer = document.getElementById('examPlanCtaContainer');
+        const footerBtn = document.getElementById('createExamPlanFooterBtn');
+
+        if (globalSettings.hideExamPlanBanner === true) {
+            ctaContainer.classList.add('hidden');
+            footerBtn.classList.remove('hidden');
+        } else {
+            ctaContainer.classList.remove('hidden');
+            footerBtn.classList.add('hidden');
+        }
+        decksContainer.innerHTML = '';
+
+        if (allPlans && allPlans.length > 0) {
+            const plansContainer = document.createElement('div');
+            plansContainer.className = 'exam-plans-container';
+            plansContainer.innerHTML = `<h3 class="category-title">Your Exam Plans</h3>`;
+
+            for (const plan of allPlans) {
+                const now = new Date();
+                const [year, month, day] = plan.examDate.split('-').map(Number);
+                const examDate = new Date(year, month - 1, day);
+                examDate.setHours(23, 59, 59, 999); 
+
+                const nowStartOfDay = new Date();
+                nowStartOfDay.setHours(0, 0, 0, 0);
+
+                const timeDiff = examDate.getTime() - nowStartOfDay.getTime();
+                const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+                let countdownText = '';
+                if (daysRemaining > 1) {
+                    countdownText = `${daysRemaining} days remaining`;
+                } else if (daysRemaining === 1) {
+                    countdownText = `Exam is tomorrow!`;
+                } else if (daysRemaining === 0) {
+                    countdownText = `Exam is today! Good luck!`;
+                } else {
+                    countdownText = `Exam has passed.`;
+                }
+
+                let totalCardsInPlan = 0;
+                let totalMasterySum = 0;
+                plan.deckIds.forEach(deckId => {
+                    const deck = decks[deckId];
+                    if (deck) {
+                        totalCardsInPlan += deck.cards.length;
+                        deck.cards.forEach(card => {
+                            const state = knowledgeMap.get(card.id);
+                            totalMasterySum += state ? state.masteryScore : 0.5;
+                        });
+                    }
+                });
+                const progressPercent = totalCardsInPlan > 0 ? (totalMasterySum / totalCardsInPlan) * 100 : 0;
+
+                const planCard = document.createElement('div');
+                planCard.className = 'exam-plan-card';
+                planCard.innerHTML = `
+                    <div class="plan-card-header">
+                        <div class="plan-card-title">${plan.name}</div>
+                        <div class="plan-card-countdown">${countdownText}</div>
+                    </div>
+                    <div class="deck-progress-container" style="margin-top: 15px;">
+                        <div class="deck-progress-label">
+                            <span>Overall Progress</span>
+                            <span>${Math.round(progressPercent)}%</span>
+                        </div>
+                        <div class="deck-progress-bar-outer">
+                            <div class="deck-progress-bar-inner" style="width: ${progressPercent}%; background-color: var(--success-color);"></div>
+                        </div>
+                    </div>
+                    <div class="plan-card-footer">
+                        <button class="btn btn-prominent" style="width: 100%;" onclick="startExamPlanSession('${plan.id}')">
+                            Start Today's Study Session
+                        </button>
+                    </div>
+                `;
+                plansContainer.appendChild(planCard);
+            }
+            decksContainer.appendChild(plansContainer);
+        }
+
+        const deckCount = Object.keys(decks).length;
         subtitle.textContent = deckCount === 0 ? "Create your first deck to get started!" : `Your saved decks:`;
-        
-        if (deckCount === 0) {
+
+        if (deckCount === 0 && (!allPlans || allPlans.length === 0)) {
             decksContainer.innerHTML = `<div class="no-decks">
                 <div class="no-decks-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg></div>
                 <div>No flashcard decks yet.<br>Create your first deck to get started!</div>
@@ -2691,7 +2924,6 @@
             return;
         }
 
-        decksContainer.innerHTML = '';
         const groupedDecks = {};
         for (const deck of Object.values(decks)) {
             const category = deck.category || 'Other';
@@ -2699,7 +2931,7 @@
             groupedDecks[category].push(deck);
         }
 
-        const sortedCategories = Object.keys(groupedDecks).sort((a,b) => categories.indexOf(a) - categories.indexOf(b));
+        const sortedCategories = Object.keys(groupedDecks).sort((a, b) => categories.indexOf(a) - categories.indexOf(b));
 
         for (const category of sortedCategories) {
             const categoryFolder = document.createElement('div');
@@ -2707,10 +2939,9 @@
             categoryFolder.innerHTML = `<h3 class="category-title">${category}</h3><div class="decks-grid"></div>`;
             const decksGrid = categoryFolder.querySelector('.decks-grid');
 
-            const sortedDecks = groupedDecks[category].sort((a,b) => new Date(b.created) - new Date(a.created));
+            const sortedDecks = groupedDecks[category].sort((a, b) => new Date(b.created) - new Date(a.created));
 
             decksGrid.innerHTML = sortedDecks.map(deck => {
-                
                 const totalCards = deck.cards.length;
                 let progressPercent = 0;
                 if (totalCards > 0) {
@@ -2721,7 +2952,7 @@
                     });
                     progressPercent = (totalMasteryScore / totalCards) * 100;
                 }
-                
+
                 let actionButtonsHTML;
                 if (deck.typeHint === 'Sequence') {
                     actionButtonsHTML = `
@@ -2759,8 +2990,9 @@
             }).join('');
             decksContainer.appendChild(categoryFolder);
         }
+
         updateDueCardCounts();
-        
+
         const internalBtn = document.getElementById('internalDashboardBtn');
         if (globalSettings.devMode === true) {
             internalBtn.classList.remove('hidden');
@@ -3287,6 +3519,7 @@
     async function saveStudySettings() {
         globalSettings.enableInStudyEditing = document.getElementById('enableInStudyEditing').checked;
         globalSettings.enableInStudyEditing = document.getElementById('enableInStudyEditing').checked;
+        globalSettings.hideExamPlanBanner = !document.getElementById('toggleExamPlanBanner').checked;
         await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
         showToast('Settings saved!');
     }
@@ -3951,87 +4184,90 @@
 
 
 
-        function autoCheckAnswer() {
+        async function autoCheckAnswer() {
             const userInput = document.getElementById('writeAnswerInput');
             const card = studyState.roundCards[studyState.currentCardIndex];
             if (!card || userInput.value.trim() === '') return;
 
             const submissionTime = performance.now();
-            const recallLatency = currentInteractionLog.firstKeyPressTime ? Math.round(currentInteractionLog.firstKeyPressTime - currentInteractionLog.questionLoadTime) : null; 
+            const recallLatency = currentInteractionLog.firstKeyPressTime ? Math.round(currentInteractionLog.firstKeyPressTime - currentInteractionLog.questionLoadTime) : null;
             let answerFluency = 0;
             if (currentInteractionLog.firstKeyPressTime) {
                 const typingDuration = submissionTime - currentInteractionLog.firstKeyPressTime;
                 if (typingDuration > 0) {
-                    const charCount = userInput.value.trim().length;
-                    answerFluency = parseFloat((charCount / (typingDuration / 1000))).toFixed(2);
+                    answerFluency = parseFloat((userInput.value.trim().length / (typingDuration / 1000))).toFixed(2);
                 }
             }
             const userAnswer = userInput.value.trim();
             const correctAnswer = card.answer.trim();
 
             if (studyState.isRetypingIncorrect) {
-                const isCorrectRetype = (userAnswer.toLowerCase() === correctAnswer.toLowerCase());
-                if (isCorrectRetype) {
+                if (userAnswer.toLowerCase() === correctAnswer.toLowerCase()) {
                     studyState.isRetypingIncorrect = false;
                     userInput.classList.add('correct');
                     userInput.disabled = true;
-                    const checkBtn = document.getElementById('checkAnswerBtn');
-                    checkBtn.classList.add('feedback-correct');
+                    document.getElementById('checkAnswerBtn').classList.add('feedback-correct');
                     setTimeout(() => {
-                        checkBtn.classList.remove('feedback-correct'); 
+                        document.getElementById('checkAnswerBtn').classList.remove('feedback-correct');
                         moveCard(card, false); 
-                    }, 1200); 
+                    }, 1200);
                 } else {
                     showToast("That's not quite right. Please type the answer exactly as shown.", "error");
-                    userInput.value = ''; 
+                    userInput.value = '';
                     userInput.focus();
                 }
-                return;
+                return; 
             }
 
-            let processedUserAnswer = userAnswer;
-            let processedCorrectAnswer = correctAnswer;
-            if (!studyState.settings.caseSensitive) {
-                processedUserAnswer = processedUserAnswer.toLowerCase();
-                processedCorrectAnswer = processedCorrectAnswer.toLowerCase();
-            }
-            if (!studyState.settings.punctuation) {
-                const punc = /[.,/#!$%^&*;:{}=\-_`~()]/g;
-                processedUserAnswer = processedUserAnswer.replace(punc, "");
-                processedCorrectAnswer = processedCorrectAnswer.replace(punc, "");
-            }
-            const isCorrect = processedUserAnswer === processedCorrectAnswer;
-            const questionTypeForLog = document.getElementById('flashcardViewContainer').classList.contains('hidden') ? 'MultipleChoice' : (document.getElementById('cardQuestion').innerHTML.includes('___________') ? 'Cloze' : 'Type');
+            const checkResult = checkAnswerForgivingly(userAnswer, correctAnswer, studyState.settings);
 
-            logInteraction({ cardID: card.id, wasCorrect: isCorrect, userAnswer, recallLatency, answerFluency, totalCorrections: 0, attemptCount: 1, questionType: questionTypeForLog });
-            
-            userInput.classList.toggle('correct', isCorrect);
-            userInput.classList.toggle('incorrect', !isCorrect);
             userInput.disabled = true;
-
             document.querySelector('#cardView .flashcard').classList.add('is-flipped');
             document.getElementById('cardAnswerContent').classList.remove('hidden');
-            
             document.getElementById('checkAnswerBtn').classList.add('hidden');
             document.getElementById('dontKnowBtn').classList.add('hidden');
+            const questionTypeForLog = document.getElementById('mcqView').classList.contains('hidden') ? 'Type' : 'MultipleChoice';
 
-            if (isCorrect) {
-                showToast("Correct!", "success");
-                setTimeout(() => moveCard(card, true, questionTypeForLog), 1200);
-            } else {
-                if (studyState.settings.retypeIncorrect) {
-                    studyState.isRetypingIncorrect = true;
-                    userInput.disabled = false;
+            switch (checkResult.result) {
+                case 'CORRECT':
+                    userInput.classList.add('correct');
+                    showToast("Correct!", "success");
+                    logInteraction({ cardID: card.id, wasCorrect: true, userAnswer, recallLatency, answerFluency, totalCorrections: 0, attemptCount: 1, questionType: questionTypeForLog });
+                    setTimeout(() => moveCard(card, true, questionTypeForLog), 1200);
+                    break;
+
+                case 'TYPO':
+                    userInput.classList.add('correct'); 
+                    const feedbackMessage = document.getElementById('feedbackMessage');
+                    feedbackMessage.textContent = `So close! The correct answer is: ${correctAnswer}`;
+                    feedbackMessage.style.color = 'var(--primary-color)';
+
+                    logInteraction({ cardID: card.id, wasCorrect: true, userAnswer, recallLatency, answerFluency, totalCorrections: checkResult.distance, attemptCount: 1, questionType: questionTypeForLog });
+                    
                     setTimeout(() => {
-                        userInput.value = '';
-                        userInput.focus();
-                        document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                    }, 1000);
-                    showToast("Not quite. Type the correct answer to continue.", "error", 3000);
-                } else {
-                    showToast("Not quite.", "error");
-                    setTimeout(() => moveCard(card, false, questionTypeForLog), 2000);
-                }
+                        feedbackMessage.textContent = '';
+                        moveCard(card, true, questionTypeForLog);
+                    }, 2500); 
+                    break;
+
+                case 'INCORRECT':
+                    userInput.classList.add('incorrect');
+                    logInteraction({ cardID: card.id, wasCorrect: false, userAnswer, recallLatency, answerFluency, totalCorrections: 0, attemptCount: 1, questionType: questionTypeForLog });
+
+                    if (studyState.settings.retypeIncorrect) {
+                        studyState.isRetypingIncorrect = true;
+                        userInput.disabled = false;
+                        setTimeout(() => {
+                            userInput.value = '';
+                            userInput.focus();
+                            document.getElementById('checkAnswerBtn').classList.remove('hidden');
+                        }, 1000);
+                        showToast("Not quite. Type the correct answer to continue.", "error", 3000);
+                    } else {
+                        showToast("Not quite.", "error");
+                        setTimeout(() => moveCard(card, false, questionTypeForLog), 2000);
+                    }
+                    break;
             }
         }
 
@@ -6126,7 +6362,6 @@
                 options: { responsive: true, cutout: '70%', plugins: { legend: { display: false } } }
             });
 
-            // Update custom legend
             const legend = document.getElementById('masteryLegend');
             legend.innerHTML = `
                 <div style="display:flex; align-items:center; margin-bottom: 5px;"><div style="width:12px; height:12px; background-color:#fc8181; border-radius:50%; margin-right:8px;"></div>Novice: ${counts.novice} cards</div>
@@ -6135,6 +6370,186 @@
             `;
         }
 
+        function checkAnswerForgivingly(userAnswer, correctAnswer, settings) {
+            let processedUserAnswer = userAnswer.trim();
+            let processedCorrectAnswer = correctAnswer.trim();
+
+            if (!settings.caseSensitive) {
+                processedUserAnswer = processedUserAnswer.toLowerCase();
+                processedCorrectAnswer = processedCorrectAnswer.toLowerCase();
+            }
+            if (!settings.punctuation) {
+                const punc = /[.,/#!$%^&*;:{}=\-_`~()]/g;
+                processedUserAnswer = processedUserAnswer.replace(punc, "").replace(/\s+/g, ' ');
+                processedCorrectAnswer = processedCorrectAnswer.replace(punc, "").replace(/\s+/g, ' ');
+            }
+
+            if (processedUserAnswer === processedCorrectAnswer) {
+                return { result: 'CORRECT', distance: 0 };
+            }
+
+            if (settings.forgivingAutomarking) {
+                const distance = levenshteinDistance(processedUserAnswer, processedCorrectAnswer);
+                const threshold = Math.max(1, Math.floor(processedCorrectAnswer.length / 5));
+
+                if (distance <= threshold) {
+                    return { result: 'TYPO', distance: distance };
+                }
+            }
+
+            return { result: 'INCORRECT', distance: levenshteinDistance(processedUserAnswer, processedCorrectAnswer) };
+        }
+
+        async function generateDailySessionForPlan(planId) {
+            const plans = await getAllDataFromDB('examPlans');
+            const plan = plans.find(p => p.id === planId);
+            if (!plan) {
+                console.error("Exam plan not found!");
+                return [];
+            }
+
+            const allCards = [];
+            for (const deckId of plan.deckIds) {
+                if (decks[deckId]) {
+                    const cardsWithOrigin = decks[deckId].cards.map(c => ({...c, deckId: deckId}));
+                    allCards.push(...cardsWithOrigin);
+                }
+            }
+
+            const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
+            const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
+            const now = new Date();
+            const examDate = new Date(plan.examDate);
+            const totalDaysRemaining = Math.max(1, (examDate - now) / (1000 * 3600 * 24));
+
+            const prioritizedCards = allCards.map(card => {
+                const state = knowledgeMap.get(card.id) || { masteryScore: 0.5, sm2Data: { dueDate: new Date(0).toISOString() } };
+                const dueDate = new Date(state.sm2Data.dueDate);
+                
+                const daysOverdue = (now - dueDate) / (1000 * 3600 * 24);
+                const dueFactor = daysOverdue > 0 ? 1 + Math.log(1 + daysOverdue) : 0;
+
+                const masteryFactor = 1 - (state.masteryScore || 0.5);
+
+                const urgencyFactor = 1 / totalDaysRemaining;
+
+                const priorityScore = (dueFactor * 0.6) + (masteryFactor * 0.3) + (urgencyFactor * 0.1);
+
+                return { ...card, priorityScore };
+            });
+
+            prioritizedCards.sort((a, b) => b.priorityScore - a.priorityScore);
+            
+            const sessionSize = 50; 
+            return prioritizedCards.slice(0, sessionSize);
+        }
+
+        function showExamPlanModal() {
+            const deckSelector = document.getElementById('examPlanDeckSelector');
+            deckSelector.innerHTML = ''; // Clear previous options
+
+            const deckIds = Object.keys(decks);
+
+            if (deckIds.length === 0) {
+                deckSelector.innerHTML = '<p style="text-align:center; color:var(--secondary-text);">You need to create at least one deck before making a plan.</p>';
+            } else {
+                deckIds.forEach(deckId => {
+                    const deck = decks[deckId];
+                    const checkboxHTML = `
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="deck-check-${deck.id}" name="planDecks" value="${deck.id}">
+                            <label for="deck-check-${deck.id}">${deck.name}</label>
+                        </div>
+                    `;
+                    deckSelector.innerHTML += checkboxHTML;
+                });
+            }
+
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('examPlanDate').setAttribute('min', today);
+
+            document.getElementById('examPlanModal').classList.add('show');
+        }
+
+        function closeExamPlanModal() {
+            document.getElementById('examPlanModal').classList.remove('show');
+            document.getElementById('examPlanName').value = '';
+            document.getElementById('examPlanDate').value = '';
+            document.getElementById('examPlanDeckSelector').innerHTML = '';
+        }
+
+        async function saveExamPlan() {
+            const name = document.getElementById('examPlanName').value.trim();
+            const examDate = document.getElementById('examPlanDate').value;
+            const selectedDecks = Array.from(document.querySelectorAll('#examPlanDeckSelector input:checked')).map(el => el.value);
+
+            if (!name) {
+                showToast('Please enter a name for your plan.', 'error');
+                return;
+            }
+            if (!examDate) {
+                showToast('Please select an exam date.', 'error');
+                return;
+            }
+            if (selectedDecks.length === 0) {
+                showToast('Please select at least one deck for the plan.', 'error');
+                return;
+            }
+
+            const newPlan = {
+                id: Date.now().toString(),
+                name: name,
+                examDate: examDate,
+                deckIds: selectedDecks
+            };
+
+            await saveDataToDB('examPlans', newPlan);
+            showToast(`Exam Plan "${name}" created!`, 'success');
+            
+            closeExamPlanModal();
+            await updateDashboard(); 
+        }
+
+        async function startExamPlanSession(planId) {
+            showToast('Building your optimal study session...', 'info');
+            
+            currentMode = 'exam'; 
+            
+            const sessionCards = await generateDailySessionForPlan(planId);
+
+            if (sessionCards.length === 0) {
+                showToast("You're all caught up on this plan for today! Great work.", 'success');
+                return;
+            }
+
+            studyState.roundCards = sessionCards;
+            studyState.currentCardIndex = 0;
+            studyState.currentRound = 1; 
+            studyState.startTime = new Date();
+
+            const allPlans = await getAllDataFromDB('examPlans');
+            const currentPlan = allPlans.find(p => p.id === planId);
+
+            showView('studyMode');
+            document.getElementById('studyTitle').textContent = 'Exam Plan Session';
+            document.getElementById('studySubtitle').textContent = currentPlan ? currentPlan.name : 'Studying';
+            
+            transitionSubView(null, document.getElementById('cardView'));
+            showNextCard();
+        }
+
+        async function hideExamPlanBanner(event) {
+            event.stopPropagation();
+
+            globalSettings.hideExamPlanBanner = true;
+
+            await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
+
+            document.getElementById('examPlanCtaContainer').classList.add('hidden');
+            document.getElementById('createExamPlanFooterBtn').classList.remove('hidden');
+
+            showToast('Banner hidden. You can create plans from the button below.', 'info');
+        }
     </script>
 </body>
 </html>
