@@ -5693,14 +5693,23 @@
         }
 
         function selectOptimalQuestionType(card) {
-            const settings = studyState.settings.adaptiveModes || { auto: true, mcq: true, cloze: true };
+            const deckIdForThisCard = card.deckId; 
+            const deckForThisCard = decks[deckIdForThisCard];
+
+            if (!deckForThisCard) {
+                console.error(`Could not find deck with ID ${deckIdForThisCard} for card "${card.question}". Defaulting to Flashcard.`);
+                return 'Flashcard';
+            }
+            
+            const allCardsInDeck = deckForThisCard.cards;
+            const settings = deckForThisCard.settings?.adaptiveModes || { auto: true, mcq: true, cloze: true };
+
             const mastery = studyState.knowledgeStates.get(card.id)?.masteryScore || 0.5;
-            const allCardsInDeck = decks[currentDeckId].cards;
 
             if (!settings.auto) {
                 if (settings.cloze && canGenerateQuestionType('Cloze', card, allCardsInDeck)) return 'Cloze';
                 if (settings.mcq && canGenerateQuestionType('MultipleChoice', card, allCardsInDeck)) return 'MultipleChoice';
-                return studyState.settings.learnMode === 'write' ? 'Type' : 'Flashcard';
+                return deckForThisCard.settings?.learnMode === 'write' ? 'Type' : 'Flashcard';
             }
 
             if (mastery < 0.6) {
