@@ -612,12 +612,37 @@
         .close-btn:hover {
             color: var(--text-color);
         }
+
+        #authView {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
     </style>
 </head>
 <body>
     <div id="dynamicToast" class="toast"></div>
-
-    <header class="app-header">
+    <div id="authView" class="container view-container fade-in">
+        <div style="text-align: center; max-width: 600px;">
+            <div class="logo" style="margin: 0 auto 20px auto; width: 80px; height: 80px;">
+                <img src='https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png' alt="Lagiote Revise Logo">
+            </div>
+            <h2 style="font-size: 2.5rem; font-weight: 700;">Welcome to Lagiote Revise</h2>
+            <p style="font-size: 1.2rem; color: var(--secondary-text); margin-top: 15px;">
+                The smart flashcard app that helps you learn faster and forget less.
+            </p>
+            <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px;">
+                <button class="btn btn-prominent" style="width: 100%; max-width: 300px;" onclick="netlifyIdentity.open('signup');">Sign Up for Free</button>
+                <button class="btn btn-secondary" style="width: 100%; max-width: 300px;" onclick="netlifyIdentity.open('login');">Log In</button>
+                <button id="continueAsGuestBtn" class="btn" style="background: none; color: var(--primary-color); box-shadow: none; margin-top: 10px;">Continue as a Guest</button>
+            </div>
+            <p style="font-size: 0.9rem; color: var(--secondary-text); margin-top: 30px;">
+                By signing up, you can sync your progress across devices and access our full library of features.
+            </p>
+        </div>
+    </div>
+    <header id="appHeader" class="app-header hidden">
          <div class="logo-section">
             <button id="headerBackBtn" class="header-btn hidden" title="Go Back">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
@@ -2700,6 +2725,11 @@
     }
 
     function showView(viewId, isInitial = false, callback = null) {
+        const appHeader = document.getElementById('appHeader');
+        if (viewId !== 'authView') {
+            // If we are showing any view that is NOT the auth screen, make sure the header is visible.
+            appHeader.classList.remove('hidden');
+        }
         if (activeView === 'editorView' && !isEditorClean() && viewId !== 'editorView') {
             showConfirmModal(
                 'You have unsaved changes. Are you sure you want to leave?',
@@ -6903,8 +6933,8 @@
         }
 
         function updateUIAfterLogout() {
+            document.getElementById('appHeader').classList.add('hidden');
             document.getElementById('welcomeMessage').textContent = `Lagiote Revise`;
-
             document.getElementById('loggedInView').classList.add('hidden');
             document.getElementById('loggedOutView').classList.remove('hidden');
 
