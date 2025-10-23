@@ -61,9 +61,26 @@
         body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-color); min-height: 100vh; color: var(--text-color); transition: background-color 0.3s, color 0.3s; }
         .view-container { 
             display: none; 
-            position: relative; 
-            z-index: 1;
+            opacity: 0;
+            transition: opacity 0.4s ease-in-out, transform 0.4s ease-in-out;
+            transform: translateY(10px);
         }
+
+        .view-container.is-visible {
+            display: block; 
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        #authView.is-visible {
+            display: flex;
+        }
+        
+        .view-container.is-hiding {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
         .view-container.animating { animation-duration: 0.4s; animation-timing-function: ease-in-out; animation-fill-mode: forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }
@@ -623,20 +640,21 @@
 </head>
 <body>
     <div id="dynamicToast" class="toast"></div>
-    <div id="authView" class="container view-container fade-in">
+    <div id="authView" class="container view-container">
         <div style="text-align: center; max-width: 600px;">
             <div class="logo" style="margin: 0 auto 20px auto; width: 80px; height: 80px;">
                 <img src='https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png' alt="Lagiote Revise Logo">
             </div>
             <h2 style="font-size: 2.5rem; font-weight: 700;">Welcome to Lagiote Revise</h2>
             <p style="font-size: 1.2rem; color: var(--secondary-text); margin-top: 15px;">
-                The smart flashcard app that helps you learn faster and forget less.
+                The smart flashcard app that helps you learn faster.
             </p>
             <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px;">
-                <button class="btn btn-prominent" style="width: 100%; max-width: 300px;" onclick="netlifyIdentity.open('signup');">Sign Up for Free</button>
-                <button class="btn btn-secondary" style="width: 100%; max-width: 300px;" onclick="netlifyIdentity.open('login');">Log In</button>
+                <button id="authSignupBtn" class="btn btn-prominent" style="width: 100%; max-width: 300px;">Sign Up for Free</button>
+                <button id="authLoginBtn" class="btn btn-secondary" style="width: 100%; max-width: 300px;">Log In</button>
                 <button id="continueAsGuestBtn" class="btn" style="background: none; color: var(--primary-color); box-shadow: none; margin-top: 10px;">Continue as a Guest</button>
             </div>
+
             <p style="font-size: 0.9rem; color: var(--secondary-text); margin-top: 30px;">
                 By signing up, you can sync your progress across devices and access our full library of features.
             </p>
@@ -2448,30 +2466,24 @@
 
     function setupEventListeners() {
         netlifyIdentity.on('login', user => {
-            const sessionData = {
-                user: user,
-                token: user.token.access_token,
-                expires_at: user.token.expires_at
-            };
-            saveDataToDB('appData', { key: 'userSession', ...sessionData });
-            
+            handleGuestToUserTransition();
             updateUIAfterLogin(user);
         });
 
         netlifyIdentity.on('logout', () => {
-            deleteDataFromDB('appData', 'userSession');  
+            deleteDataFromDB('appData', 'userSession');
             updateUIAfterLogout();
         });
 
-        netlifyIdentity.on('init', user => {
-            if (user) {
-                updateUIAfterLogin(user);
-            } else {
-                updateUIAfterLogout();
-            }
+        document.getElementById('authSignupBtn').addEventListener('click', () => netlifyIdentity.open('signup'));
+        document.getElementById('authLoginBtn').addEventListener('click', () => netlifyIdentity.open('login'));
+        document.getElementById('continueAsGuestBtn').addEventListener('click', () => {
+            localStorage.setItem('hasBeenGuest', 'true');
+            showView('dashboard');
+            document.getElementById('loggedInView').classList.remove('hidden');
+            document.getElementById('guestPromptBanner').classList.remove('hidden');
         });
-        netlifyIdentity.on('login', user => updateUIAfterLogin(user));
-        netlifyIdentity.on('logout', () => updateUIAfterLogout());
+
         setupSearch();
         setupKeyboardControls();        
         document.getElementById('deckDetailTestBtn').addEventListener('click', () => openPracticeTestModal(currentViewingDeckId));
@@ -2727,27 +2739,35 @@
     function showView(viewId, isInitial = false, callback = null) {
         const appHeader = document.getElementById('appHeader');
         if (viewId !== 'authView') {
-            // If we are showing any view that is NOT the auth screen, make sure the header is visible.
             appHeader.classList.remove('hidden');
-        }
-        if (activeView === 'editorView' && !isEditorClean() && viewId !== 'editorView') {
-            showConfirmModal(
-                'You have unsaved changes. Are you sure you want to leave?',
-                () => transitionView(viewId, isInitial, callback)
-            );
-            return;
         }
 
         if (activeView === viewId && !isInitial) {
-            if (callback) {
-                callback();
-            }
-            return; 
+            if (callback) callback();
+            return;
         }
-        
-            transitionView(viewId, isInitial, callback);
+
+        const currentView = document.getElementById(activeView);
+        const nextView = document.getElementById(viewId);
+
+        if (currentView && currentView !== nextView) {
+            currentView.classList.add('is-hiding');
+            currentView.classList.remove('is-visible');
+            
+            setTimeout(() => {
+                currentView.classList.remove('is-hiding');
+                nextView.classList.add('is-visible');
+                activeView = viewId;
+                window.scrollTo(0, 0);
+                if (callback) callback();
+            }, 400); 
+        } else {
+            nextView.classList.add('is-visible');
+            activeView = viewId;
+            if (callback) callback();
         }
-    
+    }
+
     function transitionView(viewId, isInitial = false, callback = null) {
         if (!isInitial && activeView !== viewId && viewId !=='dashboard') {
             if(viewHistory[viewHistory.length-1] !== activeView) {
