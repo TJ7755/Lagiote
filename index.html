@@ -2742,13 +2742,20 @@
             appHeader.classList.remove('hidden');
         }
 
-        if (activeView === viewId && !isInitial) {
-            if (callback) callback();
+        const nextView = document.getElementById(viewId);
+        if (!nextView) {
+            console.error("View not found:", viewId);
             return;
         }
 
+        if (isInitial) {
+            nextView.classList.add('is-visible');
+            activeView = viewId;
+            if (callback) callback();
+            return; 
+        }
+
         const currentView = document.getElementById(activeView);
-        const nextView = document.getElementById(viewId);
 
         if (currentView && currentView !== nextView) {
             currentView.classList.add('is-hiding');
@@ -2761,12 +2768,13 @@
                 window.scrollTo(0, 0);
                 if (callback) callback();
             }, 400); 
-        } else {
+        } else if (!currentView) {
             nextView.classList.add('is-visible');
             activeView = viewId;
             if (callback) callback();
         }
     }
+
 
     function transitionView(viewId, isInitial = false, callback = null) {
         if (!isInitial && activeView !== viewId && viewId !=='dashboard') {
