@@ -1797,20 +1797,32 @@
     };
 
     window.onload = function() {
-        initDB().then(async () => {
-            loadSavedData();
-            setupEventListeners();
-            if (isElectron) {
-                await initOfflineAuth(); 
-            } else {
-                netlifyIdentity.init(); 
-            }
-            showView('dashboard', true);
-            updateOnlineStatusUI();
+        initDB().then(() => {
+            console.log("Database initialized.");
         }).catch(error => {
             console.error("Failed to initialize the database:", error);
             showToast("Could not start the application. Database initialization failed.", "error");
         });
+
+        if (window.netlifyIdentity) {
+            window.netlifyIdentity.on("init", user => {
+                console.log("Netlify Identity initialized.");
+                
+                loadSavedData();
+                setupEventListeners();
+                updateOnlineStatusUI();
+
+                if (!user) {
+                    if (localStorage.getItem('hasBeenGuest') === 'true') {
+                        showView('dashboard');
+                        document.getElementById('loggedInView').classList.remove('hidden');
+                        document.getElementById('guestPromptBanner').classList.remove('hidden');
+                    } else {
+                        showView('authView', true);
+                    }
+                }
+            });
+        }
     };
     
     function initDB() {
