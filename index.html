@@ -646,73 +646,85 @@
             </button>
             <button id="headerSettingsBtn" class="header-btn header-settings-btn" title="Settings" onclick="showSettings()">
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.39.44 1.02.12 1.45l-.527.737c-.25.35-.272.806-.108 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.11v1.093c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.108 1.204l.527.738c.32.43.27.96-.12 1.45l-.773.773a1.125 1.125 0 0 1-1.45.12l-.737-.527c-.35-.25-.806-.272-1.204-.108-.397.165-.71.505-.78.93l-.15.893c-.09.543-.56.94-1.11.94h-1.093c-.55 0-1.02-.398-1.11-.94l-.149-.894c-.07-.424-.384-.764-.78-.93-.398-.164-.855-.142-1.205.108l-.737.527a1.125 1.125 0 0 1-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.11v-1.093c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.527-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.806.272 1.204.108.397-.165.71.505.78-.93l.15-.893Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+                 <div data-netlify-identity-menu></div>
             </button>
             <div data-netlify-identity-menu></div>
         </div>
     </header>
     
     <div id="dashboard" class="container view-container">
-        <div class="main-content">
-            <div id="decksSection">
-                <p id="subtitle" style="color: var(--secondary-text); font-size: 1.1rem; margin-bottom: 25px;"></p>
-                <div id="examPlanCtaContainer" class="exam-plan-cta-container">
-                    <button class="close-btn" onclick="hideExamPlanBanner(event)" title="Hide this banner">&times;</button>
-                    <button class="btn btn-prominent" onclick="showExamPlanModal()">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0h18M12 12.75h.008v.008H12v-.008Z" />
-                        </svg>
-                        Create New Exam Plan
-                    </button>
-                </div>
+        <div id="loggedOutView" class="hidden" style="text-align: center; padding: 80px 20px;">
+            <h2 style="font-size: 2.5rem; font-weight: 700;">Unlock Your Full Learning Potential</h2>
+            <p style="font-size: 1.2rem; color: var(--secondary-text); margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
+                Create an account to save your progress, sync across devices, and access the curricula library.
+            </p>
+            <div style="margin-top: 40px;">
+                <button class="btn btn-prominent" onclick="netlifyIdentity.open('signup');">Create Free Account</button>
+            </div>
+        </div>
+        <div id="loggedInView" class="hidden">
+            <div class="main-content">
+                <div id="decksSection">
+                    <p id="subtitle" style="color: var(--secondary-text); font-size: 1.1rem; margin-bottom: 25px;"></p>
+                    <div id="examPlanCtaContainer" class="exam-plan-cta-container">
+                        <button class="close-btn" onclick="hideExamPlanBanner(event)" title="Hide this banner">&times;</button>
+                        <button class="btn btn-prominent" onclick="showExamPlanModal()">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0h18M12 12.75h.008v.008H12v-.008Z" />
+                            </svg>
+                            Create New Exam Plan
+                        </button>
+                    </div>
 
-                <div id="decksContainer"></div><br><br>
-            </div>
-            <div id="deckDetailView" class="deck-detail-view hidden">
-                <div class="deck-detail-header">
-                    <div>
-                        <span class="deck-detail-category" id="deckDetailCategory"></span>
-                        <h2 class="deck-detail-title" id="deckDetailTitle"></h2>
+                    <div id="decksContainer"></div><br><br>
+                </div>
+                <div id="deckDetailView" class="deck-detail-view hidden">
+                    <div class="deck-detail-header">
+                        <div>
+                            <span class="deck-detail-category" id="deckDetailCategory"></span>
+                            <h2 class="deck-detail-title" id="deckDetailTitle"></h2>
+                        </div>
+                        <div id="deckDetailActions" class="deck-detail-actions">
+                            <button class="btn learn-btn" onclick="configureStudy('learn')">Learn</button>
+                            <!--<button class="btn spaced-btn" onclick="configureStudy('spaced')">Spaced Learning</button>-->
+                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
+                            <button class="btn review-btn" id="deckDetailTestBtn">Practice Test</button>
+                            <button class="btn btn-secondary" id="deckDetailSettingsBtn">Settings</button>
+                            <button class="btn btn-secondary" id="deckDetailEditBtn">Edit</button>
+                            <button class="btn btn-danger" id="deckDetailDeleteBtn">Delete</button>
+                        </div>
                     </div>
-                    <div id="deckDetailActions" class="deck-detail-actions">
-                        <button class="btn learn-btn" onclick="configureStudy('learn')">Learn</button>
-                        <!--<button class="btn spaced-btn" onclick="configureStudy('spaced')">Spaced Learning</button>-->
-                        <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
-                        <button class="btn review-btn" id="deckDetailTestBtn">Practice Test</button>
-                        <button class="btn btn-secondary" id="deckDetailSettingsBtn">Settings</button>
-                        <button class="btn btn-secondary" id="deckDetailEditBtn">Edit</button>
-                        <button class="btn btn-danger" id="deckDetailDeleteBtn">Delete</button>
+                    <h3 class="section-title">Cards in this deck</h3>
+                    <div class="deck-cards-list" id="deckCardsList"></div>
+                </div>
+                <div class="create-section">
+                    <div class="section-title">Start a new deck</div>
+                    <div class="create-options">
+                        <div class="create-card" onclick="showEditor()">
+                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg></span>
+                            <div class="create-title">Create Manually</div>
+                            <div class="create-desc">Build your own deck card-by-card</div>
+                        </div>
+                        <div class="create-card" onclick="showImportModal()">
+                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" /></svg></span>
+                            <div class="create-title">Import Deck</div>
+                            <div class="create-desc">Import from JSON, CSV, or pasted text</div>
+                        </div>
+                        <div class="create-card" onclick="showAiGenerator()">
+                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /></svg></span>
+                            <div class="create-title">Create with AI</div>
+                            <div class="create-desc">Generate a deck from a topic or text</div>
+                        </div>
                     </div>
                 </div>
-                <h3 class="section-title">Cards in this deck</h3>
-                <div class="deck-cards-list" id="deckCardsList"></div>
-            </div>
-            <div class="create-section">
-                <div class="section-title">Start a new deck</div>
-                <div class="create-options">
-                    <div class="create-card" onclick="showEditor()">
-                        <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg></span>
-                        <div class="create-title">Create Manually</div>
-                        <div class="create-desc">Build your own deck card-by-card</div>
-                    </div>
-                    <div class="create-card" onclick="showImportModal()">
-                         <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" /></svg></span>
-                         <div class="create-title">Import Deck</div>
-                         <div class="create-desc">Import from JSON, CSV, or pasted text</div>
-                    </div>
-                    <div class="create-card" onclick="showAiGenerator()">
-                        <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /></svg></span>
-                        <div class="create-title">Create with AI</div>
-                        <div class="create-desc">Generate a deck from a topic or text</div>
-                    </div>
+                <div style="text-align: center; padding-top: 20px; border-top: 1px solid var(--border-color); margin-top: 40px;">
                 </div>
-            </div>
-            <div style="text-align: center; padding-top: 20px; border-top: 1px solid var(--border-color); margin-top: 40px;">
-            </div>
-            <div class="dashboard-footer">
-                <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
-                <button class="btn btn-secondary" onclick="showAnalyticsModal()">Show Analytics</button>
-                <button id="createExamPlanFooterBtn" class="btn btn-secondary hidden" onclick="showExamPlanModal()">Create Exam Plan</button>
-                <button id="internalDashboardBtn" class="btn btn-secondary" onclick="showInternalAnalytics()" style="margin-left: 10px;">Internal Dashboard</button>
+                <div class="dashboard-footer">
+                    <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
+                    <button class="btn btn-secondary" onclick="showAnalyticsModal()">Show Analytics</button>
+                    <button id="createExamPlanFooterBtn" class="btn btn-secondary hidden" onclick="showExamPlanModal()">Create Exam Plan</button>
+                    <button id="internalDashboardBtn" class="btn btn-secondary" onclick="showInternalAnalytics()" style="margin-left: 10px;">Internal Dashboard</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1785,9 +1797,14 @@
     };
 
     window.onload = function() {
-        initDB().then(() => {
+        initDB().then(async () => {
             loadSavedData();
             setupEventListeners();
+            if (isElectron) {
+                await initOfflineAuth(); 
+            } else {
+                netlifyIdentity.init(); 
+            }
             showView('dashboard', true);
             updateOnlineStatusUI();
         }).catch(error => {
@@ -2394,14 +2411,30 @@
 
     function setupEventListeners() {
         netlifyIdentity.on('login', user => {
-            console.log('Welcome', user);
-            updateUIAfterLogin(user); 
+            const sessionData = {
+                user: user,
+                token: user.token.access_token,
+                expires_at: user.token.expires_at
+            };
+            saveDataToDB('appData', { key: 'userSession', ...sessionData });
+            
+            updateUIAfterLogin(user);
         });
 
         netlifyIdentity.on('logout', () => {
-            console.log('User logged out');
+            deleteDataFromDB('appData', 'userSession');  
             updateUIAfterLogout();
         });
+
+        netlifyIdentity.on('init', user => {
+            if (user) {
+                updateUIAfterLogin(user);
+            } else {
+                updateUIAfterLogout();
+            }
+        });
+        netlifyIdentity.on('login', user => updateUIAfterLogin(user));
+        netlifyIdentity.on('logout', () => updateUIAfterLogout());
         setupSearch();
         setupKeyboardControls();        
         document.getElementById('deckDetailTestBtn').addEventListener('click', () => openPracticeTestModal(currentViewingDeckId));
@@ -3529,6 +3562,11 @@
             await saveDataToDB('decks', deck);
         } else {
             await createNewDeck(name, category, tempDeck.cards, notes, typeHint);
+        }
+        if (isOnline) {
+            loadUserDataAndSync(); 
+        } else {
+            showToast("Deck saved locally. It will sync when you're next online.", "info");
         }
         
         document.getElementById('deckTitle').value = '';
@@ -6840,6 +6878,139 @@
                     checkbox.checked = true;
                 }
             });
+        }
+
+        function updateUIAfterLogin(user) {
+            const username = user.user_metadata.full_name || user.email.split('@')[0];
+            document.getElementById('welcomeMessage').textContent = `Welcome back, ${username}!`;
+
+            document.getElementById('loggedOutView').classList.add('hidden');
+            document.getElementById('loggedInView').classList.remove('hidden');
+
+            loadUserDataAndSync();
+        }
+
+        function updateUIAfterLogout() {
+            document.getElementById('welcomeMessage').textContent = `Lagiote Revise`;
+
+            document.getElementById('loggedInView').classList.add('hidden');
+            document.getElementById('loggedOutView').classList.remove('hidden');
+
+            clearLocalData();
+        }
+
+        async function clearLocalData() {
+            decks = {};
+            analyticsData = {  };
+            
+            await clearStoreInDB('decks');
+            await clearStoreInDB('userKnowledgeState');
+            await clearStoreInDB('examPlans');
+            
+            updateDashboard();
+        }
+
+        async function loadUserDataAndSync() {
+            if (!isOnline) {
+                console.log("Offline. Skipping sync.");
+                await updateDashboard();
+                return;
+            }
+            showToast('Syncing your data...', 'info');
+
+            const lastSynced = localStorage.getItem('lastSynced');
+
+            const allDecks = await getAllDataFromDB('decks');
+            const allKnowledge = await getAllDataFromDB('userKnowledgeState');
+
+            try {
+                const token = await netlifyIdentity.currentUser().jwt();
+                const response = await fetch('/.netlify/functions/sync', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        lastSynced: lastSynced,
+                        dirtyDecks: allDecks,
+                        dirtyKnowledgeStates: allKnowledge
+                    })
+                });
+
+                if (!response.ok) throw new Error('Sync failed on the server.');
+
+                const syncResult = await response.json();
+
+                for (const deck of syncResult.updatedDecks) {
+                    await saveDataToDB('decks', deck); 
+                    decks[deck.id] = deck; 
+                }
+                for (const state of syncResult.updatedKnowledgeStates) {
+                    await saveDataToDB('userKnowledgeState', state);
+                }
+
+                localStorage.setItem('lastSynced', syncResult.newTimestamp);
+
+                showToast('Sync complete!', 'success');
+
+            } catch (error) {
+                console.error('Sync Error:', error);
+                showToast('Could not sync data. Working in offline mode.', 'error');
+            } finally {
+                await updateDashboard();
+            }
+        }
+
+        async function initOfflineAuth() {
+            if (!isElectron) return;
+
+            const savedSession = await getDataFromDB('appData', 'userSession');
+            if (savedSession && new Date(savedSession.expires_at) > new Date()) {
+                console.log("Found valid offline session. Logging in locally.");
+                netlifyIdentity.currentUser = () => savedSession.user;
+                updateUIAfterLogin(savedSession.user);
+            } else {
+                console.log("No offline session found.");
+                updateUIAfterLogout();
+            }
+        }
+
+        async function showCurriculaLibrary() {
+            if (!isOnline) {
+                showToast("You must be online to browse the Curricula Library.", "error");
+                return;
+            }
+            showView('libraryView');
+            const grid = document.getElementById('libraryGrid');
+            grid.innerHTML = '<p>Loading courses...</p>';
+
+            try {
+                const response = await fetch('/.netlify/functions/getPublicCurricula');
+                if (!response.ok) throw new Error('Failed to load the library.');
+
+                const curricula = await response.json();
+
+                if (curricula.length === 0) {
+                    grid.innerHTML = '<p>No published curricula found yet. Check back soon!</p>';
+                    return;
+                }
+
+                grid.innerHTML = curricula.map(curriculum => `
+                    <div class="deck-card" style="border-color: var(--success-color);">
+                        <div class="deck-card-main-clickable">
+                            <div class="deck-header">
+                                <div class="deck-category" style="background-color: #e6fffa; color: #317b75;">Curriculum</div>
+                                <div class="deck-name">${curriculum.title}</div>
+                                <div class="deck-info">${curriculum.description || 'No description.'}</div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Library Error:', error);
+                grid.innerHTML = '<p style="color: var(--danger-color);">Could not load the library. Please try again later.</p>';
+            }
         }
     </script>
 </body>
