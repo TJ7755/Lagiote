@@ -72,6 +72,7 @@
     "dotenv": "^17.2.3",
     "electron-squirrel-startup": "^1.0.1",
     "node-fetch": "^3.3.2",
+    "pg": "^8.16.3",
     "update-electron-app": "^3.0.0"
   }
 }
