@@ -1667,10 +1667,6 @@
 </div>
 
 <script type="module">
-    import netlifyIdentity from 'https://cdn.jsdelivr.net/npm/netlify-identity-widget@1.9.2/build/netlify-identity-widget.js';
-    window.netlifyIdentity = netlifyIdentity;
-</script>
-<script>
     console.log('Test 1: Script is starting!');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
     
@@ -1843,16 +1839,20 @@
         numQuestions: 10
     };
 
-    window.onload = function() {
-        initDB().then(() => {
-            console.log("Database initialized.");
-            netlifyIdentity.init(); 
-        }).catch(error => {
-            console.error("Failed to initialize the database:", error);
-            showToast("Could not start the application. Database initialization failed.", "error");
-        });
+    window.onload = async function() { 
+        console.log('Test 1: Script is starting!');
 
-        if (window.netlifyIdentity) {
+        try {
+            const netlifyIdentity = await import('https://cdn.jsdelivr.net/npm/netlify-identity-widget@1.9.2/build/netlify-identity-widget.js');
+            
+            window.netlifyIdentity = netlifyIdentity.default;
+            console.log("Netlify Identity script loaded successfully.");
+
+            await initDB();
+            console.log("Database initialized.");
+
+            window.netlifyIdentity.init();
+
             window.netlifyIdentity.on("init", user => {
                 console.log("Netlify Identity initialized.");
                 
@@ -1870,6 +1870,10 @@
                     }
                 }
             });
+
+        } catch (error) {
+            console.error("Fatal error during startup:", error);
+            showToast("Could not start the application. A critical resource failed to load.", "error");
         }
     };
     
