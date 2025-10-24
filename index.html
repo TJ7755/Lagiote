@@ -2543,6 +2543,10 @@
         document.getElementById('deckDetailDeleteBtn').addEventListener('click', () => deleteDeck(currentViewingDeckId));
         document.getElementById('deckDetailSettingsBtn').addEventListener('click', () => openDeckSettingsModal(currentViewingDeckId));
         document.getElementById('headerBackBtn').addEventListener('click', goBack);
+        const nameForm = document.getElementById('nameForm');
+        if (nameForm) {
+            nameForm.addEventListener('submit', saveName);
+        }
         document.getElementById('darkModeToggle').addEventListener('change', toggleDarkMode);
         document.getElementById('continueBtn').addEventListener('click', continueStudy);
         document.getElementById('instructionsBtn').addEventListener('click', () => document.getElementById('instructionsModal').classList.add('show'));
@@ -2954,6 +2958,13 @@
         const settings = await getDataFromDB('appData', 'userSettings');
         globalSettings = settings || {};
         globalSettings.newCardsPerDay = globalSettings.newCardsPerDay || 20;
+
+        if (globalSettings.username) {
+            document.getElementById('welcomeMessage').textContent = `Welcome back, ${globalSettings.username}!`;
+            checkName();
+        } else {
+            document.getElementById('nameModal').classList.add('show');
+        }
         
         const savedCategories = await getDataFromDB('appData', 'categories');
         if(savedCategories) categories = savedCategories.data;
