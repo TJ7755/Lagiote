@@ -630,7 +630,7 @@
             color: var(--text-color);
         }
 
-        #authView {
+        #authView.is-visible {
             display: flex;
             justify-content: center;
             align-items: center;
@@ -1850,7 +1850,8 @@
 
             await loadSavedData();
             setupEventListeners();
-
+            loadCookieConsent();
+            
             if (user) {
                 await updateUIAfterLogin(user);
                 runSmartCoachChecks('dashboardLoad');
@@ -6953,7 +6954,7 @@
 
             const authView = document.getElementById('authView');
             if (authView) {
-                authView.style.display = 'none';
+                authView.classList.remove('is-visible');
             }
 
             document.getElementById('loggedOutView').classList.add('hidden');
