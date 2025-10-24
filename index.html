@@ -2498,16 +2498,42 @@
 
         document.getElementById('authSignupBtn').addEventListener('click', () => netlifyIdentity.open('signup'));
         document.getElementById('authLoginBtn').addEventListener('click', () => netlifyIdentity.open('login'));
-        const guestBtn = document.getElementById('continueAsGuestBtn');
-        if (guestBtn) {
-            guestBtn.addEventListener('click', () => {
-                localStorage.setItem('hasBeenGuest', 'true');
-                showView('dashboard');
-                document.getElementById('loggedInView').classList.remove('hidden');
-                document.getElementById('guestPromptBanner').classList.remove('hidden');
-                loadCookieConsent();
-            });
-        }
+        document.getElementById('continueAsGuestBtn').addEventListener('click', () => {
+            localStorage.setItem('hasBeenGuest', 'true');
+            showView('dashboard');
+            const loggedInEl = document.getElementById('loggedInView');
+            if (loggedInEl) {
+                loggedInEl.classList.remove('hidden');
+            } else {
+                console.warn('⚠️ Element #loggedInView not found – skipping class toggle.');
+            }
+
+            const bannerEl = document.getElementById('guestPromptBanner');
+            if (bannerEl) {
+                bannerEl.classList.remove('hidden');
+            } else {
+                const banner = document.createElement('div');
+                banner.id = 'guestPromptBanner';
+                banner.style.cssText = `
+                    background: var(--card-bg);
+                    border: 2px solid var(--border-color);
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin: 20px auto;
+                    max-width: 800px;
+                    text-align: center;
+                    color: var(--text-color);
+                `;
+                banner.innerHTML = `
+                    <strong>Welcome, Guest!</strong><br>
+                    Your progress is stored locally. Sign up to sync across devices.
+                `;
+                document.body.appendChild(banner);
+                console.warn('⚠️ Element #guestPromptBanner not found – no banner displayed.');
+            }
+
+            loadCookieConsent();
+        });
 
 
         setupSearch();
@@ -2928,13 +2954,6 @@
         const settings = await getDataFromDB('appData', 'userSettings');
         globalSettings = settings || {};
         globalSettings.newCardsPerDay = globalSettings.newCardsPerDay || 20;
-
-        if (globalSettings.username) {
-            document.getElementById('welcomeMessage').textContent = `Welcome back, ${globalSettings.username}!`;
-            checkName();
-        } else {
-            document.getElementById('nameModal').classList.add('show');
-        }
         
         const savedCategories = await getDataFromDB('appData', 'categories');
         if(savedCategories) categories = savedCategories.data;
