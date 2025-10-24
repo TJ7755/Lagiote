@@ -5526,59 +5526,6 @@
             return isNaN(iqs) ? 0.5 : Math.max(0, Math.min(1, iqs));
         }
 
-        async function fetchLatestDownloads() {
-            const repo = 'TJ7755/Lagiote-Revise';
-            const apiUrl = `https://api.github.com/repos/${repo}/releases`;
-            const container = document.getElementById('download-buttons-container');
-
-            container.innerHTML = `<p style="color: var(--secondary-text);">Loading latest downloads...</p>`;
-
-
-            try {
-                const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
-                const data = await response.json();
-
-                if (!Array.isArray(data) || data.length === 0) {
-                    container.innerHTML = `<p style="color: var(--secondary-text);">No releases found for this repository.</p>`;
-                    return;
-                }
-                const latestRelease = data[0];
-                
-                if (latestRelease && latestRelease.assets && latestRelease.assets.length > 0) {
-                    container.innerHTML = ''; 
-                    
-                    const winAsset = latestRelease.assets.find(a => a.name.endsWith('.exe'));
-                    const macAsset = latestRelease.assets.find(a => a.name.endsWith('.dmg'));
-
-                    if (winAsset) {
-                        const winBtn = document.createElement('a');
-                        winBtn.href = winAsset.browser_download_url;
-                        winBtn.className = 'btn';
-                        winBtn.innerHTML = `Download for Windows`;
-                        container.appendChild(winBtn);
-                    }
-                    
-                    if (macAsset) {
-                        const macBtn = document.createElement('a');
-                        macBtn.href = macAsset.browser_download_url;
-                        macBtn.className = 'btn';
-                        macBtn.innerHTML = `Download for Mac`;
-                        container.appendChild(macBtn);
-                    }
-
-                    if (!winAsset && !macAsset) {
-                        container.innerHTML = `<p style="color: var(--secondary-text);">No compatible downloads found in the latest release.</p>`;
-                    }
-                    
-                } else {
-                    container.innerHTML = `<p style="color: var(--secondary-text);">Could not find any download files in the latest release.</p>`;
-                }
-            } catch (error) {
-                console.error('Failed to fetch downloads:', error);
-                container.innerHTML = `<p style="color: var(--secondary-text);">Failed to load downloads. Please try again later.</p>`;
-            }
-        }
         
         function calculateFocusScore(log) {
             const TARGET_LATENCY = 3000; 
