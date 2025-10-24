@@ -1843,9 +1843,9 @@
         console.log('Test 1: Script is starting!');
 
         try {
-            const netlifyIdentity = await import('https://cdn.jsdelivr.net/npm/netlify-identity-widget@1.9.2/build/netlify-identity-widget.js');
+            const netlifyIdentityModule = await import('https://cdn.jsdelivr.net/npm/netlify-identity-widget@1.9.2/build/netlify-identity-widget.js');
             
-            window.netlifyIdentity = netlifyIdentity.default;
+            window.netlifyIdentity = netlifyIdentityModule.default;
             console.log("Netlify Identity script loaded successfully.");
 
             await initDB();
@@ -1873,9 +1873,13 @@
 
         } catch (error) {
             console.error("Fatal error during startup:", error);
-            showToast("Could not start the application. A critical resource failed to load.", "error");
+            document.body.innerHTML = `<div style="padding: 40px; text-align: center;">
+                <h2>Application Failed to Start</h2>
+                <p style="color: #e53e3e;">A critical resource failed to load. Please check your internet connection and disable any ad blockers, then refresh the page.</p>
+            </div>`;
         }
     };
+
     
     function initDB() {
         return new Promise((resolve, reject) => {
