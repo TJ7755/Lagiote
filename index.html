@@ -8,7 +8,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lagiote Revise</title>
-    <script src="https://app.termly.io/resource-blocker/acc0f1f0-9746-4ec5-a629-1def23043b13?autoBlock=on"></script>
+    <script id="termly-script" data-src="https://app.termly.io/resource-blocker/acc0f1f0-9746-4ec5-a629-1def23043b13?autoBlock=on"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-86DQ5HTDV9"></script>
     <script>
@@ -23,7 +23,6 @@
     <script src="./assets/js/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
-    <script type="text/javascript" src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
     <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
@@ -1668,6 +1667,9 @@
 </div>
 
 <script>
+    import netlifyIdentity from 'netlify-identity-widget';
+    window.netlifyIdentity = netlifyIdentity;
+    console.log('Test 1: Script is starting!');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
     
     const isElectron = typeof window.electronAPI !== 'undefined';
@@ -1842,6 +1844,7 @@
     window.onload = function() {
         initDB().then(() => {
             console.log("Database initialized.");
+            netlifyIdentity.init(); 
         }).catch(error => {
             console.error("Failed to initialize the database:", error);
             showToast("Could not start the application. Database initialization failed.", "error");
@@ -2482,6 +2485,7 @@
             showView('dashboard');
             document.getElementById('loggedInView').classList.remove('hidden');
             document.getElementById('guestPromptBanner').classList.remove('hidden');
+            loadCookieConsent();
         });
 
         setupSearch();
@@ -6958,6 +6962,7 @@
             document.getElementById('loggedInView').classList.remove('hidden');
 
             loadUserDataAndSync();
+            loadCookieConsent(); 
         }
 
         function updateUIAfterLogout() {
@@ -7080,6 +7085,15 @@
             } catch (error) {
                 console.error('Library Error:', error);
                 grid.innerHTML = '<p style="color: var(--danger-color);">Could not load the library. Please try again later.</p>';
+            }
+        }
+
+        function loadCookieConsent() {
+            const termlyScript = document.getElementById('termly-script');
+            
+            if (termlyScript && !termlyScript.hasAttribute('src')) {
+                console.log("Loading cookie consent banner...");
+                termlyScript.setAttribute('src', termlyScript.getAttribute('data-src'));
             }
         }
     </script>
