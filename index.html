@@ -1841,63 +1841,69 @@
     };
 
     window.onload = async function () {
-    console.log('Test 1: Script is starting!');
-    if (
-        typeof window.netlifyIdentity === 'object' &&
-        typeof window.netlifyIdentity.init === 'function'
-    ) {
-        console.log('Netlify Identity script loaded successfully.');
-        window.netlifyIdentity.init();
+        console.log('Test 1: Script is starting!');
 
-        window.netlifyIdentity.on('init', async user => {
-            console.log('Netlify Identity .on("init") event has fired.');
+        if (
+            typeof window.netlifyIdentity === 'object' &&
+            typeof window.netlifyIdentity.on === 'function'
+        ) {
+
+            window.netlifyIdentity.on('init', async user => {
+                console.log('Netlify Identity .on("init") event has fired.');
+
+                await initDB(); 
+                console.log('Database initialized.');
+
+                window.netlifyIdentity.on('login', user => {
+                    handleGuestToUserTransition(); 
+                    updateUIAfterLogin(user);
+                });
+
+                window.netlifyIdentity.on('logout', () => {
+                    deleteDataFromDB('appData', 'userSession');
+                    updateUIAfterLogout();
+                });
+
+                await loadSavedData();
+
+                setupEventListeners();
+
+                if (user) {
+                    updateUIAfterLogin(user);
+                } else {
+                    showView('authView', true);
+                }
+
+                updateOnlineStatusUI();
+
+                runSmartCoachChecks('dashboardLoad');
+            });
+
+            console.log('Netlify Identity script loaded successfully.');
+            window.netlifyIdentity.init();
+        } else {
+
+            console.warn(
+                '⚠️ Netlify Identity widget could not be loaded. ' +
+                'Continuing in offline/guest mode (no authentication).'
+            );
 
             await initDB();
-            console.log('Database initialized.');
-
-            window.netlifyIdentity.on('login', user => {
-                handleGuestToUserTransition();
-                updateUIAfterLogin(user);
-            });
-
-            window.netlifyIdentity.on('logout', () => {
-                deleteDataFromDB('appData', 'userSession');
-                updateUIAfterLogout();
-            });
+            console.log('Database initialized (offline mode).');
 
             await loadSavedData();
-
             setupEventListeners();
 
-            if (user) {
-                updateUIAfterLogin(user);
-            } else {
-                showView('authView', true);
-            }
-
+            showView('dashboard', true);
             updateOnlineStatusUI();
-
             runSmartCoachChecks('dashboardLoad');
-        });
-    } else {
+        }
+    };
 
-        console.warn(
-            '⚠️ Netlify Identity widget could not be loaded. ' +
-            'Continuing in offline mode (no authentication).'
-        );
-
-        await initDB();
-        console.log('Database initialized (offline mode).');
-
-        await loadSavedData();
-        setupEventListeners();
-
-        showView('dashboard', true);
-        updateOnlineStatusUI();
-
-        runSmartCoachChecks('dashboardLoad');
+    function handleGuestToUserTransition() {
+        console.log('🔧 handleGuestToUserTransition called – no migration logic defined yet.');
     }
-};
+
 
     function initDB() {
         return new Promise((resolve, reject) => {
