@@ -18,6 +18,7 @@
 
     gtag('config', 'G-86DQ5HTDV9');
     </script>
+    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
     <script src="./assets/js/pdf.min.js"></script>
     <script src="./assets/js/mammoth.browser.min.js"></script>
     <script src="./assets/js/chart.js"></script>
@@ -1839,49 +1840,65 @@
         numQuestions: 10
     };
 
-    window.onload = async function() { 
-        console.log('Test 1: Script is starting!');
+    window.onload = async function () {
+    console.log('Test 1: Script is starting!');
+    if (
+        typeof window.netlifyIdentity === 'object' &&
+        typeof window.netlifyIdentity.init === 'function'
+    ) {
+        console.log('Netlify Identity script loaded successfully.');
+        window.netlifyIdentity.init();
 
-        try {
-            const netlifyIdentityModule = await import('https://cdn.jsdelivr.net/npm/netlify-identity-widget@1.9.2/build/netlify-identity-widget.js');
-            
-            window.netlifyIdentity = netlifyIdentityModule.default;
-            console.log("Netlify Identity script loaded successfully.");
-
-            window.netlifyIdentity.init();
+        window.netlifyIdentity.on('init', async user => {
+            console.log('Netlify Identity .on("init") event has fired.');
 
             await initDB();
-            console.log("Database initialized.");
+            console.log('Database initialized.');
 
-            window.netlifyIdentity.on("init", user => {
-                console.log("Netlify Identity .on('init') event has fired.");
-                
-                loadSavedData();
-                setupEventListeners();
-                updateOnlineStatusUI();
-
-                if (!user) {
-                    if (localStorage.getItem('hasBeenGuest') === 'true') {
-                        showView('dashboard');
-                        document.getElementById('loggedInView').classList.remove('hidden');
-                        document.getElementById('guestPromptBanner').classList.remove('hidden');
-                    } else {
-                        showView('authView', true);
-                    }
-                }
+            window.netlifyIdentity.on('login', user => {
+                handleGuestToUserTransition();
+                updateUIAfterLogin(user);
             });
 
-        } catch (error) {
-            console.error("Fatal error during startup:", error);
-            document.body.innerHTML = `<div style="padding: 40px; text-align: center;">
-                <h2>Application Failed to Start</h2>
-                <p style="color: #e53e3e; margin-top: 15px;">A critical resource failed to load. Please check your internet connection and disable any ad blockers, then refresh the page.</p>
-            </div>`;
-        }
-    };
+            window.netlifyIdentity.on('logout', () => {
+                deleteDataFromDB('appData', 'userSession');
+                updateUIAfterLogout();
+            });
 
+            await loadSavedData();
 
-    
+            setupEventListeners();
+
+            if (user) {
+                updateUIAfterLogin(user);
+            } else {
+                showView('authView', true);
+            }
+
+            updateOnlineStatusUI();
+
+            runSmartCoachChecks('dashboardLoad');
+        });
+    } else {
+
+        console.warn(
+            '⚠️ Netlify Identity widget could not be loaded. ' +
+            'Continuing in offline mode (no authentication).'
+        );
+
+        await initDB();
+        console.log('Database initialized (offline mode).');
+
+        await loadSavedData();
+        setupEventListeners();
+
+        showView('dashboard', true);
+        updateOnlineStatusUI();
+
+        runSmartCoachChecks('dashboardLoad');
+    }
+};
+
     function initDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open('LagioteDB', 6);
