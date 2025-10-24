@@ -1666,9 +1666,11 @@
     </div>
 </div>
 
-<script>
-    import netlifyIdentity from 'netlify-identity-widget';
+<script type="module">
+    import netlifyIdentity from './node_modules/netlify-identity-widget/build/netlify-identity-widget.js';
     window.netlifyIdentity = netlifyIdentity;
+</script>
+<script></script>
     console.log('Test 1: Script is starting!');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
     
