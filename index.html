@@ -1666,7 +1666,7 @@
     </div>
 </div>
 
-<script type="module">
+<script>
     console.log('Test 1: Script is starting!');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
     
@@ -1848,13 +1848,13 @@
             window.netlifyIdentity = netlifyIdentityModule.default;
             console.log("Netlify Identity script loaded successfully.");
 
+            window.netlifyIdentity.init();
+
             await initDB();
             console.log("Database initialized.");
 
-            window.netlifyIdentity.init();
-
             window.netlifyIdentity.on("init", user => {
-                console.log("Netlify Identity initialized.");
+                console.log("Netlify Identity .on('init') event has fired.");
                 
                 loadSavedData();
                 setupEventListeners();
@@ -1875,10 +1875,11 @@
             console.error("Fatal error during startup:", error);
             document.body.innerHTML = `<div style="padding: 40px; text-align: center;">
                 <h2>Application Failed to Start</h2>
-                <p style="color: #e53e3e;">A critical resource failed to load. Please check your internet connection and disable any ad blockers, then refresh the page.</p>
+                <p style="color: #e53e3e; margin-top: 15px;">A critical resource failed to load. Please check your internet connection and disable any ad blockers, then refresh the page.</p>
             </div>`;
         }
     };
+
 
     
     function initDB() {
