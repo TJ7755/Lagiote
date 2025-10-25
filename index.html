@@ -968,7 +968,7 @@
                     </div>
                 </div>
                  <div id="flashcard-summary" class="processing-controls hidden" style="margin-top: 15px;">
-                    <button id="save-deck-btn" class="btn btn-success" style="width: 100%;">Save as New Deck</button>
+                    <button id="save-deck-btn" class="btn btn-success" style="width: 100%;" onclick="saveAiGeneratedDeck()">Save as New Deck</button>
                 </div>
             </div>
         </div>
@@ -1851,7 +1851,7 @@
             await loadSavedData();
             setupEventListeners();
             loadCookieConsent();
-            
+
             if (user) {
                 await updateUIAfterLogin(user);
                 runSmartCoachChecks('dashboardLoad');
