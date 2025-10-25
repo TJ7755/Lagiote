@@ -636,47 +636,6 @@
             align-items: center;
             min-height: 100vh;
         }
-
-        #userMenuDropdown {
-            display: none; 
-            position: absolute;
-            top: 50px;
-            right: 0;
-            background-color: var(--header-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-            width: 200px;
-            z-index: 110;
-            overflow: hidden;
-        }
-
-        #userMenuDropdown.show {
-            display: block; 
-        }
-
-        #userMenuInfo {
-            padding: 15px;
-            border-bottom: 1px solid var(--border-color);
-            color: var(--secondary-text);
-            font-size: 0.9rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        #userMenuDropdown a {
-            display: block;
-            padding: 12px 15px;
-            color: var(--text-color);
-            text-decoration: none;
-            font-weight: 500;
-            transition: background-color 0.2s;
-        }
-
-        #userMenuDropdown a:hover {
-            background-color: var(--input-bg);
-        }
     </style>
 </head>
 <body>
@@ -731,18 +690,7 @@
             <button id="headerSettingsBtn" class="header-btn header-settings-btn" title="Settings" onclick="showSettings()">
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.39.44 1.02.12 1.45l-.527.737c-.25.35-.272.806-.108 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.11v1.093c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.108 1.204l.527.738c.32.43.27.96-.12 1.45l-.773.773a1.125 1.125 0 0 1-1.45.12l-.737-.527c-.35-.25-.806-.272-1.204-.108-.397.165-.71.505-.78.93l-.15.893c-.09.543-.56.94-1.11.94h-1.093c-.55 0-1.02-.398-1.11-.94l-.149-.894c-.07-.424-.384-.764-.78-.93-.398-.164-.855-.142-1.205.108l-.737.527a1.125 1.125 0 0 1-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.11v-1.093c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.527-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.806.272 1.204.108.397-.165.71.505.78-.93l.15-.893Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
             </button>
-            <div id="userMenuContainer" class="hidden" style="position: relative;">
-                <button id="userMenuBtn" class="header-btn" title="Account">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-                    </svg>
-                </button>
-                <div id="userMenuDropdown" class="hidden">
-                    <div id="userMenuInfo"></div>
-                    <a href="#" id="userMenuSettings">Settings</a>
-                    <a href="#" id="userMenuLogout">Log Out</a>
-                </div>
-            </div>
+            <div data-netlify-identity-menu></div>
         </div>
     </header>
     
@@ -2735,34 +2683,6 @@
         fileInput.addEventListener('change', () => handleAiFiles(fileInput.files));
         document.getElementById('add-text-btn').addEventListener('click', addTextAsDocument);
         document.getElementById('process-btn').addEventListener('click', processAllDocuments);
-
-        const userMenuBtn = document.getElementById('userMenuBtn');
-        const userMenuDropdown = document.getElementById('userMenuDropdown');
-
-        userMenuBtn.addEventListener('click', (event) => {
-            event.stopPropagation(); 
-            userMenuDropdown.classList.toggle('show');
-        });
-
-        document.getElementById('userMenuSettings').addEventListener('click', (e) => {
-            e.preventDefault();
-            showSettings();
-            userMenuDropdown.classList.remove('show');
-        });
-
-        document.getElementById('userMenuLogout').addEventListener('click', (e) => {
-            e.preventDefault();
-            if (netlifyIdentity.currentUser()) {
-                netlifyIdentity.logout();
-            }
-            userMenuDropdown.classList.remove('show');
-        });
-
-        window.addEventListener('click', (event) => {
-            if (!userMenuBtn.contains(event.target)) {
-                userMenuDropdown.classList.remove('show');
-            }
-        });
     }
     
     function showToast(message, type = 'info', duration = 3000, icon = null) {
@@ -3946,29 +3866,37 @@
         }
 
         async function startReviewMode(deckId) {
-            document.getElementById('progressView').classList.add('hidden');
-            document.getElementById('cardView').classList.add('hidden');
-            document.getElementById('completeView').classList.add('hidden');
+            // 1. Set up the basic state
             currentMode = 'review';
             currentDeckId = deckId;
             const deck = decks[deckId];
             deck.settings = {...DEFAULT_DECK_SETTINGS, ...(deck.settings || {})};
-            await saveDataToDB('decks', deck);
-
+            
             studyState.settings = deck.settings;
-            studyState.stillLearning = [...(deck.reviewState?.stillLearning || deck.cards)];
-            studyState.correct = [...(deck.reviewState?.correct || [])];
-            studyState.currentRound = deck.reviewState?.currentRound || 1;
-            studyState.lastRoundIncorrect = [...(deck.reviewState?.lastRoundIncorrect || [])];
+            studyState.currentCardIndex = 0;
             studyState.startTime = new Date();
-            studyState.originPlanId = null;
+            studyState.originPlanId = null; 
+
+            let allCards = [...deck.cards];
+            if (allCards.length === 0) {
+                showToast("This deck has no cards to review.", "error");
+                return;
+            }
+
+            if (studyState.settings.reviewOrder === 'alphabetical') {
+                allCards.sort((a, b) => a.question.localeCompare(b.question));
+            } else {
+                allCards = shuffleArray(allCards);
+            }
+            studyState.roundCards = allCards; 
+
             showView('studyMode');
             document.getElementById('studyTitle').textContent = 'Review Mode';
             document.getElementById('studySubtitle').textContent = deck.name;
-            if (studyState.stillLearning.length === 0) showComplete();
-            else showProgress();
-        }
 
+            transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
+            showNextCard();
+        }
 
         async function saveStudyProgress() {
             if (!currentDeckId) return;
@@ -4007,7 +3935,7 @@
                 continueBtn.classList.remove('btn-prominent');
             }
             if(currentMode === 'learn') updateLearnProgress();
-            else if (currentMode === 'review') updateReviewProgress();
+            //else if (currentMode === 'review') updateReviewProgress(); No longer needed after review mode overhaul.
             else if (currentMode === 'exam') {
                 updateExamProgress();
             }
@@ -4237,6 +4165,29 @@
 
             const checkBtn = document.getElementById('checkAnswerBtn');
             const dontKnowBtn = document.getElementById('dontKnowBtn');
+
+            if (currentMode === 'review') {
+                if (studyState.currentCardIndex >= studyState.roundCards.length) {
+                    showToast("Review complete!", "success");
+                    await endSession();
+                    return;
+                }
+
+                const card = studyState.roundCards[studyState.currentCardIndex];
+                
+                document.getElementById('flashcardViewContainer').classList.remove('hidden');
+                document.getElementById('cardQuestion').innerHTML = card.question;
+                document.getElementById('cardAnswer').innerHTML = card.answer;
+                
+                document.getElementById('showAnswerBtn').classList.remove('hidden');
+                
+                document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
+                document.getElementById('cardAnswerContent').classList.add('hidden');
+                document.getElementById('cardRoundInfo').textContent = `Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
+                
+                return; 
+            }
+
             if (currentMode === 'sequence') {
                 checkBtn.onclick = checkSequenceAnswer;
                 dontKnowBtn.onclick = dontKnowSequenceAnswer;
@@ -4666,16 +4617,18 @@
                     studyState.incorrectInThisRound.push({ ...card });
                 }
                 
-                if (currentMode === 'review') {
-                    if (correct) {
-                        const index = studyState.stillLearning.findIndex(c => c.id === card.id);
-                        if (index > -1) {
-                            studyState.stillLearning.splice(index, 1);
-                            studyState.correct.push(card);
-                        }
-                    } else {
-                         if (!studyState.lastRoundIncorrect.some(c => c.id === card.id)) {
-                            studyState.lastRoundIncorrect.push(card);
+                if (currentMode !== 'review') {
+                    if (currentMode === 'review') { 
+                        if (correct) {
+                            const index = studyState.stillLearning.findIndex(c => c.id === card.id);
+                            if (index > -1) {
+                                studyState.stillLearning.splice(index, 1);
+                                studyState.correct.push(card);
+                            }
+                        } else {
+                            if (!studyState.lastRoundIncorrect.some(c => c.id === card.id)) {
+                                studyState.lastRoundIncorrect.push(card);
+                            }
                         }
                     }
                 }
@@ -7026,40 +6979,25 @@
         }
 
         async function updateUIAfterLogin(user) {
-            const username = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Friend';
-            document.getElementById('welcomeMessage').textContent = `Welcome back, ${username}!`;
+            const username = user.user_metadata?.full_name ||
+                            user.email?.split('@')[0] ||
+                            'Friend';
+            document.getElementById('welcomeMessage').textContent =
+                `Welcome back, ${username}!`;
 
             const authView = document.getElementById('authView');
             if (authView) {
                 authView.classList.remove('is-visible');
             }
-            
-            document.getElementById('headerSettingsBtn').classList.add('hidden'); // Hide old settings button
-            document.getElementById('userMenuContainer').classList.remove('hidden'); // Show our new menu
-            document.getElementById('userMenuInfo').textContent = user.email; // Display user's email
 
             document.getElementById('loggedOutView').classList.add('hidden');
             document.getElementById('loggedInView').classList.remove('hidden');
             await loadUserDataAndSync();
 
             loadCookieConsent();
-            showView('dashboard'); 
+
+            transitionView('dashboard');
         }
-
-        function updateUIAfterLogout() {
-            document.getElementById('appHeader').classList.add('hidden');
-            document.getElementById('welcomeMessage').textContent = `Lagiote Revise`;
-
-            document.getElementById('userMenuContainer').classList.add('hidden'); 
-            document.getElementById('headerSettingsBtn').classList.remove('hidden'); 
-
-            document.getElementById('loggedInView').classList.add('hidden');
-            document.getElementById('loggedOutView').classList.remove('hidden');
-
-            clearLocalData();
-            showView('authView', true); 
-        }
-
 
         function updateUIAfterLogout() {
             document.getElementById('appHeader').classList.add('hidden');
