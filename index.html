@@ -759,8 +759,6 @@
                         </div>
                     </div>
                 </div>
-                <div style="text-align: center; padding-top: 20px; border-top: 1px solid var(--border-color); margin-top: 40px;">
-                </div>
                 <div class="dashboard-footer">
                     <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
                     <button class="btn btn-secondary" onclick="showAnalyticsModal()">Show Analytics</button>
@@ -2830,6 +2828,10 @@
 
 
     function transitionView(viewId, isInitial = false, callback = null) {
+        const appHeader = document.getElementById('appHeader');
+        if (viewId !== 'authView') {
+            appHeader.classList.remove('hidden');
+        }
         if (!isInitial && activeView !== viewId && viewId !=='dashboard') {
             if(viewHistory[viewHistory.length-1] !== activeView) {
                     viewHistory.push(activeView);
