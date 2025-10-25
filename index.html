@@ -2825,52 +2825,6 @@
             if (callback) callback();
         }
     }
-
-
-    function transitionView(viewId, isInitial = false, callback = null) {
-        const appHeader = document.getElementById('appHeader');
-        if (viewId !== 'authView') {
-            appHeader.classList.remove('hidden');
-        }
-        if (!isInitial && activeView !== viewId && viewId !=='dashboard') {
-            if(viewHistory[viewHistory.length-1] !== activeView) {
-                    viewHistory.push(activeView);
-            }
-        }
-        
-        const currentView = document.getElementById(activeView);
-        const nextView = document.getElementById(viewId);
-        
-        const isDashboard = viewId === 'dashboard';
-        document.querySelector('.search-bar').style.display = isDashboard ? 'flex' : 'none';
-        document.getElementById('headerSettingsBtn').style.display = isDashboard ? 'flex' : 'none';
-        document.getElementById('headerBackBtn').classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
-        
-        document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
-
-        if (isInitial) {
-            if(currentView) currentView.classList.remove('fade-in', 'fade-out', 'animating');
-            nextView.classList.add('fade-in', 'animating');
-            activeView = viewId;
-            if (callback) callback(); 
-            return;
-        }
-
-        if (currentView) {
-            currentView.classList.add('fade-out', 'animating');
-            currentView.classList.remove('fade-in');
-            
-            setTimeout(() => {
-                currentView.style.display = 'none';
-                currentView.classList.remove('fade-out', 'animating');
-                nextView.style.display = 'block';
-                nextView.classList.add('fade-in', 'animating');
-                activeView = viewId;
-                window.scrollTo(0, 0);
-                if (callback) callback(); 
-            }, 400); 
-        }
-    }
     
     function transitionSubView(currentElem, nextElem) {
         if (currentElem && !currentElem.classList.contains('hidden')) {
@@ -2903,7 +2857,7 @@
     function continueGoBack() {
          const previousView = viewHistory.pop();
         if (previousView) {
-            transitionView(previousView);
+            showView(previousView);
         } else {
              backToDashboard(true);
         }
@@ -2924,10 +2878,9 @@
             showConfirmModal(
                 'You have unsaved changes. Are you sure you want to leave?',
                 () => { 
-                    transitionView('dashboard'); 
-                    // After confirming, we still need to reset the dashboard state.
+                    showView('dashboard'); 
                     if (currentDeckId && currentMode) endSession();
-                    resetDashboardState(true); // Call our new helper
+                    resetDashboardState(true); 
                 }
             );
             return;
@@ -6998,7 +6951,7 @@
 
             loadCookieConsent();
 
-            transitionView('dashboard');
+            showView('dashboard');
         }
 
         function updateUIAfterLogout() {
