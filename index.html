@@ -4094,7 +4094,11 @@
                 const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
                 studyState.knowledgeStates = new Map(knowledgeStates.map(item => [item.cardID, item]));
                 const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
-                const nonMasteredCards = allCards.map(card => ({...card, mastery: knowledgeMap.get(card.id)?.masteryScore || 0.5 })).filter(card => card.mastery < 0.95);
+                const nonMasteredCards = allCards.map(card => ({
+                    ...card,
+                    deckId: currentDeckId,
+                    mastery: knowledgeMap.get(card.id)?.masteryScore || 0.5
+                })).filter(card => card.mastery < 0.95);
                 nonMasteredCards.sort((a, b) => a.mastery - b.mastery);
                 
                 let poolSize;
