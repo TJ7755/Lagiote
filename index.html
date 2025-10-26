@@ -636,6 +636,10 @@
             align-items: center;
             min-height: 100vh;
         }
+
+        .view-container.hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -2788,42 +2792,38 @@
     }
 
     function showView(viewId, isInitial = false, callback = null) {
-        const appHeader = document.getElementById('appHeader');
-        if (viewId !== 'authView') {
-            appHeader.classList.remove('hidden');
-        }
-
         const nextView = document.getElementById(viewId);
         if (!nextView) {
-            console.error("View not found:", viewId);
+            console.error('View not found:', viewId);
             return;
         }
 
         if (isInitial) {
+            nextView.classList.remove('hidden');
             nextView.classList.add('is-visible');
             activeView = viewId;
             if (callback) callback();
-            return; 
+            return;
         }
 
         const currentView = document.getElementById(activeView);
-
         if (currentView && currentView !== nextView) {
             currentView.classList.add('is-hiding');
             currentView.classList.remove('is-visible');
-            
+
             setTimeout(() => {
                 currentView.classList.remove('is-hiding');
-                nextView.classList.add('is-visible');
-                activeView = viewId;
-                window.scrollTo(0, 0);
-                if (callback) callback();
-            }, 400); 
-        } else if (!currentView) {
-            nextView.classList.add('is-visible');
-            activeView = viewId;
-            if (callback) callback();
+                currentView.classList.add('hidden');
+            }, 400);
         }
+
+        nextView.classList.remove('hidden');
+        nextView.classList.add('is-visible');
+
+        activeView = viewId;
+        window.scrollTo(0, 0);
+
+        if (callback) callback();
     }
 
 
@@ -3392,10 +3392,16 @@
     
     async function createNewDeck(name, category, cards, notes = '', typeHint = 'General') {
         const deckId = Date.now().toString();
-        const settings = { ...DEFAULT_DECK_SETTINGS };
-        
+
+        const settings = {
+            ...DEFAULT_DECK_SETTINGS,
+            learnMode: 'flashcard',
+            reviewMode: 'flashcard',
+            adaptiveModes: { auto: true, mcq: true, cloze: true }
+        };
+
         const tempDeck = { name, category, cards, notes, typeHint };
-        showToast("Analyzing new deck content...", "info", 2000);
+        showToast("Analysing new deck content…", "info", 2000);
         await processDeckContent(tempDeck);
 
         const sm2 = new SM2Algorithm();
@@ -3405,9 +3411,14 @@
         }));
 
         const newDeck = {
-            id: deckId, name, category, cards: processedCards, notes, typeHint,
+            id: deckId,
+            name,
+            category,
+            cards: processedCards,
+            notes,
+            typeHint,
             created: new Date().toISOString(),
-            settings: settings,
+            settings: settings 
         };
         decks[deckId] = newDeck;
 
@@ -3417,15 +3428,13 @@
             stateStore.put({
                 userID: 'default_user',
                 cardID: card.id,
-                masteryScore: 0.5, 
-                stability: 1.0,    
+                masteryScore: 0.5,
+                stability: 1.0,
                 lastReviewed: new Date().toISOString(),
                 recallHistory: []
             });
         });
-
         await new Promise(resolve => transaction.oncomplete = resolve);
-
         await saveDataToDB('decks', newDeck);
         return deckId;
     }
@@ -3807,27 +3816,45 @@
             currentDeckId = deckId;
             const deck = decks[deckId];
 
-            document.getElementById('progressView').classList.add('hidden');
-            document.getElementById('cardView').classList.add('hidden');
-            document.getElementById('completeView').classList.add('hidden');
+            deck.settings = {
+                ...DEFAULT_DECK_SETTINGS,
+                ...(deck.settings || {})
+            };
+            if (!deck.settings.learnMode) deck.settings.learnMode = 'flashcard';
 
             if (deck.cards.length > 0 && typeof deck.cards[0].archetype === 'undefined') {
-                showToast("Performing first-time analysis...", "info", 2000);
+                showToast("Performing first‑time analysis…", "info", 2000);
                 await processDeckContent(deck);
                 await saveDataToDB('decks', deck); 
             }
-            
-            deck.settings = {...DEFAULT_DECK_SETTINGS, ...(deck.settings || {})};
+
+            const allKnowledge = await getAllDataFromDB('userKnowledgeState');
+            studyState.knowledgeStates = new Map(allKnowledge.map(k => [k.cardID, k]));
+
+            const allCards = deck.cards;
+            const nonMastered = allCards.filter(c => {
+                const mastery = studyState.knowledgeStates.get(c.id)?.masteryScore ?? 0.5;
+                return mastery < 0.95;
+            });
+
+            const poolSize = lastKnownFocusScore >= 0.85 ? 7 :
+                            lastKnownFocusScore >= 0.65 ? 5 : 3;
+            studyState.activeLearningPool = shuffleArray(nonMastered).slice(0, poolSize);
+
+            assignQuestionTypesToCards(studyState.activeLearningPool, deckId);
+
+            studyState.roundCards = shuffleArray(studyState.activeLearningPool);
             studyState.settings = deck.settings;
             studyState.currentRound = 1;
             studyState.startTime = new Date();
             studyState.originPlanId = null;
-            
+
             showView('studyMode');
             document.getElementById('studyTitle').textContent = 'Learning Mode';
             document.getElementById('studySubtitle').textContent = deck.name;
-            showProgress();
+            showProgress(); 
         }
+
 
         async function startSpacedLearning(deckId) {
             document.getElementById('progressView').classList.add('hidden');
@@ -4154,6 +4181,45 @@
             continueBtn.disabled = false;
             continueBtn.innerHTML = studyState.currentRound === 1 ? 'Start Round' : 'Continue Round';
         }
+
+        function assignQuestionTypesToCards(cards, deckId) {
+            const deck = decks[deckId];
+            if (!deck) return;
+
+            deck.settings = {
+                ...DEFAULT_DECK_SETTINGS,
+                ...(deck.settings || {})
+            };
+
+            const adaptive = deck.settings.adaptiveModes || {
+                auto: true,
+                mcq: true,
+                cloze: true
+            };
+
+            cards.forEach(card => {
+                if (deck.settings.learnMode === 'write') {
+                    card.questionTypeToShow = 'Type';
+                    return;
+                }
+
+                const mastery = studyState.knowledgeStates?.get(card.id)?.masteryScore ?? 0.5;
+
+                if (adaptive.auto) {
+                    if (mastery < 0.6 && adaptive.mcq && canGenerateQuestionType('MultipleChoice', card, deck.cards)) {
+                        card.questionTypeToShow = 'MultipleChoice';
+                        return;
+                    }
+                    if (mastery < 0.85 && adaptive.cloze && canGenerateQuestionType('Cloze', card, deck.cards)) {
+                        card.questionTypeToShow = 'Cloze';
+                        return;
+                    }
+                }
+
+                card.questionTypeToShow = 'Flashcard';
+            });
+        }
+
 
         async function showNextCard() {
             document.getElementById('flashcardViewContainer').classList.add('hidden');
