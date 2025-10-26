@@ -2098,7 +2098,7 @@
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    userID: getCurrentUserId(),
+                    userID: 'default_user',
                     cardID: logData.cardID,
                     timestamp: new Date().toISOString(),
                     wasCorrect: logData.wasCorrect,
@@ -3512,7 +3512,7 @@
         const stateStore = transaction.objectStore('userKnowledgeState');
         newDeck.cards.forEach(card => {
             stateStore.put({
-                userID: getCurrentUserId(),
+                userID: 'default_user',
                 cardID: card.id,
                 masteryScore: 0.5,
                 stability: 1.0,
@@ -3760,7 +3760,7 @@
 
                     newCards.forEach(card => {
                         stateStore.put({
-                            userID: getCurrentUserId(),
+                            userID: 'default_user',
                             cardID: card.id,
                             masteryScore: 0.5,
                             stability: 1.0,
@@ -5013,8 +5013,9 @@
                 
                 const resetPromises = deck.cards.map(card => {
                     return new Promise((resolve, reject) => {
+                        // This is the default state for a brand new card.
                         const defaultState = {
-                            userID: getCurrentUserId(),
+                            userID: 'default_user',
                             cardID: card.id,
                             masteryScore: 0.5,
                             stability: 1.0,
@@ -5809,7 +5810,7 @@
 
         async function updateKnowledgeState(card, wasCorrect, iqs = 0.5, questionType = 'Flashcard') {
             if (!db) return;
-            const userId = getCurrentUserId();
+
             return new Promise((resolve, reject) => {
                 const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
                 const store = transaction.objectStore('userKnowledgeState');
@@ -7287,14 +7288,7 @@
                 termlyScript.setAttribute('src', termlyScript.getAttribute('data-src'));
             }
         }
-
-        function getCurrentUserId() {
-            if (window.netlifyIdentity && netlifyIdentity.currentUser()) {
-                return netlifyIdentity.currentUser().id; 
-            }
-            return 'guest_user'; 
-        }
-
+        
     </script>
 </body>
 </html>
