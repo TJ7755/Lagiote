@@ -654,6 +654,17 @@ For v1.20 (final version before total redo):
             margin-bottom: 30px;
         }
 
+        #userProfileDropdown a:hover {
+            background-color: var(--input-bg);
+        }
+
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
         .flashcard-editor-row.drag-item {
             background: var(--card-bg);
             border: 2px solid var(--border-color);
@@ -712,6 +723,13 @@ For v1.20 (final version before total redo):
     </style>
 </head>
 <body>
+    <div id="loadingView" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--bg-color); z-index: 9999; display: flex; justify-content: center; align-items: center;">
+        <div style="text-align: center;">
+            <img src="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png" alt="Lagiote Revise Logo" style="width: 80px; height: 80px; margin-bottom: 20px;">
+            <div class="spinner" style="width: 30px; height: 30px; border-width: 4px; margin: 0 auto 20px auto;"></div>
+            <p id="loadingMessage" style="font-size: 1.1rem; color: var(--secondary-text); font-weight: 500;">Loading...</p>
+        </div>
+    </div>
     <div id="dynamicToast" class="toast"></div>
     <div id="authView" class="container view-container">
         <div style="text-align: center; max-width: 600px;">
@@ -6592,13 +6610,20 @@ For v1.20 (final version before total redo):
             }
 
             if (decksToUpdate.length > 0) {
-                showToast(`Upgrading ${decksToUpdate.length} deck(s) with new intelligence features...`, "info", 3000);
-                for (const deck of decksToUpdate) {
-                    await processDeckContent(deck);
-                    await saveDataToDB('decks', deck);
+                showLoadingScreen(`Upgrading ${decksToUpdate.length} deck(s) with new intelligence features...`);
+                try {
+                    for (const deck of decksToUpdate) {
+                        await processDeckContent(deck);
+                        await saveDataToDB('decks', deck);
+                    }
+                    showToast("Deck upgrades complete!", "success");
+                } catch (error) {
+                    console.error("Failed to upgrade decks:", error);
+                    showToast("Could not finish deck upgrades.", "error");
+                } finally {
+                    await updateDashboard();
+                    hideLoadingScreen(); 
                 }
-                showToast("Deck upgrades complete!", "success");
-                await updateDashboard(); 
             }
         }
 
@@ -7702,7 +7727,7 @@ For v1.20 (final version before total redo):
                 return;
             }
 
-            showToast('Syncing your data...', 'info');
+            showLoadingScreen('Syncing your data...');
 
             const lastSynced = localStorage.getItem('lastSynced');
 
@@ -7711,6 +7736,8 @@ For v1.20 (final version before total redo):
 
             try {
                 const token = await netlifyIdentity.currentUser().jwt();
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 25000);
                 const response = await fetch('/.netlify/functions/sync', {
                     method: 'POST',
                     headers: {
@@ -7741,10 +7768,14 @@ For v1.20 (final version before total redo):
 
             } catch (error) {
                 console.error('Sync Error:', error);
-                showToast('Could not sync data. Working in offline mode.', 'error');
-            } finally {
-                hideLoadingScreen();
-                await updateDashboard();
+                
+                if (error.name === 'AbortError') {
+                    showToast('Sync is taking too long. Your data is saved locally.', 'info');
+                } else if (error.message.includes('504')) {
+                    showToast('Server timeout. Your data is saved locally and will sync later.', 'info');
+                } else {
+                    showToast('Could not sync data. Working in offline mode.', 'error');
+                }
             }
         }
 
@@ -7812,6 +7843,19 @@ For v1.20 (final version before total redo):
         function generateDiffHTML(s1, s2) {
             const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             return `<span style="background-color: #ffcdd2; text-decoration: line-through;">${escape(s1)}</span> <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+        }
+
+        function showLoadingScreen(message) {
+            const loadingView = document.getElementById('loadingView');
+            document.getElementById('loadingMessage').textContent = message;
+            loadingView.classList.remove('hidden');
+            loadingView.style.display = 'flex';
+        }
+
+        function hideLoadingScreen() {
+            const loadingView = document.getElementById('loadingView');
+            loadingView.classList.add('hidden');
+            loadingView.style.display = 'none';
         }
 
         function toggleEditorView(deckType) {
