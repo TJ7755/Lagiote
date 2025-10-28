@@ -7702,7 +7702,7 @@ For v1.20 (final version before total redo):
                 return;
             }
 
-            showLoadingScreen('Syncing your data...');
+            showToast('Syncing your data...', 'info');
 
             const lastSynced = localStorage.getItem('lastSynced');
 
