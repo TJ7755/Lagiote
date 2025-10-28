@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication</title>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://lagiote-revise.netlify.app https://*.netlify.com https://*.gotrue.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://identity.netlify.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://lagiote-revise.netlify.app https://*.netlify.com https://*.gotrue.com;">
+    <script type="text/javascript" src="https://identity.netlify.com/v1/netlify-identity-widget.js" onload="debugLog('Widget script loaded successfully')" onerror="debugLog('Failed to load widget script')"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f7fafc;
+            position: relative;
+        }
+        .loading {
+            text-align: center;
+            color: #4a5568;
+            margin-bottom: 20px;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .status.error {
+            background-color: #fed7d7;
+            color: #c53030;
+        }
+        .status.success {
+            background-color: #c6f6d5;
+            color: #2f855a;
+        }
+        #debug {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.9);
+            color: #00ff00;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            border-radius: 4px;
+            border: 1px solid #666;
+            display: block;  /* Always show debug panel */
+            z-index: 1000;
+        }
+        #debug:empty {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading">Initializing authentication...</div>
+    <div id="status"></div>
+    <div id="debug"></div>
+
+    <script>
+        // Debug logger with timestamps
+        function debugLog(message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const formattedMessage = `[${timestamp}] ${type.toUpperCase()}: ${message}`;
+            console.log(formattedMessage);
+            
+            const debug = document.getElementById('debug');
+            const msgElement = document.createElement('div');
+            msgElement.innerHTML = formattedMessage;
+            if (type === 'error') {
+                msgElement.style.color = '#ff4444';
+            }
+            debug.appendChild(msgElement);
+            debug.scrollTop = debug.scrollHeight;
+        }
+
+        // Status display
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+        }
+
+        // Error handler
+        window.onerror = function(msg, url, line, col, error) {
+            debugLog(`Error: ${msg} at ${url}:${line}:${col}`, 'error');
+            if (error && error.stack) {
+                debugLog(`Stack: ${error.stack}`, 'error');
+            }
+            return false;
+        };
+                async function tryInitialize() {
+        // Unhandled promise rejection handler
+        window.onunhandledrejection = function(event) {
+            debugLog(`Unhandled Promise Rejection: ${event.reason}`, 'error');
+            return false;
+        };
+
+        debugLog('Authentication page loaded');
+
+        // Function to try initialization
+        function tryInitialize() {
+            debugLog('Checking for Netlify Identity Widget...');
+            
+            // Check if the widget is available
+            if (typeof window.netlifyIdentity === 'undefined' && typeof netlifyIdentity === 'undefined') {
+                debugLog('Widget not found yet, will retry');
+                return false;
+            }
+
+            // Ensure we have it in the window scope
+            if (typeof window.netlifyIdentity === 'undefined') {
+                window.netlifyIdentity = netlifyIdentity;
+            }
+
+            debugLog('Widget found! Available methods: ' + Object.keys(window.netlifyIdentity).join(', '));
+
+            try {
+                debugLog('Attempting initialization');
+                window.netlifyIdentity.init({
+                    APIUrl: 'https://lagiote-revise.netlify.app/.netlify/identity',
+                    locale: {
+                        // Custom error messages
+                        error: {
+                            default: 'An error occurred during authentication',
+                            connection: 'Unable to connect to authentication service',
+                            invalidCredentials: 'Invalid email or password',
+                            emailNotConfirmed: 'Please confirm your email address'
+                        }
+                    }
+                });
+
+                // Set up event listeners
+                window.netlifyIdentity.on('init', user => {
+                    debugLog('Init event received, user: ' + (user ? 'logged in' : 'not logged in'));
+                    updateStatus('Authentication initialized', 'success');
+                    
+                    if (!user) {
+                        debugLog('Opening login modal');
+                        
+                        // Wait for DOM to be fully ready
+                        const waitForDOM = () => {
+                            return new Promise((resolve) => {
+                                if (document.readyState === 'complete') {
+                                    resolve();
+                                } else {
+                                    window.addEventListener('load', resolve);
+                                }
+                            });
+                        };
+
+                        // Try to open login modal with retries
+                        const tryOpenLogin = async () => {
+                            let attempts = 0;
+                            const maxAttempts = 3;
+                            
+                            while (attempts < maxAttempts) {
+                                attempts++;
+                                try {
+                                    debugLog(`Attempting to open login modal (attempt ${attempts}/${maxAttempts})`);
+                                    
+                                    // Check if widget is properly initialized
+                                    if (typeof window.netlifyIdentity === 'undefined') {
+                                        throw new Error('Netlify Identity widget not found');
+                                    }
+
+                                    // Wait for any previous modal to close
+                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                    
+                                    // Force close any existing modal
+                                    try {
+                                        window.netlifyIdentity.close();
+                                    } catch (e) {
+                                        debugLog('No previous modal to close');
+                                    }
+
+                                    // Wait a bit after closing
+                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                    
+                                    // Open new modal
+                                    window.netlifyIdentity.open('login');
+                                    debugLog('Login modal opened successfully');
+                                    return true;
+                                } catch (e) {
+                                    debugLog(`Failed to open login modal (attempt ${attempts}): ${e.toString()}`, 'error');
+                                    if (attempts < maxAttempts) {
+                                        debugLog(`Retrying in ${attempts * 1000}ms...`);
+                                        await new Promise(resolve => setTimeout(resolve, attempts * 1000));
+                                    } else {
+                                        debugLog('Failed to open login modal after all attempts', 'error');
+                                        updateStatus('Failed to open login dialog', 'error');
+                                        if (window.electronAPI) {
+                                            window.electronAPI.handleAuthError({
+                                                code: 'LOGIN_MODAL_FAILED',
+                                                message: 'Failed to open login modal after multiple attempts',
+                                                details: e.toString()
+                                            });
+                                        }
+                                        return false;
+                                    }
+                                }
+                            }
+                        };
+                        
+                        // Start the login process
+                        waitForDOM().then(() => {
+                            debugLog('DOM is ready, starting login process');
+                            return new Promise(resolve => setTimeout(resolve, 1500));
+                        }).then(() => {
+                            return tryOpenLogin();
+                        }).catch(error => {
+                            debugLog('Login process failed: ' + error.toString(), 'error');
+                            if (window.electronAPI) {
+                                window.electronAPI.handleAuthError({
+                                    code: 'LOGIN_PROCESS_FAILED',
+                                    message: 'Login process failed',
+                                    details: error.toString()
+                                });
+                            }
+                        });
+                    }
+                });
+
+                window.netlifyIdentity.on('login', user => {
+                    debugLog('Login successful for user: ' + user.email);
+                    updateStatus('Login successful!', 'success');
+                    
+                    // Package user data
+                    const userData = {
+                        type: 'authorization',
+                        user: {
+                            email: user.email,
+                            id: user.id,
+                            token: user.token?.access_token,
+                            metadata: user.user_metadata
+                        }
+                    };
+
+                    try {
+                        if (window.electronAPI) {
+                            debugLog('Sending auth data via electronAPI');
+                            window.electronAPI.sendAuthToMain(userData);
+                        } else {
+                            debugLog('Sending auth data via postMessage');
+                            window.opener.postMessage(userData, 'https://lagiote-revise.netlify.app');
+                        }
+                    } catch (e) {
+                        debugLog('Failed to send auth data: ' + e.toString(), 'error');
+                        updateStatus('Failed to complete login process', 'error');
+                    }
+                    window.netlifyIdentity.on('login', async (user) => {
+                        try {
+                            debugLog('Login successful for user: ' + user.email);
+                            updateStatus('Login successful!', 'success');
+                        
+                            // Ensure we have all user data
+                            if (!user || !user.token) {
+                                throw new Error('Invalid user data received');
+                            }
+                        
+                            // Package user data
+                            const userData = {
+                                type: 'authorization',
+                                user: {
+                                    email: user.email,
+                                    id: user.id,
+                                    token: user.token?.access_token,
+                                    metadata: user.user_metadata
+                                }
+                            };
+
+                            // Wait a moment for any pending operations
+                            await new Promise(resolve => setTimeout(resolve, 500));
+
+                            debugLog('Preparing to send auth data');
+                        
+                            if (window.electronAPI) {
+                                debugLog('Sending auth data via electronAPI');
+                                window.electronAPI.sendAuthToMain(userData);
+                            } else {
+                                debugLog('Sending auth data via postMessage');
+                                window.opener.postMessage(userData, 'https://lagiote-revise.netlify.app');
+                            }
+
+                            debugLog('Auth data sent successfully');
+                        } catch (e) {
+                            debugLog('Failed to process login: ' + e.toString(), 'error');
+                            updateStatus('Failed to complete login process', 'error');
+                            if (window.electronAPI) {
+                                window.electronAPI.handleAuthError({
+                                    code: 'LOGIN_PROCESSING_FAILED',
+                                    message: 'Failed to process login data',
+                                    details: e.toString()
+                                });
+                            }
+                        }
+                    });
+
+                window.netlifyIdentity.on('logout', () => {
+                    debugLog('User logged out');
+                    updateStatus('Logged out');
+                });
+
+                window.netlifyIdentity.on('error', err => {
+                    const errorMsg = err.message || JSON.stringify(err);
+                    debugLog('Authentication error: ' + errorMsg, 'error');
+                    updateStatus('Authentication error: ' + errorMsg, 'error');
+                    
+                    if (window.electronAPI) {
+                        window.electronAPI.handleAuthError({
+                            message: errorMsg,
+                            code: err.code || 'UNKNOWN_ERROR',
+                            data: err
+                        });
+                    }
+                });
+
+                return true;
+            } catch (error) {
+                debugLog('Initialization error: ' + error.toString());
+                return false;
+            }
+        }
+
+        // Try initialization immediately when script loads
+        if (!tryInitialize()) {
+            debugLog('Initial attempt failed, will retry with delay');
+            // If it fails, try again after a delay
+            window.addEventListener('load', () => {
+                debugLog('Window loaded, trying again');
+                let attempts = 0;
+                const maxAttempts = 5;
+                
+                function attemptInit() {
+                    attempts++;
+                    debugLog(`Attempt ${attempts} of ${maxAttempts}`);
+                    
+                    if (!tryInitialize() && attempts < maxAttempts) {
+                        setTimeout(attemptInit, 1000);
+                    }
+                }
+                
+                setTimeout(attemptInit, 1000);
+            });
+        }
+    </script>
+</body>
+</html>

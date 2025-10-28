@@ -10,6 +10,50 @@ For v1.20 (final version before total redo):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lagiote Revise</title>
+    <script type="text/javascript" src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const isRunningInElectron = window.electronAPI?.isElectron;
+        
+        if (!isRunningInElectron) {
+          // Web version: Initialize Netlify Identity normally
+          if (netlifyIdentity) {
+            netlifyIdentity.init({
+              APIUrl: 'https://lagiote-revise.netlify.app/.netlify/identity'
+            });
+          }
+                } else {
+                    // Electron: accounts are not yet supported in the packaged app.
+                    // Disable the buttons and show a 'Coming Soon' hint so users aren't routed
+                    // into the fragile auth flow until we stabilise it.
+                    function markComingSoon(id) {
+                        const btn = document.getElementById(id);
+                        if (!btn) return;
+                        try {
+                            btn.disabled = true;
+                            // append small hint
+                            btn.textContent = btn.textContent + ' — Coming Soon (App version)';
+                            btn.classList.add('btn-secondary');
+                            btn.title = 'Accounts are available in the web version. Sign in on the website for now.';
+                            btn.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                alert('Account sign-in is not available in the Electron app yet. Please use the web app to sign in.');
+                            });
+                        } catch (err) {
+                            console.warn('Failed to mark button coming soon', err);
+                        }
+                    }
+
+                    markComingSoon('authSignupBtn');
+                    markComingSoon('authLoginBtn');
+                }
+
+        // Common event handlers for both platforms
+        window.electronAPI?.onAuthWindowClosed(() => {
+          console.log('Auth window closed');
+        });
+      });
+    </script>
     <script id="termly-script" data-src="https://app.termly.io/resource-blocker/acc0f1f0-9746-4ec5-a629-1def23043b13?autoBlock=on"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-86DQ5HTDV9"></script>
@@ -20,12 +64,63 @@ For v1.20 (final version before total redo):
 
     gtag('config', 'G-86DQ5HTDV9');
     </script>
-    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+    <script>
+        async function loadNetlifyIdentity() {
+            if (!navigator.onLine) {
+            console.warn("Offline mode: Netlify Identity disabled");
+            window.netlifyOffline = true;
+            return;
+            }
+
+            const script = document.createElement('script');
+            script.src = "https://identity.netlify.com/v1/netlify-identity-widget.js";
+            script.onload = () => {
+            console.log("Netlify Identity loaded");
+
+            if (window.netlifyIdentity) {
+                window.netlifyIdentity.on('login', user => {
+                console.log("🔐 Logged in:", user.email);
+                localStorage.setItem('userToken', user.token.access_token);
+                document.dispatchEvent(new CustomEvent('user-logged-in', { detail: user }));
+                });
+
+                window.netlifyIdentity.on('logout', () => {
+                console.log("👋 Logged out");
+                localStorage.removeItem('userToken');
+                });
+
+                window.netlifyIdentity.init();
+            }
+            };
+            document.head.appendChild(script);
+        }
+
+        window.addEventListener('online', () => {
+            console.log("🌐 Back online: reloading identity...");
+            loadNetlifyIdentity();
+        });
+
+        window.addEventListener('offline', () => {
+            console.warn("📴 Offline mode activated");
+            window.netlifyOffline = true;
+        });
+
+        window.addEventListener('DOMContentLoaded', loadNetlifyIdentity);
+    </script>
     <script src="./assets/js/pdf.min.js"></script>
     <script src="./assets/js/mammoth.browser.min.js"></script>
     <script src="./assets/js/chart.js"></script>
+    <script>
+    if (window.netlifyIdentity) {
+        window.netlifyIdentity.on('login', async (user) => {
+        const token = user.token.access_token;
+        window.opener?.postMessage({ type: 'AUTH_TOKEN', token }, '*');
+        });
+    }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
+    <script type="module" src="./assets/js/syncManager.js"></script>
     <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
@@ -371,6 +466,12 @@ For v1.20 (final version before total redo):
             background-color: var(--input-focus-bg);
             /* Adds a modern shadow effect on focus */
             box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+        /* Ensure Sequence description uses brand font (Inter) */
+        .sequence-desc-input {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
+            line-height: 1.45;
         }
         .form-section { margin-bottom: 40px; }
         .form-row { display: flex; gap: 20px; margin-bottom: 25px; }
@@ -3659,14 +3760,27 @@ For v1.20 (final version before total redo):
 
 
     function isEditorClean() {
-        const title = document.getElementById('deckTitle').value.trim();
+        // Defensive: editor supports multiple card types (Standard Q/A and Sequence).
+        // Some card markup uses .question-input/.solution-input while Sequence uses
+        // .sequence-term-input/.sequence-desc-input. Guard against missing elements.
+        const titleEl = document.getElementById('deckTitle');
+        const title = titleEl ? (titleEl.value || '').trim() : '';
         if (title) return false;
+
         const cardItems = document.querySelectorAll('#editorView .flashcard-item');
         for (const item of cardItems) {
-            const q = item.querySelector('.question-input').value.trim();
-            const a = item.querySelector('.solution-input').value.trim();
-            const qImg = item.querySelector('.question-image-input').value.trim();
-            const aImg = item.querySelector('.answer-image-input').value.trim();
+            // Try all possible selectors for term/question and answer/description
+            const qEl = item.querySelector('.question-input') || item.querySelector('.sequence-desc-input') || item.querySelector('.sequence-term-input');
+            const aEl = item.querySelector('.solution-input') || item.querySelector('.sequence-term-input') || item.querySelector('.sequence-desc-input');
+
+            const q = qEl ? ((qEl.value || '').trim()) : '';
+            const a = aEl ? ((aEl.value || '').trim()) : '';
+
+            const qImgEl = item.querySelector('.question-image-input');
+            const aImgEl = item.querySelector('.answer-image-input');
+            const qImg = qImgEl ? ((qImgEl.value || '').trim()) : '';
+            const aImg = aImgEl ? ((aImgEl.value || '').trim()) : '';
+
             if (q || a || qImg || aImg) return false;
         }
         return true;
@@ -7722,6 +7836,18 @@ For v1.20 (final version before total redo):
         }
 
         async function loadUserDataAndSync() {
+            if (navigator.onLine) { // For Offline electron app
+                const token = localStorage.getItem('userToken');
+                const result = await window.electronAPI.syncData({ decks: [deck], token });
+                if (result?.success !== false) {
+                console.log("Deck synced immediately");
+                return;
+                }
+                queueForSync(deck);
+            } else {
+                queueForSync(deck);
+            }
+
             if (!isOnline) {
                 await updateDashboard();
                 return;

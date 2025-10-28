@@ -28,6 +28,14 @@
     resize: vertical;
 }
 
+/* Ensure the Sequence description textarea uses the brand Inter font
+   The description field is rendered with class .sequence-desc-input in index.html */
+.sequence-desc-input {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    line-height: 1.45;
+}
+
 .sequence-inputs textarea:focus {
     border-color: var(--primary-color);
     outline: none;

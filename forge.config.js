@@ -1,4 +1,3 @@
-// forge.config.js
 
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
@@ -8,7 +7,11 @@ module.exports = {
     asar: true,
     icon: './assets/dmg-background.png',
   },
-  rebuildConfig: {},
+  rebuildConfig: {
+    "forge": {
+    "packagerConfig": {
+      "icon": "assets/logo/icon" 
+  },
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
