@@ -18,10 +18,14 @@ exports.handler = async (event, context) => {
             for (const deck of dirtyDecks) {
                 await client.query(
                     `INSERT INTO decks (id, owner_id, data, last_modified)
-                     VALUES ($1, $2, $3, NOW())
-                     ON CONFLICT (id) DO UPDATE SET data = $3, last_modified = NOW()`,
+                    VALUES ($1, $2, $3, NOW())
+                    ON CONFLICT (id) DO UPDATE 
+                        SET data = EXCLUDED.data, 
+                            last_modified = NOW()
+                        WHERE decks.owner_id = $2`,
                     [deck.id, user.sub, deck] 
                 );
+
             }
         }
 

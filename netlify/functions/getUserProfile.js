@@ -5,19 +5,20 @@ exports.handler = async (event, context) => {
 
     if (!user) {
         return {
-            statusCode: 401, // Unauthorized
+            statusCode: 401,
             body: JSON.stringify({ error: 'You must be logged in to access this.' }),
         };
     }
 
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const client = await pool.connect(); 
 
     try {
-        const result = await pool.query('SELECT * FROM users WHERE id = $1', [user.sub]);
+        const result = await client.query('SELECT * FROM users WHERE id = $1', [user.sub]);
 
         let userProfile;
         if (result.rows.length === 0) {
-            const newUser = await pool.query(
+            const newUser = await client.query( 
                 'INSERT INTO users (id, email) VALUES ($1, $2) RETURNING *',
                 [user.sub, user.email]
             );
@@ -35,6 +36,6 @@ exports.handler = async (event, context) => {
         console.error('Database Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error.' }) };
     } finally {
-        await pool.end();
+        client.release(); 
     }
 };

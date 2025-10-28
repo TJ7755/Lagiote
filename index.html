@@ -2502,6 +2502,10 @@
         document.getElementById('authLoginBtn').addEventListener('click', () => netlifyIdentity.open('login'));
         document.getElementById('continueAsGuestBtn').addEventListener('click', () => {
             localStorage.setItem('hasBeenGuest', 'true');
+            const appHeader = document.getElementById('appHeader');
+            if (appHeader) {
+                appHeader.classList.remove('hidden');
+            }
             showView('dashboard');
             const loggedInEl = document.getElementById('loggedInView');
             if (loggedInEl) {
