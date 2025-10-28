@@ -1,5 +1,7 @@
 <!--
-
+For v1.20 (final version before total redo):
+    1. Sequence Practice tests. This is going to be sooooo good!
+    2. Update analytics so it looks more user friendly and similar to Memory Insights - more charts and more prominence.
 -->
 
 <!DOCTYPE html>
@@ -375,7 +377,7 @@
         .form-group { flex: 1; }
         .form-group.full-width { flex: 1 1 100%; }
         .form-group label { font-size: 16px; }
-        .form-group input, .form-group textarea { padding: 15px 15px !important; border-radius: 10px !important; font-size: 16px !important; margin-bottom: 10px; resize: vertical; font-family: 'Inter', sans-serif; font-weight: bold;}
+        .form-group input, .form-group textarea { padding: 15px 15px !important; border-radius: 10px !important; font-size: 16px !important; margin-bottom: 10px; resize: vertical; font-family: 'Inter', sans-serif;}
         .flashcard-editor-row {
             display: flex;
             align-items: center; 
@@ -463,14 +465,14 @@
         .settings-option-group {
             border: 2px solid var(--border-color);
             border-radius: 12px;
-            padding: 10px 15px 15px 15px; /* Top padding is smaller due to legend */
+            padding: 10px 15px 15px 15px; 
             margin-top: 10px;
         }
 
         .settings-option-group legend {
             font-weight: 600;
             color: var(--text-color);
-            padding: 0 8px; /* Creates a clean break in the fieldset border */
+            padding: 0 8px; 
             margin-left: 10px;
             font-size: 0.95rem;
         }
@@ -640,9 +642,27 @@
         .view-container.hidden {
             display: none !important;
         }
+
+        #userProfileDropdown a:hover {
+            background-color: var(--input-bg);
+        }
+
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
     </style>
 </head>
 <body>
+    <div id="loadingView" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--bg-color); z-index: 9999; display: flex; justify-content: center; align-items: center;">
+        <div style="text-align: center;">
+            <img src="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png" alt="Lagiote Revise Logo" style="width: 80px; height: 80px; margin-bottom: 20px;">
+            <div class="spinner" style="width: 30px; height: 30px; border-width: 4px; margin: 0 auto 20px auto;"></div>
+            <p id="loadingMessage" style="font-size: 1.1rem; color: var(--secondary-text); font-weight: 500;">Loading...</p>
+        </div>
+    </div>
     <div id="dynamicToast" class="toast"></div>
     <div id="authView" class="container view-container">
         <div style="text-align: center; max-width: 600px;">
@@ -694,7 +714,17 @@
             <button id="headerSettingsBtn" class="header-btn header-settings-btn" title="Settings" onclick="showSettings()">
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.39.44 1.02.12 1.45l-.527.737c-.25.35-.272.806-.108 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.11v1.093c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.108 1.204l.527.738c.32.43.27.96-.12 1.45l-.773.773a1.125 1.125 0 0 1-1.45.12l-.737-.527c-.35-.25-.806-.272-1.204-.108-.397.165-.71.505-.78.93l-.15.893c-.09.543-.56.94-1.11.94h-1.093c-.55 0-1.02-.398-1.11-.94l-.149-.894c-.07-.424-.384-.764-.78-.93-.398-.164-.855-.142-1.205.108l-.737.527a1.125 1.125 0 0 1-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.11v-1.093c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.527-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.806.272 1.204.108.397-.165.71.505.78-.93l.15-.893Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
             </button>
-            <div data-netlify-identity-menu></div>
+            <div id="userProfileMenu" class="hidden" style="position: relative;">
+                <button id="userProfileBtn" class="header-btn" title="Profile">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                    </svg>
+                </button>
+                <div id="userProfileDropdown" class="hidden" style="position: absolute; right: 0; top: 50px; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 4px 12px var(--shadow-color); min-width: 220px; z-index: 101; padding: 10px; text-align: left;">
+                    <div id="userEmail" style="padding: 8px 12px; color: var(--secondary-text); border-bottom: 1px solid var(--border-color); margin-bottom: 8px; font-size: 0.9rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
+                    <a id="logoutBtn" href="#" style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px;">Log Out</a>
+                </div>
+            </div>
         </div>
     </header>
     
@@ -765,7 +795,7 @@
                 </div>
                 <div class="dashboard-footer">
                     <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
-                    <button class="btn btn-secondary" onclick="showAnalyticsModal()">Show Analytics</button>
+                    <button class="btn btn-secondary" onclick="showAnalyticsView()">Show Analytics</button>
                     <button id="createExamPlanFooterBtn" class="btn btn-secondary hidden" onclick="showExamPlanModal()">Create Exam Plan</button>
                     <button id="internalDashboardBtn" class="btn btn-secondary" onclick="showInternalAnalytics()" style="margin-left: 10px;">Internal Dashboard</button>
                 </div>
@@ -1409,7 +1439,7 @@
         <p>Bundle decks and set a date to create an automated study schedule.</p>
         <div class="form-group">
             <label for="examPlanName">Plan Name</label>
-            <input type="text" id="examPlanName" placeholder="e.g., Biology Midterm">
+            <input type="text" id="examPlanName" placeholder="e.g., Biology GCSE">
         </div>
         <div class="form-group">
             <label for="examPlanDate">Exam Date</label>
@@ -1443,7 +1473,6 @@
          <p>Let's pick up where you left off. Ready to continue?</p>
          <div class="modal-actions">
             <button id="resumeStudyBtn" class="btn btn-success">Continue</button>
-            <button id="restartCardBtn" class="btn btn-secondary">Restart This Card</button>
          </div>
     </div>
 </div>
@@ -1631,22 +1660,40 @@
     </div>
 </div>
 
-<div id="analyticsModal" class="modal">
-    <div class="modal-content" style="max-width: 700px;">
-        <span class="close" onclick="this.parentElement.classList.remove('show')">&times;</span>
-        <h2>Analytics</h2>
-        <div class="stats" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 30px;">
+<div id="analyticsView" class="container view-container">
+    <div class="section-title" style="padding-top: 20px;">Your Learning Analytics</div>
+    
+    <div class="settings-container" style="margin-bottom: 30px;">
+        <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
             <div class="stat">
                 <div class="stat-value" id="analyticsStreak">0 days</div>
-                <div class="stat-label">Current Streak</div>
+                <div class="stat-label">Current Study Streak</div>
             </div>
             <div class="stat">
                 <div class="stat-value" id="analyticsTotalTime">0m</div>
                 <div class="stat-label">Total Study Time</div>
             </div>
+            <div class="stat">
+                <div class="stat-value" id="analyticsTotalSessions">0</div>
+                <div class="stat-label">Total Sessions</div>
+            </div>
         </div>
-        <h4>Session History</h4>
-        <div id="analyticsSessionList" style="max-height: 300px; overflow-y: auto; margin-top: 15px;">
+    </div>
+
+    <div class="analytics-grid">
+        <div class="settings-container">
+            <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Activity (Last 7 Days)</h3>
+            <canvas id="analyticsActivityChart"></canvas>
+        </div>
+        <div class="settings-container">
+            <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Time per Deck</h3>
+            <canvas id="analyticsDeckBreakdownChart"></canvas>
+        </div>
+    </div>
+
+    <div class="settings-container" style="margin-top: 30px;">
+        <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Recent Sessions</h3>
+        <div id="analyticsSessionList" style="max-height: 300px; overflow-y: auto;">
             <p>No study sessions recorded yet.</p>
         </div>
     </div>
@@ -2689,6 +2736,27 @@
         fileInput.addEventListener('change', () => handleAiFiles(fileInput.files));
         document.getElementById('add-text-btn').addEventListener('click', addTextAsDocument);
         document.getElementById('process-btn').addEventListener('click', processAllDocuments);
+
+        document.getElementById('userProfileBtn').addEventListener('click', (e) => {
+            e.stopPropagation(); 
+            document.getElementById('userProfileDropdown').classList.toggle('hidden');
+        });
+
+        document.getElementById('logoutBtn').addEventListener('click', (e) => {
+            e.preventDefault();
+            netlifyIdentity.logout();
+        });
+
+        document.getElementById('deckTypeHint').addEventListener('change', (e) => {
+            toggleEditorView(e.target.value);
+        });
+
+        window.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('userProfileDropdown');
+            if (!dropdown.classList.contains('hidden') && !e.target.closest('#userProfileMenu')) {
+                dropdown.classList.add('hidden');
+            }
+        });
     }
     
     function showToast(message, type = 'info', duration = 3000, icon = null) {
@@ -2747,6 +2815,9 @@
 
         switch (context) {
             case 'dashboardLoad':
+                if (!globalSettings.username || activeView !== 'dashboard') {
+                    return; 
+                }
                 const today = new Date().toDateString();
                 if (analyticsData.lastGreetingDate !== today) {
                     if (analyticsData.streak > 1) {
@@ -2849,6 +2920,7 @@
         document.querySelector('.search-bar').style.display = isDashboard ? 'flex' : 'none';
         document.getElementById('headerSettingsBtn').style.display = isDashboard ? 'flex' : 'none';
         document.getElementById('headerBackBtn').classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
+        document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
         
         document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
 
@@ -2913,7 +2985,23 @@
         }
     }
 
-    function showEditor() { showView('editorView'); editorInitialize(); }
+    function showEditor() { 
+        showView('editorView');
+        editorInitialise();
+
+        const container = document.getElementById('flashcardsContainer');
+        if (sortableInstance) {
+            sortableInstance.destroy();
+        }
+        sortableInstance = new Sortable(container, {
+            animation: 150,
+            handle: '.drag-handle', 
+            ghostClass: 'drag-ghost',
+            onEnd: () => {
+                editorRenumberCards(); 
+            }
+        });
+    }
 
     async function showSettings() {
         const settings = await getDataFromDB('appData', 'userSettings');
@@ -2929,7 +3017,6 @@
                 'You have unsaved changes. Are you sure you want to leave?',
                 () => { 
                     transitionView('dashboard'); 
-                    // After confirming, we still need to reset the dashboard state.
                     if (currentDeckId && currentMode) endSession();
                     resetDashboardState(true); // Call our new helper
                 }
@@ -3476,14 +3563,17 @@
         populateCategoryDropdowns();
         document.getElementById('deckCategory').value = 'Other';
         document.getElementById('deckNotes').value = '';
-        const container = document.getElementById('flashcardsContainer');
-        container.innerHTML = '';
+        document.getElementById('deckTypeHint').value = 'General';
         editorCardCounter = 0;
-        editorAddNewCard();
-        editorAddNewCard();
-        document.getElementById('deckTitle').focus();
         currentDeckId = null;
+
+        toggleEditorView('General'); 
+
+        editorAddNewCard('General');
+        editorAddNewCard('General');
+        document.getElementById('deckTitle').focus();
     }
+
 
     function isEditorClean() {
         const title = document.getElementById('deckTitle').value.trim();
@@ -3499,7 +3589,7 @@
         return true;
     }
 
-    function editorAddNewCard(card = {}) {
+    function editorAddNewStandardCard(card = {}) {
         const { id = null, question = '', answer = '', questionImage = '', answerImage = '', order = '' } = card;
         editorCardCounter++;
         const container = document.getElementById('flashcardsContainer');
@@ -3540,7 +3630,12 @@
                 <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
                 <input type="hidden" class="answer-image-input" value="${answerImage}">
             </div>
-            <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>`;
+            <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
+            <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                </svg>
+            </div> `;
         
         container.appendChild(newRow);
         
@@ -3551,6 +3646,39 @@
         if (!question && !answer) newRow.querySelector('.question-input').focus();
     }
 
+    function editorAddNewCard(type, card = {}) {
+        if (type === 'Sequence') {
+            editorAddNewSequenceCard(card);
+        } else {
+            editorAddNewStandardCard(card);
+        }
+        editorRenumberCards();
+    }
+
+    function editorAddNewSequenceCard(card = {}) {
+        const { question = '', answer = '' } = card; 
+        editorCardCounter++;
+        const container = document.getElementById('flashcardsContainer');
+
+        const newRow = document.createElement('div');
+        newRow.className = 'flashcard-editor-row drag-item';
+        newRow.setAttribute('data-card-id', editorCardCounter);
+
+        newRow.innerHTML = `
+            <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text); display: flex; align-items: center;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>
+            </div>
+            <div class="flashcard-item" data-original-id="${card.id || ''}" style="padding: 15px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div class="flashcard-number" style="font-weight: 600; color: var(--secondary-text);"></div>
+                    <input type="text" class="sequence-term-input" placeholder="Enter Sequence Term..." value="${answer}" style="flex-grow: 1; border: none; background: transparent; font-size: 1.1rem; padding: 5px;">
+                    <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})" style="position: static; flex-shrink: 0;">&times;</button>
+                </div>
+                <textarea class="sequence-desc-input" placeholder="Add optional description..." style="width: 100%; border: none; background: transparent; margin-top: 10px; padding: 5px; font-size: 0.9rem; resize: none; min-height: 25px;">${question}</textarea>
+            </div>`;
+        container.appendChild(newRow);
+        if (!answer) newRow.querySelector('.sequence-term-input').focus();
+    }
     
     function triggerImageUpload(button) {
         button.closest('.image-controls').nextElementSibling.nextElementSibling.click();
@@ -3619,14 +3747,16 @@
     }
 
     function editorRenumberCards() {
+        const deckType = document.getElementById('deckTypeHint').value;
         const cardRows = document.querySelectorAll('#editorView .flashcard-editor-row');
         cardRows.forEach((row, index) => {
-            const cardItem = row.querySelector('.flashcard-item');
-            if (cardItem) {
-                cardItem.querySelector('.flashcard-number').textContent = `${index + 1}.`;
+            const numberElement = row.querySelector('.flashcard-number');
+            if (numberElement) {
+                numberElement.textContent = `${index + 1}.`;
             }
         });
     }
+
 
     async function editorSaveDeck() {
         const saveBtn = document.querySelector('.editor-container .actions-section .btn-success');
@@ -3634,93 +3764,120 @@
         saveBtn.innerHTML = '<span class="spinner" style="border-width:2px; width:16px; height:16px;"></span> Saving...';
         saveBtn.disabled = true;
 
-        const name = document.getElementById('deckTitle').value.trim();
-        const category = document.getElementById('deckCategory').value;
-        const notes = document.getElementById('deckNotes').value.trim();
-        const typeHint = document.getElementById('deckTypeHint').value;
+        try {
+            const name = document.getElementById('deckTitle').value.trim();
+            const category = document.getElementById('deckCategory').value;
+            const notes = document.getElementById('deckNotes').value.trim();
+            const typeHint = document.getElementById('deckTypeHint').value;
 
-        if (!name) { 
-            showToast('Please enter a title for your deck.', 'error');
-            saveBtn.innerHTML = originalText;
-            saveBtn.disabled = false;
-            return; 
-        }
-        
-        const cards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map(el => {
-            const orderInput = el.querySelector('.card-order-input');
-            const originalId = el.dataset.originalId; 
-            return {
-                id: originalId ? originalId : Date.now() + Math.random(),
-                question: el.querySelector('.question-input').value.trim(),
-                answer: el.querySelector('.solution-input').value.trim(),
-                questionImage: el.querySelector('.question-image-input').value.trim(),
-                answerImage: el.querySelector('.answer-image-input').value.trim(),
-                order: orderInput ? parseInt(orderInput.value) : 0,
-                isNew: !originalId
-            };
-        }).filter(c => c.question || c.questionImage);
-
-        if (cards.length === 0) { 
-            showToast('Please add at least one complete flashcard.', 'error');
-            saveBtn.innerHTML = originalText;
-            saveBtn.disabled = false;
-            return; 
-        }
-
-        const newCards = cards.filter(c => c.isNew);
-        if (newCards.length > 0) {
-            try {
-                await new Promise((resolve, reject) => {
-                    const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
-                    const stateStore = transaction.objectStore('userKnowledgeState');
-                    transaction.oncomplete = resolve;
-                    transaction.onerror = reject;
-
-                    newCards.forEach(card => {
-                        stateStore.put({
-                            userID: 'default_user',
-                            cardID: card.id,
-                            masteryScore: 0.5,
-                            stability: 1.0,
-                            lastReviewed: new Date().toISOString(),
-                            recallHistory: []
-                        });
-                        card.isNew = false; 
-                    });
-                });
-            } catch (error) {
-                console.error("Failed to save knowledge state for new cards:", error);
-                showToast("Error saving new cards' progress.", "error");
+            if (!name) { 
+                showToast('Please enter a title for your deck.', 'error');
                 saveBtn.innerHTML = originalText;
                 saveBtn.disabled = false;
                 return; 
             }
-        }
-        
-        const tempDeck = { name, category, cards, notes, typeHint };
-        showToast("Analysing deck content...", "info", 2000);
-        await processDeckContent(tempDeck);
+            
+            let cards = [];
+            if (typeHint === 'Sequence') {
+                cards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map((el, index) => {
+                    const originalId = el.dataset.originalId;
+                    const term = el.querySelector('.sequence-term-input').value.trim();
+                    const description = el.querySelector('.sequence-desc-input').value.trim();
 
-        if (currentDeckId) {
-            const deck = decks[currentDeckId];
-            deck.name = name;
-            deck.category = category;
-            deck.cards = tempDeck.cards;
-            deck.notes = notes;
-            deck.typeHint = typeHint;
-            await saveDataToDB('decks', deck);
-        } else {
-            await createNewDeck(name, category, tempDeck.cards, notes, typeHint);
+                    if (!term) return null; 
+
+                    return {
+                        id: originalId || Date.now() + Math.random(),
+                        question: description,
+                        answer: term, 
+                        order: index + 1,
+                        isNew: !originalId,
+                        questionImage: '',
+                        answerImage: ''
+                    };
+                }).filter(Boolean); 
+            } else {
+                cards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map(el => {
+                    const originalId = el.dataset.originalId;
+                    return {
+                        id: originalId ? originalId : Date.now() + Math.random(),
+                        question: el.querySelector('.question-input').value.trim(),
+                        answer: el.querySelector('.solution-input').value.trim(),
+                        questionImage: el.querySelector('.question-image-input').value.trim(),
+                        answerImage: el.querySelector('.answer-image-input').value.trim(),
+                        order: 0,
+                        isNew: !originalId
+                    };
+                }).filter(c => c.question || c.questionImage);
+            }
+
+            if (cards.length === 0) { 
+                showToast('Please add at least one complete flashcard.', 'error');
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+                return; 
+            }
+
+            const newCards = cards.filter(c => c.isNew);
+            if (newCards.length > 0) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
+                        const stateStore = transaction.objectStore('userKnowledgeState');
+                        transaction.oncomplete = resolve;
+                        transaction.onerror = reject;
+
+                        newCards.forEach(card => {
+                            stateStore.put({
+                                userID: 'default_user',
+                                cardID: card.id,
+                                masteryScore: 0.5,
+                                stability: 1.0,
+                                lastReviewed: new Date().toISOString(),
+                                recallHistory: []
+                            });
+                            card.isNew = false; 
+                        });
+                    });
+                } catch (error) {
+                    console.error("Failed to save knowledge state for new cards:", error);
+                    showToast("Error saving new cards' progress.", "error");
+                    saveBtn.innerHTML = originalText;
+                    saveBtn.disabled = false;
+                    return; 
+                }
+            }
+            
+            const tempDeck = { name, category, cards, notes, typeHint };
+            showToast("Analysing deck content...", "info", 2000);
+            await processDeckContent(tempDeck);
+
+            if (currentDeckId) {
+                const deck = decks[currentDeckId];
+                deck.name = name;
+                deck.category = category;
+                deck.cards = tempDeck.cards;
+                deck.notes = notes;
+                deck.typeHint = typeHint;
+                await saveDataToDB('decks', deck);
+            } else {
+                await createNewDeck(name, category, tempDeck.cards, notes, typeHint);
+            }
+            if (isOnline) {
+                loadUserDataAndSync(); 
+            } else {
+                showToast("Deck saved locally. It will sync when you're next online.", "info");
+            }
+            
+            document.getElementById('deckTitle').value = '';
+            document.getElementById('flashcardsContainer').innerHTML = '';
+            backToDashboard();
+        } catch (error) {
+            console.error("Failed to save deck", error);
+            showToast("Could not save deck. Please retry.", "error");
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
         }
-        if (isOnline) {
-            loadUserDataAndSync(); 
-        } else {
-            showToast("Deck saved locally. It will sync when you're next online.", "info");
-        }
-        
-        document.getElementById('deckTitle').value = '';
-        document.getElementById('flashcardsContainer').innerHTML = '';
-        backToDashboard();
     }
     
     function checkName() {
@@ -4519,6 +4676,9 @@
             const card = studyState.roundCards[studyState.currentCardIndex];
             if (!card || userInput.value.trim() === '') return;
 
+            const feedbackMessage = document.getElementById('feedbackMessage');
+            feedbackMessage.innerHTML = ''; 
+
             const submissionTime = performance.now();
             const recallLatency = currentInteractionLog.firstKeyPressTime ? Math.round(currentInteractionLog.firstKeyPressTime - currentInteractionLog.questionLoadTime) : null;
             let answerFluency = 0;
@@ -4568,7 +4728,6 @@
 
                 case 'TYPO':
                     userInput.classList.add('correct'); 
-                    const feedbackMessage = document.getElementById('feedbackMessage');
                     feedbackMessage.textContent = `So close! The correct answer is: ${correctAnswer}`;
                     feedbackMessage.style.color = 'var(--primary-color)';
 
@@ -4584,6 +4743,10 @@
                     userInput.classList.add('incorrect');
                     logInteraction({ cardID: card.id, wasCorrect: false, userAnswer, recallLatency, answerFluency, totalCorrections: 0, attemptCount: 1, questionType: questionTypeForLog });
 
+                    const diffHtml = generateDiffHTML(userAnswer, correctAnswer);
+                    feedbackMessage.innerHTML = `<strong>Your answer:</strong> ${diffHtml}`;
+                    feedbackMessage.style.color = 'var(--text-color)';
+
                     if (studyState.settings.retypeIncorrect) {
                         studyState.isRetypingIncorrect = true;
                         userInput.disabled = false;
@@ -4595,7 +4758,10 @@
                         showToast("Not quite. Type the correct answer to continue.", "error", 3000);
                     } else {
                         showToast("Not quite.", "error");
-                        setTimeout(() => moveCard(card, false, questionTypeForLog), 2000);
+                        setTimeout(() => {
+                            feedbackMessage.innerHTML = '';
+                            moveCard(card, false, questionTypeForLog);
+                        }, 2500);
                     }
                     break;
             }
@@ -4661,7 +4827,7 @@
                             showNextCard();
                         }
                     } else {
-                        showToast("Not quite. Let's try that one again.", "error");
+                        showToast("Let's try that one again.", "error");
                         showNextCard(); 
                     }
                 } else if (studyState.sequencePhase === 'Backward Chaining') {
@@ -4673,7 +4839,7 @@
                             showNextCard();
                         }
                     } else {
-                        showToast("Not quite. Let's try that one again.", "error");
+                        showToast("Let's try that one again.", "error");
                         showNextCard(); 
                     }
                 } else if (studyState.sequencePhase === 'InterChunkReview') {
@@ -5515,25 +5681,120 @@
             await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
         }
 
-        function showAnalyticsModal() {
+        async function showAnalyticsView() {
+            const sessions = analyticsData.sessions || [];
+
+            const activityData = {
+                labels: [],
+                data: []
+            };
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                const dayString = date.toLocaleDateString('en-US', { weekday: 'short' });
+                activityData.labels.push(dayString);
+
+                const startOfDay = new Date(date).setHours(0, 0, 0, 0);
+                const endOfDay = new Date(date).setHours(23, 59, 59, 999);
+
+                const totalMinutes = sessions
+                    .filter(s => {
+                        const sessionDate = new Date(s.date).getTime();
+                        return sessionDate >= startOfDay && sessionDate <= endOfDay;
+                    })
+                    .reduce((sum, s) => sum + (s.duration || 0), 0) / 60;
+                
+                activityData.data.push(Math.round(totalMinutes));
+            }
+
+            const deckBreakdown = sessions.reduce((acc, session) => {
+                const deckName = session.deckName || 'Unknown';
+                acc[deckName] = (acc[deckName] || 0) + (session.duration || 0);
+                return acc;
+            }, {});
+            
+            const deckData = {
+                labels: Object.keys(deckBreakdown),
+                data: Object.values(deckBreakdown).map(d => Math.round(d / 60)), 
+            };
+
             document.getElementById('analyticsStreak').textContent = `${analyticsData.streak} day${analyticsData.streak === 1 ? '' : 's'}`;
             const totalMinutes = Math.round(analyticsData.totalStudyTime / 60);
             document.getElementById('analyticsTotalTime').textContent = `${totalMinutes}m`;
+            document.getElementById('analyticsTotalSessions').textContent = sessions.length;
 
             const sessionList = document.getElementById('analyticsSessionList');
-            if (analyticsData.sessions.length > 0) {
-                sessionList.innerHTML = analyticsData.sessions.map(s => {
+            if (sessions.length > 0) {
+                sessionList.innerHTML = sessions.map(s => {
                     const date = new Date(s.date).toLocaleString();
                     const duration = `${Math.round(s.duration / 60)}m`;
-                    const accuracyText = s.accuracy !== undefined ? ` - ${s.accuracy}% acc` : '';
-                    return `<div class="deck-card-item">${date}: Studied "${s.deckName}" (${s.mode}) for ${duration}${accuracyText}</div>`;
+                    return `<div class="deck-card-item">${date}: Studied "${s.deckName}" for ${duration}</div>`;
                 }).join('');
             } else {
                 sessionList.innerHTML = '<p style="color: var(--secondary-text); text-align: center;">No study sessions recorded yet.</p>';
             }
 
-            document.getElementById('analyticsModal').classList.add('show');
+            showView('analyticsView', false, () => {
+                renderAnalyticsActivityChart(activityData);
+                renderAnalyticsDeckBreakdownChart(deckData);
+            });
         }
+
+        function renderAnalyticsActivityChart(activityData) {
+            const canvasId = 'analyticsActivityChart';
+            if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            chartInstances[canvasId] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: activityData.labels,
+                    datasets: [{
+                        label: 'Minutes Studied',
+                        data: activityData.data,
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // Add this new function to render the deck breakdown chart
+        function renderAnalyticsDeckBreakdownChart(deckData) {
+            const canvasId = 'analyticsDeckBreakdownChart';
+            if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+            const ctx = document.getElementById(canvasId).getContext('2d');
+
+            if (deckData.labels.length === 0) {
+                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                 ctx.font = "16px 'Inter'";
+                 ctx.fillStyle = "var(--secondary-text)";
+                 ctx.textAlign = "center";
+                 ctx.fillText("No study data per deck yet.", ctx.canvas.width / 2, ctx.canvas.height / 2);
+                 return;
+            }
+
+            chartInstances[canvasId] = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: deckData.labels,
+                    datasets: [{
+                        label: 'Minutes per Deck',
+                        data: deckData.data,
+                        backgroundColor: ['#667eea', '#4ecdc4', '#fd79a8', '#fab1a0', '#a29bfe', '#74b9ff', '#55efc4'],
+                        borderColor: 'var(--card-bg)',
+                        borderWidth: 4
+                    }]
+                },
+                options: { responsive: true, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+            });
+        }
+
 
         function showDownloadsModal() {
             document.getElementById('downloadsModal').classList.add('show');
@@ -5970,35 +6231,61 @@
 
         async function generateAndDisplayMCQ(correctCard) {
             const optionsContainer = document.getElementById('mcqOptions');
-            
             const deckForThisCard = decks[correctCard.deckId];
-            if (!deckForThisCard) {
-                console.error("Could not find deck for MCQ generation.");
-                showAnswer();
+
+            if (correctCard.distractors && correctCard.distractors.length >= 3) {
+                console.log("Using cached distractors for card:", correctCard.id);
+                const finalOptions = shuffleArray([correctCard.answer, ...correctCard.distractors]);
+                displayMCQButtons(finalOptions, correctCard);
                 return;
             }
-            const allCardsInDeck = deckForThisCard.cards;
 
-            const preGeneratedDistractors = studyState.preGeneratedDistractors.get(correctCard.id);
+            if (isOnline) {
+                console.log("No cached data. Calling API to generate distractors for card:", correctCard.id);
+                try {
+                    const requestBody = { question: correctCard.question, answer: correctCard.answer };
+                    let generatedDistractors;
 
-            if (preGeneratedDistractors && preGeneratedDistractors.length >= 3) {
-                const finalOptions = shuffleArray([correctCard.answer, ...preGeneratedDistractors.slice(0, 3)]);
-                displayMCQButtons(finalOptions, correctCard);
-            } else {
-                if (isOnline && preGeneratedDistractors !== undefined) { // Check if it tried and failed
+                    if (isElectron) {
+                        generatedDistractors = await window.electronAPI.generateDistractors(requestBody);
+                    } else {
+                        const response = await fetch('/.netlify/functions/generateDistractors', {
+                            method: 'POST',
+                            body: JSON.stringify(requestBody)
+                        });
+                        if (!response.ok) throw new Error('Server function for distractors failed.');
+                        const result = await response.json();
+                        generatedDistractors = result.distractors;
+                    }
+
+                    if (generatedDistractors && generatedDistractors.length >= 3) {
+                        const cardInDeck = deckForThisCard.cards.find(c => c.id === correctCard.id);
+                        if (cardInDeck) {
+                            cardInDeck.distractors = generatedDistractors;
+                            await saveDataToDB('decks', deckForThisCard); 
+                            console.log("Distractors cached successfully for card:", correctCard.id);
+                        }
+                        
+                        const finalOptions = shuffleArray([correctCard.answer, ...generatedDistractors]);
+                        displayMCQButtons(finalOptions, correctCard);
+                        return;
+                    }
+                } catch (error) {
+                    console.error("Failed to generate/cache distractors, falling back to random.", error);
                     showToast("Couldn't generate smart options, using random.", "error");
                 }
-                console.warn("No pre-generated distractors found in cache (or offline), falling back to random.");
-                
-                const options = new Set([correctCard.answer]);
-                const randomFill = shuffleArray(allCardsInDeck.filter(card => card.id !== correctCard.id));
-                for (const randomCard of randomFill) {
-                    if (options.size < 4) options.add(randomCard.answer);
-                    else break;
-                }
-                const finalOptions = shuffleArray(Array.from(options));
-                displayMCQButtons(finalOptions, correctCard);
             }
+            
+            console.warn("Falling back to random distractors for card:", correctCard.id);
+            const allCardsInDeck = deckForThisCard.cards;
+            const options = new Set([correctCard.answer]);
+            const randomFill = shuffleArray(allCardsInDeck.filter(card => card.id !== correctCard.id));
+            for (const randomCard of randomFill) {
+                if (options.size < 4) options.add(randomCard.answer);
+                else break;
+            }
+            const finalOptions = shuffleArray(Array.from(options));
+            displayMCQButtons(finalOptions, correctCard);
         }
 
 
@@ -6074,13 +6361,20 @@
             }
 
             if (decksToUpdate.length > 0) {
-                showToast(`Upgrading ${decksToUpdate.length} deck(s) with new intelligence features...`, "info", 3000);
-                for (const deck of decksToUpdate) {
-                    await processDeckContent(deck);
-                    await saveDataToDB('decks', deck);
+                showLoadingScreen(`Upgrading ${decksToUpdate.length} deck(s) with new intelligence features...`);
+                try {
+                    for (const deck of decksToUpdate) {
+                        await processDeckContent(deck);
+                        await saveDataToDB('decks', deck);
+                    }
+                    showToast("Deck upgrades complete!", "success");
+                } catch (error) {
+                    console.error("Failed to upgrade decks:", error);
+                    showToast("Could not finish deck upgrades.", "error");
+                } finally {
+                    await updateDashboard();
+                    hideLoadingScreen();
                 }
-                showToast("Deck upgrades complete!", "success");
-                await updateDashboard(); 
             }
         }
 
@@ -7055,6 +7349,8 @@
         }
 
         async function updateUIAfterLogin(user) {
+            document.getElementById('userProfileMenu').classList.remove('hidden');
+            document.getElementById('userEmail').textContent = user.email;
             const username = user.user_metadata?.full_name ||
                             user.email?.split('@')[0] ||
                             'Friend';
@@ -7076,12 +7372,18 @@
         }
 
         function updateUIAfterLogout() {
+            document.getElementById('userProfileMenu').classList.add('hidden');
+            document.getElementById('userProfileDropdown').classList.add('hidden');
             document.getElementById('appHeader').classList.add('hidden');
             document.getElementById('welcomeMessage').textContent = `Lagiote Revise`;
             document.getElementById('loggedInView').classList.add('hidden');
             document.getElementById('loggedOutView').classList.remove('hidden');
 
-            clearLocalData();
+            decks = {}; 
+            analyticsData = {};
+            updateDashboard(); 
+
+            showView('authView'); 
         }
 
         async function clearLocalData() {
@@ -7097,11 +7399,11 @@
 
         async function loadUserDataAndSync() {
             if (!isOnline) {
-                console.log("Offline. Skipping sync.");
                 await updateDashboard();
                 return;
             }
-            showToast('Syncing your data...', 'info');
+
+            showLoadingScreen('Syncing your data...');
 
             const lastSynced = localStorage.getItem('lastSynced');
 
@@ -7142,6 +7444,7 @@
                 console.error('Sync Error:', error);
                 showToast('Could not sync data. Working in offline mode.', 'error');
             } finally {
+                hideLoadingScreen();
                 await updateDashboard();
             }
         }
@@ -7205,6 +7508,58 @@
                 console.log("Loading cookie consent banner...");
                 termlyScript.setAttribute('src', termlyScript.getAttribute('data-src'));
             }
+        }
+
+        function generateDiffHTML(s1, s2) {
+            const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return `<span style="background-color: #ffcdd2; text-decoration: line-through;">${escape(s1)}</span> <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+        }
+
+        function showLoadingScreen(message) {
+            const loadingView = document.getElementById('loadingView');
+            document.getElementById('loadingMessage').textContent = message;
+            loadingView.classList.remove('hidden');
+            loadingView.style.display = 'flex';
+        }
+
+        function hideLoadingScreen() {
+            const loadingView = document.getElementById('loadingView');
+            loadingView.classList.add('hidden');
+            loadingView.style.display = 'none';
+        }
+
+        function toggleEditorView(deckType) {
+            const container = document.getElementById('flashcardsContainer');
+            const cards = []; 
+            
+            document.querySelectorAll('#editorView .flashcard-item').forEach(el => {
+                const isSequence = el.querySelector('.sequence-term-input');
+                cards.push({
+                    question: isSequence ? el.querySelector('.sequence-desc-input').value.trim() : el.querySelector('.question-input').value.trim(),
+                    answer: isSequence ? el.querySelector('.sequence-term-input').value.trim() : el.querySelector('.solution-input').value.trim(),
+                    questionImage: el.querySelector('.question-image-input')?.value.trim() || '',
+                    answerImage: el.querySelector('.answer-image-input')?.value.trim() || ''
+                });
+            });
+
+            container.innerHTML = ''; 
+            
+            if (deckType === 'Sequence') {
+                document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Sequence');
+                cards.forEach(card => editorAddNewCard('Sequence', card));
+                if (sortableInstance) sortableInstance.destroy();
+                sortableInstance = new Sortable(container, {
+                    animation: 150,
+                    handle: '.drag-handle',
+                    ghostClass: 'drag-ghost',
+                    onEnd: editorRenumberCards
+                });
+            } else {
+                document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Standard');
+                cards.forEach(card => editorAddNewCard('Standard', card));
+                if (sortableInstance) sortableInstance.destroy();
+            }
+            editorRenumberCards();
         }
     </script>
 </body>
