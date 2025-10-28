@@ -653,16 +653,65 @@ For v1.20 (final version before total redo):
             gap: 30px;
             margin-bottom: 30px;
         }
+
+        .flashcard-editor-row.drag-item {
+            background: var(--card-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 15px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .flashcard-editor-row.drag-item:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 12px var(--shadow-color);
+        }
+
+        .flashcard-editor-row.drag-item.drag-ghost {
+            opacity: 0.4;
+            background: var(--primary-color);
+        }
+
+        .flashcard-editor-row.drag-item.drag-chosen {
+            background: var(--input-focus-bg);
+            border-color: var(--primary-color);
+            transform: scale(1.02);
+        }
+
+        .drag-handle:hover {
+            color: var(--primary-color) !important;
+            background: var(--input-bg);
+            border-radius: 8px;
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
+        #passiveReviewList li:hover {
+            background: var(--input-focus-bg);
+            transform: translateX(5px);
+        }
+
+        #dragDropList .drag-item:hover {
+            border-color: var(--primary-color) !important;
+            box-shadow: 0 4px 12px var(--shadow-color);
+        }
+
+        #dragDropList .drag-ghost {
+            opacity: 0.4;
+            background: var(--primary-color) !important;
+        }
+
+        #dragDropList .drag-chosen {
+            background: var(--input-focus-bg) !important;
+            border-color: var(--primary-color) !important;
+            transform: scale(1.05);
+            box-shadow: 0 8px 20px var(--shadow-color);
+        }
     </style>
 </head>
 <body>
-    <div id="loadingView" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--bg-color); z-index: 9999; display: flex; justify-content: center; align-items: center;">
-        <div style="text-align: center;">
-            <img src="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png" alt="Lagiote Revise Logo" style="width: 80px; height: 80px; margin-bottom: 20px;">
-            <div class="spinner" style="width: 30px; height: 30px; border-width: 4px; margin: 0 auto 20px auto;"></div>
-            <p id="loadingMessage" style="font-size: 1.1rem; color: var(--secondary-text); font-weight: 500;">Loading...</p>
-        </div>
-    </div>
     <div id="dynamicToast" class="toast"></div>
     <div id="authView" class="container view-container">
         <div style="text-align: center; max-width: 600px;">
@@ -3458,6 +3507,9 @@ For v1.20 (final version before total redo):
         showConfirmModal('Are you sure you want to delete this card?', async () => {
             deck.cards.splice(cardIndex, 1);
             await saveDataToDB('decks', deck);
+            if (isOnline) {
+                loadUserDataAndSync();
+            }
             showDeckDetail(deckId);
             updateDashboard();
             showToast('Card deleted.');
@@ -3527,6 +3579,9 @@ For v1.20 (final version before total redo):
         });
         await new Promise(resolve => transaction.oncomplete = resolve);
         await saveDataToDB('decks', newDeck);
+        if (isOnline) {
+            loadUserDataAndSync();
+        }
         return deckId;
     }
 
@@ -3555,10 +3610,20 @@ For v1.20 (final version before total redo):
                 updateDashboard();
             }
             showToast(`Deck "${deckName}" deleted.`);
+            if (isOnline && netlifyIdentity.currentUser()) {
+                await loadUserDataAndSync();
+            }
+            
+            if (currentViewingDeckId === deckId) {
+                backToDashboard();
+            } else {
+                updateDashboard();
+            }
+            showToast(`Deck "${deckName}" deleted.`);
         });
     }
 
-    function editorInitialize() {
+    function editorInitialise() {
         document.getElementById('deckTitle').value = '';
         populateCategoryDropdowns();
         document.getElementById('deckCategory').value = 'Other';
@@ -3656,29 +3721,122 @@ For v1.20 (final version before total redo):
     }
 
     function editorAddNewSequenceCard(card = {}) {
-        const { question = '', answer = '' } = card; 
+        const { question = '', answer = '', order = 0 } = card;
         editorCardCounter++;
         const container = document.getElementById('flashcardsContainer');
+        const cardNumber = document.querySelectorAll('.flashcard-editor-row').length + 1;
 
         const newRow = document.createElement('div');
         newRow.className = 'flashcard-editor-row drag-item';
         newRow.setAttribute('data-card-id', editorCardCounter);
 
         newRow.innerHTML = `
-            <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text); display: flex; align-items: center;">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>
+            <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text); display: flex; align-items: center; align-self: stretch;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                </svg>
             </div>
-            <div class="flashcard-item" data-original-id="${card.id || ''}" style="padding: 15px;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <div class="flashcard-number" style="font-weight: 600; color: var(--secondary-text);"></div>
-                    <input type="text" class="sequence-term-input" placeholder="Enter Sequence Term..." value="${answer}" style="flex-grow: 1; border: none; background: transparent; font-size: 1.1rem; padding: 5px;">
-                    <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})" style="position: static; flex-shrink: 0;">&times;</button>
+            <div class="flashcard-item" data-original-id="${card.id || ''}" style="flex-grow: 1; display: flex; flex-direction: column; gap: 15px;">
+                <!-- Order Number Badge -->
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div class="flashcard-number" style="
+                        background: var(--primary-color); 
+                        color: white; 
+                        padding: 4px 12px; 
+                        border-radius: 20px; 
+                        font-weight: 600; 
+                        font-size: 0.9rem;
+                    "></div>
+                    <span style="color: var(--secondary-text); font-size: 0.85rem; font-style: italic;">
+                        Drag to reorder
+                    </span>
                 </div>
-                <textarea class="sequence-desc-input" placeholder="Add optional description..." style="width: 100%; border: none; background: transparent; margin-top: 10px; padding: 5px; font-size: 0.9rem; resize: none; min-height: 25px;">${question}</textarea>
-            </div>`;
+                
+                <!-- Main Term Input -->
+                <div>
+                    <label style="
+                        display: block; 
+                        font-size: 0.9rem; 
+                        font-weight: 600; 
+                        color: var(--text-color); 
+                        margin-bottom: 8px;
+                    ">Sequence Term (Required)</label>
+                    <input 
+                        type="text" 
+                        class="sequence-term-input" 
+                        placeholder="e.g., 'Battle of Hastings' or 'Mitosis'" 
+                        value="${answer}" 
+                        style="
+                            width: 100%; 
+                            padding: 12px 15px; 
+                            border: 2px solid var(--border-color); 
+                            border-radius: 10px; 
+                            font-size: 1.1rem; 
+                            font-weight: 500;
+                            background: var(--input-bg);
+                            color: var(--text-color);
+                            transition: all 0.3s;
+                        "
+                    >
+                </div>
+                
+                <!-- Optional Description -->
+                <div>
+                    <label style="
+                        display: block; 
+                        font-size: 0.85rem; 
+                        font-weight: 500; 
+                        color: var(--secondary-text); 
+                        margin-bottom: 6px;
+                    ">Description (Optional)</label>
+                    <textarea 
+                        class="sequence-desc-input" 
+                        placeholder="Add context, dates, or additional details..." 
+                        style="
+                            width: 100%; 
+                            padding: 10px 15px; 
+                            border: 2px solid var(--border-color); 
+                            border-radius: 10px; 
+                            font-size: 0.95rem; 
+                            background: var(--input-bg);
+                            color: var(--text-color);
+                            resize: vertical;
+                            min-height: 60px;
+                            transition: all 0.3s;
+                        "
+                    >${question}</textarea>
+                </div>
+            </div>
+            <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})" style="
+                align-self: flex-start;
+                margin-top: 8px;
+            ">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+            </button>
+        `;
+        
         container.appendChild(newRow);
-        if (!answer) newRow.querySelector('.sequence-term-input').focus();
+        
+        // Add focus styles
+        const termInput = newRow.querySelector('.sequence-term-input');
+        const descInput = newRow.querySelector('.sequence-desc-input');
+        
+        [termInput, descInput].forEach(input => {
+            input.addEventListener('focus', function() {
+                this.style.borderColor = 'var(--primary-color)';
+                this.style.backgroundColor = 'var(--input-focus-bg)';
+            });
+            input.addEventListener('blur', function() {
+                this.style.borderColor = 'var(--border-color)';
+                this.style.backgroundColor = 'var(--input-bg)';
+            });
+        });
+        
+        if (!answer) termInput.focus();
     }
+
     
     function triggerImageUpload(button) {
         button.closest('.image-controls').nextElementSibling.nextElementSibling.click();
@@ -4437,7 +4595,20 @@ For v1.20 (final version before total redo):
                     case 'Passive Review':
                         document.getElementById('passiveReviewView').classList.remove('hidden');
                         const list = document.getElementById('passiveReviewList');
-                        list.innerHTML = currentChunk.map(c => `<li>${c.answer}</li>`).join('');
+                        list.innerHTML = currentChunk.map((c, idx) => `
+                            <li style="
+                                padding: 15px 20px;
+                                margin-bottom: 12px;
+                                background: var(--input-bg);
+                                border-radius: 12px;
+                                border-left: 4px solid var(--primary-color);
+                                transition: all 0.3s;
+                                line-height: 1.6;
+                            ">
+                                <strong style="color: var(--primary-color); font-size: 1.1rem;">${c.answer}</strong>
+                                ${c.question ? `<div style="color: var(--secondary-text); font-size: 0.95rem; margin-top: 8px;">${c.question}</div>` : ''}
+                            </li>
+                        `).join('');
                         break;
                     case 'Forward Chaining':
                     case 'Backward Chaining':
@@ -4445,36 +4616,67 @@ For v1.20 (final version before total redo):
                         document.getElementById('writeAnswerInput').classList.remove('hidden');
                         document.getElementById('checkAnswerBtn').classList.remove('hidden');
                         document.getElementById('dontKnowBtn').classList.remove('hidden');
+                        
                         const qElement = document.getElementById('cardQuestion');
+                        const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
+                        const card = currentChunk[studyState.currentCardIndex];
+                        
                         if (studyState.sequencePhase === 'Forward Chaining') {
-                            qElement.innerHTML = (studyState.currentCardIndex === 0) ? `What is the first item in this chunk?` : `What comes after: <strong>${currentChunk[studyState.currentCardIndex - 1].answer}</strong>?`;
+                            if (studyState.currentCardIndex === 0) {
+                                qElement.innerHTML = `
+                                    <div style="text-align: center;">
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔹 Forward Chaining 🔹</div>
+                                        <div style="font-size: 1.3rem;">What is the <strong>first item</strong> in this sequence?</div>
+                                    </div>
+                                `;
+                            } else {
+                                const prevCard = currentChunk[studyState.currentCardIndex - 1];
+                                qElement.innerHTML = `
+                                    <div style="text-align: center;">
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔹 Forward Chaining 🔹</div>
+                                        <div style="font-size: 1.1rem; margin-bottom: 20px;">What comes <strong>after</strong>:</div>
+                                        <div style="
+                                            background: var(--input-bg);
+                                            padding: 20px;
+                                            border-radius: 12px;
+                                            border-left: 4px solid var(--primary-color);
+                                            font-size: 1.3rem;
+                                            font-weight: 600;
+                                        ">${prevCard.answer}</div>
+                                        ${prevCard.question ? `<div style="color: var(--secondary-text); margin-top: 10px; font-size: 0.95rem;">${prevCard.question}</div>` : ''}
+                                    </div>
+                                `;
+                            }
                         } else {
-                            qElement.innerHTML = (studyState.currentCardIndex === currentChunk.length - 1) ? `What is the last item in this chunk?` : `What comes before: <strong>${currentChunk[studyState.currentCardIndex + 1].answer}</strong>?`;
+                            if (studyState.currentCardIndex === currentChunk.length - 1) {
+                                qElement.innerHTML = `
+                                    <div style="text-align: center;">
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔸 Backward Chaining 🔸</div>
+                                        <div style="font-size: 1.3rem;">What is the <strong>last item</strong> in this sequence?</div>
+                                    </div>
+                                `;
+                            } else {
+                                const nextCard = currentChunk[studyState.currentCardIndex + 1];
+                                qElement.innerHTML = `
+                                    <div style="text-align: center;">
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔸 Backward Chaining 🔸</div>
+                                        <div style="font-size: 1.1rem; margin-bottom: 20px;">What comes <strong>before</strong>:</div>
+                                        <div style="
+                                            background: var(--input-bg);
+                                            padding: 20px;
+                                            border-radius: 12px;
+                                            border-left: 4px solid var(--primary-color);
+                                            font-size: 1.3rem;
+                                            font-weight: 600;
+                                        ">${nextCard.answer}</div>
+                                        ${nextCard.question ? `<div style="color: var(--secondary-text); margin-top: 10px; font-size: 0.95rem;">${nextCard.question}</div>` : ''}
+                                    </div>
+                                `;
+                            }
                         }
                         startInteractionLog(card.id);
                         break;
-                    case 'Drag and Drop':
-                        document.getElementById('dragDropView').classList.remove('hidden');
-                        setupDragDropView(currentChunk);
-                        break;
-                    case 'InterChunkReview':
-                        const reviewCard = studyState.roundCards[0];
-                        document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                        document.getElementById('writeAnswerInput').classList.remove('hidden');
-                        document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                        document.getElementById('dontKnowBtn').classList.remove('hidden');
-                        document.getElementById('cardQuestion').innerHTML = `Recall from previous chunk: What is item "${reviewCard.question}"?`;
-                        startInteractionLog(reviewCard.id);
-                        break;
-                    case 'Weakest Link':
-                        const weakestCard = studyState.roundCards[studyState.currentCardIndex];
-                        document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                        document.getElementById('writeAnswerInput').classList.remove('hidden');
-                        document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                        document.getElementById('dontKnowBtn').classList.remove('hidden');
-                        document.getElementById('cardQuestion').innerHTML = `Recall: What is item "${weakestCard.question}"?`;
-                        startInteractionLog(weakestCard.id);
-                        break;
+
                 }
                 document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
                 if (card) document.getElementById('cardAnswer').innerHTML = card.answer;
@@ -5302,11 +5504,15 @@ For v1.20 (final version before total redo):
                                 const knowledgeData = importedData.knowledgeStateData;
 
                                 const oldIdToNewIdMap = new Map();
-                                deckData.cards.forEach(card => {
+                                deckData.cards.forEach((card, index) => {
                                     const oldId = card.id;
                                     const newId = Date.now() + Math.random();
                                     card.id = newId;
                                     oldIdToNewIdMap.set(oldId, newId);
+                                    
+                                    if (typeHint === 'Sequence' && typeof card.order !== 'number') {
+                                        card.order = index + 1;
+                                    }
                                 });
 
                                 const newDeckId = await createNewDeck(name, category, deckData.cards, deckData.notes || '', typeHint);
@@ -5325,13 +5531,22 @@ For v1.20 (final version before total redo):
 
                             } else {
                                 if (!importedData.name || !Array.isArray(importedData.cards)) throw new Error('Invalid JSON format.');
+                                
+                                if (typeHint === 'Sequence') {
+                                    importedData.cards.forEach((card, index) => {
+                                        if (typeof card.order !== 'number') {
+                                            card.order = index + 1;
+                                        }
+                                    });
+                                }
+                                
                                 await createNewDeck(name, category, importedData.cards, importedData.notes || '', typeHint);
                                 showToast(`Deck "${name}" imported successfully with ${importedData.cards.length} cards!`);
                             }
 
                         } else if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
-                            const cards = parseTextData(e.target.result, file.name.endsWith('.csv') ? ',' : '\t');
-                             if (cards.length > 0) {
+                            const cards = parseTextData(e.target.result, file.name.endsWith('.csv') ? ',' : '\t', typeHint);
+                            if (cards.length > 0) {
                                 await createNewDeck(name, category, cards, '', typeHint);
                                 showToast(`Deck "${name}" imported successfully with ${cards.length} cards!`);
                             } else { throw new Error('No valid cards found in file.'); }
@@ -5342,15 +5557,15 @@ For v1.20 (final version before total redo):
                 };
                 reader.readAsText(file);
             } else if (pastedText.trim()) {
-                 try {
-                    const cards = parseTextData(pastedText.trim(), '\t');
+                try {
+                    const cards = parseTextData(pastedText.trim(), '\t', typeHint);
                     if (cards.length > 0) {
                         await createNewDeck(name, category, cards, '', typeHint);
                         showToast(`Deck "${name}" created successfully with ${cards.length} cards!`);
                         closeImportModal();
                         updateDashboard();
                     } else { throw new Error('No valid cards found in text.'); }
-                 } catch (error) { showToast(`Error parsing text: ${error.message}`, 'error'); }
+                } catch (error) { showToast(`Error parsing text: ${error.message}`, 'error'); }
             } else {
                 showToast('Please select a file or paste text to import.', 'error');
             }
@@ -5363,11 +5578,24 @@ For v1.20 (final version before total redo):
             document.getElementById('importTabFile').classList.toggle('active', tabName === 'file');
         }
 
-        function parseTextData(text, separator) {
-            return text.split('\n').map(line => {
+        function parseTextData(text, separator, typeHint = 'General') {
+            return text.split('\n').map((line, index) => {
                 const parts = line.split(separator);
                 if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
-                    return { id: Date.now() + Math.random(), question: parts[0].trim(), answer: parts[1].trim(), isNew: true };
+                    const card = {
+                        id: Date.now() + Math.random(),
+                        question: parts[0].trim(),
+                        answer: parts[1].trim(),
+                        isNew: true
+                    };
+                    
+                    if (typeHint === 'Sequence') {
+                        card.order = index + 1;
+                    } else {
+                        card.order = 0;
+                    }
+                    
+                    return card;
                 }
                 return null;
             }).filter(Boolean);
@@ -5742,7 +5970,10 @@ For v1.20 (final version before total redo):
 
         function renderAnalyticsActivityChart(activityData) {
             const canvasId = 'analyticsActivityChart';
-            if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+            if (chartInstances[canvasId]) {
+                chartInstances[canvasId].destroy();
+                chartInstances[canvasId] = null;
+            }
             const ctx = document.getElementById(canvasId).getContext('2d');
             chartInstances[canvasId] = new Chart(ctx, {
                 type: 'bar',
@@ -6361,20 +6592,13 @@ For v1.20 (final version before total redo):
             }
 
             if (decksToUpdate.length > 0) {
-                showLoadingScreen(`Upgrading ${decksToUpdate.length} deck(s) with new intelligence features...`);
-                try {
-                    for (const deck of decksToUpdate) {
-                        await processDeckContent(deck);
-                        await saveDataToDB('decks', deck);
-                    }
-                    showToast("Deck upgrades complete!", "success");
-                } catch (error) {
-                    console.error("Failed to upgrade decks:", error);
-                    showToast("Could not finish deck upgrades.", "error");
-                } finally {
-                    await updateDashboard();
-                    hideLoadingScreen();
+                showToast(`Upgrading ${decksToUpdate.length} deck(s) with new intelligence features...`, "info", 3000);
+                for (const deck of decksToUpdate) {
+                    await processDeckContent(deck);
+                    await saveDataToDB('decks', deck);
                 }
+                showToast("Deck upgrades complete!", "success");
+                await updateDashboard(); 
             }
         }
 
@@ -6730,9 +6954,41 @@ For v1.20 (final version before total redo):
         function setupDragDropView(chunk) {
             const list = document.getElementById('dragDropList');
             const shuffledChunk = shuffleArray([...chunk]);
-            list.innerHTML = shuffledChunk.map(card => 
-                `<div class="deck-card-item drag-item" data-id="${card.id}">${card.answer}</div>`
-            ).join('');
+            
+            list.innerHTML = shuffledChunk.map((card, idx) => `
+                <div class="deck-card-item drag-item" data-id="${card.id}" style="
+                    cursor: grab;
+                    padding: 20px;
+                    margin-bottom: 12px;
+                    background: var(--card-bg);
+                    border: 2px solid var(--border-color);
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    gap: 15px;
+                    transition: all 0.3s;
+                ">
+                    <div style="
+                        background: var(--primary-color);
+                        color: white;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-weight: 600;
+                        flex-shrink: 0;
+                    ">${idx + 1}</div>
+                    <div style="flex-grow: 1;">
+                        <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 4px;">${card.answer}</div>
+                        ${card.question ? `<div style="color: var(--secondary-text); font-size: 0.9rem;">${card.question}</div>` : ''}
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="color: var(--secondary-text); flex-shrink: 0;">
+                        <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                    </svg>
+                </div>
+            `).join('');
 
             if (sortableInstance) {
                 sortableInstance.destroy();
@@ -6741,31 +6997,74 @@ For v1.20 (final version before total redo):
                 animation: 150,
                 ghostClass: 'drag-ghost',
                 chosenClass: 'drag-chosen',
+                handle: '.deck-card-item',
+                onStart: function(evt) {
+                    evt.item.style.cursor = 'grabbing';
+                },
+                onEnd: function(evt) {
+                    evt.item.style.cursor = 'grab';
+                }
             });
         }
+
 
         function checkDragDropOrder() {
             const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
             const listItems = document.querySelectorAll('#dragDropList .deck-card-item');
             let isCorrect = true;
+            let incorrectCount = 0;
 
             listItems.forEach((item, index) => {
                 const cardId = item.dataset.id;
+                const numberBadge = item.querySelector('div[style*="border-radius: 50%"]');
+                
                 if (cardId !== currentChunk[index].id) {
                     isCorrect = false;
-                    item.style.border = '2px solid var(--danger-color)';
+                    incorrectCount++;
+                    item.style.borderColor = 'var(--danger-color)';
+                    item.style.backgroundColor = '#fff5f5';
+                    if (numberBadge) {
+                        numberBadge.style.backgroundColor = 'var(--danger-color)';
+                    }
                 } else {
-                    item.style.border = '2px solid var(--success-color)';
+                    item.style.borderColor = 'var(--success-color)';
+                    item.style.backgroundColor = '#f0fff4';
+                    if (numberBadge) {
+                        numberBadge.style.backgroundColor = 'var(--success-color)';
+                    }
                 }
             });
+            
+            if (document.body.classList.contains('dark-mode')) {
+                listItems.forEach((item, index) => {
+                    const cardId = item.dataset.id;
+                    if (cardId !== currentChunk[index].id) {
+                        item.style.backgroundColor = '#c5303030';
+                    } else {
+                        item.style.backgroundColor = '#2c7a7b';
+                    }
+                });
+            }
 
             if (isCorrect) {
                 showToast("Perfect Order!", "success");
                 setTimeout(moveToNextSequencePhase, 1500);
             } else {
-                showToast("Not quite right. Try again.", "error");
+                showToast(`${incorrectCount} item${incorrectCount > 1 ? 's' : ''} in wrong position. Try again!`, "error");
+                
+                setTimeout(() => {
+                    listItems.forEach(item => {
+                        item.style.borderColor = 'var(--border-color)';
+                        item.style.backgroundColor = 'var(--card-bg)';
+                        const numberBadge = item.querySelector('div[style*="border-radius: 50%"]');
+                        if (numberBadge) {
+                            numberBadge.style.backgroundColor = 'var(--primary-color)';
+                        }
+                    });
+                }, 2000);
             }
         }
+
 
         function checkSequenceAnswer() {
             const userInput = document.getElementById('writeAnswerInput');
@@ -7403,13 +7702,6 @@ For v1.20 (final version before total redo):
                 return;
             }
 
-            const currentUser = netlifyIdentity.currentUser();
-            if (!currentUser) {
-                console.log('No authenticated user - skipping sync');
-                await updateDashboard();
-                return;
-            }
-            
             showLoadingScreen('Syncing your data...');
 
             const lastSynced = localStorage.getItem('lastSynced');
@@ -7522,19 +7814,6 @@ For v1.20 (final version before total redo):
             return `<span style="background-color: #ffcdd2; text-decoration: line-through;">${escape(s1)}</span> <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
         }
 
-        function showLoadingScreen(message) {
-            const loadingView = document.getElementById('loadingView');
-            document.getElementById('loadingMessage').textContent = message;
-            loadingView.classList.remove('hidden');
-            loadingView.style.display = 'flex';
-        }
-
-        function hideLoadingScreen() {
-            const loadingView = document.getElementById('loadingView');
-            loadingView.classList.add('hidden');
-            loadingView.style.display = 'none';
-        }
-
         function toggleEditorView(deckType) {
             const container = document.getElementById('flashcardsContainer');
             const cards = []; 
@@ -7552,6 +7831,9 @@ For v1.20 (final version before total redo):
             container.innerHTML = ''; 
             
             if (deckType === 'Sequence') {
+                const addBtn = document.querySelector('.add-question-btn');
+                addBtn.textContent = '+ Add Sequence Item';
+                addBtn.onclick = () => editorAddNewCard('Sequence');
                 document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Sequence');
                 cards.forEach(card => editorAddNewCard('Sequence', card));
                 if (sortableInstance) sortableInstance.destroy();
