@@ -7403,6 +7403,13 @@ For v1.20 (final version before total redo):
                 return;
             }
 
+            const currentUser = netlifyIdentity.currentUser();
+            if (!currentUser) {
+                console.log('No authenticated user - skipping sync');
+                await updateDashboard();
+                return;
+            }
+            
             showLoadingScreen('Syncing your data...');
 
             const lastSynced = localStorage.getItem('lastSynced');
