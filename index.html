@@ -10,49 +10,68 @@ For v1.20 (final version before total redo):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lagiote Revise</title>
-    <script type="text/javascript" src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
     <script>
-      document.addEventListener('DOMContentLoaded', () => {
-        const isRunningInElectron = window.electronAPI?.isElectron;
-        
-        if (!isRunningInElectron) {
-          // Web version: Initialize Netlify Identity normally
-          if (netlifyIdentity) {
-            netlifyIdentity.init({
-              APIUrl: 'https://lagiote-revise.netlify.app/.netlify/identity'
-            });
-          }
-                } else {
-                    // Electron: accounts are not yet supported in the packaged app.
-                    // Disable the buttons and show a 'Coming Soon' hint so users aren't routed
-                    // into the fragile auth flow until we stabilise it.
-                    function markComingSoon(id) {
-                        const btn = document.getElementById(id);
-                        if (!btn) return;
-                        try {
-                            btn.disabled = true;
-                            // append small hint
-                            btn.textContent = btn.textContent + ' — Coming Soon (App version)';
-                            btn.classList.add('btn-secondary');
-                            btn.title = 'Accounts are available in the web version. Sign in on the website for now.';
-                            btn.addEventListener('click', (e) => {
-                                e.preventDefault();
-                                alert('Account sign-in is not available in the Electron app yet. Please use the web app to sign in.');
-                            });
-                        } catch (err) {
-                            console.warn('Failed to mark button coming soon', err);
-                        }
-                    }
+        window.onload = async function () {
+            console.log('Test 1: Script is starting!');
 
-                    markComingSoon('authSignupBtn');
-                    markComingSoon('authLoginBtn');
+            if (
+                typeof window.netlifyIdentity === 'object' &&
+                typeof window.netlifyIdentity.on === 'function'
+            ) {
+
+            window.netlifyIdentity.on('init', async user => {
+                console.log('Netlify Identity .on("init") event has fired.');
+
+                await initDB();
+                console.log('Database initialized.');
+
+                window.netlifyIdentity.on('login', async user => {
+                    handleGuestToUserTransition();
+                    await updateUIAfterLogin(user);
+                    runSmartCoachChecks('dashboardLoad');
+                });
+
+                window.netlifyIdentity.on('logout', () => {
+                    deleteDataFromDB('appData', 'userSession');
+                    updateUIAfterLogout();
+                });
+
+                await loadSavedData();
+                setupEventListeners();
+                loadCookieConsent();
+
+                if (user) {
+                    await updateUIAfterLogin(user);
+                    runSmartCoachChecks('dashboardLoad');
+                } else {
+                    showView('authView', true);
                 }
 
-        // Common event handlers for both platforms
-        window.electronAPI?.onAuthWindowClosed(() => {
-          console.log('Auth window closed');
-        });
-      });
+                updateOnlineStatusUI();
+            });
+
+
+                console.log('Netlify Identity script loaded successfully.');
+                window.netlifyIdentity.init();
+            } else {
+
+                console.warn(
+                    'Netlify Identity widget could not be loaded. ' +
+                    'Continuing in offline/guest mode (no authentication).'
+                );
+
+                await initDB();
+                console.log('Database initialized (offline mode).');
+
+                await loadSavedData();
+                setupEventListeners();
+
+                showView('dashboard', true);
+                updateOnlineStatusUI();
+                runSmartCoachChecks('dashboardLoad');
+            }
+        };
     </script>
     <script id="termly-script" data-src="https://app.termly.io/resource-blocker/acc0f1f0-9746-4ec5-a629-1def23043b13?autoBlock=on"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD"></script>
@@ -120,7 +139,6 @@ For v1.20 (final version before total redo):
     </script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
-    <script type="module" src="./assets/js/syncManager.js"></script>
     <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
@@ -862,7 +880,7 @@ For v1.20 (final version before total redo):
             </div>
             <div class="welcome-text">
                 <h1 id="welcomeMessage">Lagiote Revise</h1>
-                <span style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.10</span>
+                <span style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.15</span>
                 <div id="onlineStatusIndicator" style="display: flex; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 5px; margin-left: 15px;">
                     <div id="onlineStatusDot" style="width: 10px; height: 10px; border-radius: 50%;"></div>
                     <span id="onlineStatusText" style="font-size: 0.8rem; font-weight: 500;"></span>
@@ -7836,24 +7854,12 @@ For v1.20 (final version before total redo):
         }
 
         async function loadUserDataAndSync() {
-            if (navigator.onLine) { // For Offline electron app
-                const token = localStorage.getItem('userToken');
-                const result = await window.electronAPI.syncData({ decks: [deck], token });
-                if (result?.success !== false) {
-                console.log("Deck synced immediately");
-                return;
-                }
-                queueForSync(deck);
-            } else {
-                queueForSync(deck);
-            }
-
             if (!isOnline) {
+                console.log("Offline. Skipping sync.");
                 await updateDashboard();
                 return;
             }
-
-            showLoadingScreen('Syncing your data...');
+            showToast('Syncing your data...', 'info');
 
             const lastSynced = localStorage.getItem('lastSynced');
 
@@ -7862,8 +7868,6 @@ For v1.20 (final version before total redo):
 
             try {
                 const token = await netlifyIdentity.currentUser().jwt();
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 25000);
                 const response = await fetch('/.netlify/functions/sync', {
                     method: 'POST',
                     headers: {
@@ -7894,14 +7898,9 @@ For v1.20 (final version before total redo):
 
             } catch (error) {
                 console.error('Sync Error:', error);
-                
-                if (error.name === 'AbortError') {
-                    showToast('Sync is taking too long. Your data is saved locally.', 'info');
-                } else if (error.message.includes('504')) {
-                    showToast('Server timeout. Your data is saved locally and will sync later.', 'info');
-                } else {
-                    showToast('Could not sync data. Working in offline mode.', 'error');
-                }
+                showToast('Could not sync data. Working in offline mode.', 'error');
+            } finally {
+                await updateDashboard();
             }
         }
 
