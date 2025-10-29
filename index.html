@@ -3698,6 +3698,7 @@ For v1.20 (final version before total redo):
             notes,
             typeHint,
             created: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
             settings: settings 
         };
         decks[deckId] = newDeck;
@@ -4167,6 +4168,7 @@ For v1.20 (final version before total redo):
                 deck.cards = tempDeck.cards;
                 deck.notes = notes;
                 deck.typeHint = typeHint;
+                deck.lastModified = new Date().toISOString();
                 await saveDataToDB('decks', deck);
             } else {
                 await createNewDeck(name, category, tempDeck.cards, notes, typeHint);
@@ -6428,6 +6430,7 @@ For v1.20 (final version before total redo):
                     state.masteryScore = Math.max(0.01, Math.min(0.99, newMastery)); 
                     state.stability = Math.max(0.1, newStability); 
                     state.lastReviewed = new Date().toISOString();
+                    state.lastModified = new Date().toISOString();
                     state.recallHistory.push({ date: state.lastReviewed, wasCorrect });
 
                     store.put(state);
@@ -7854,33 +7857,50 @@ For v1.20 (final version before total redo):
         }
 
         async function loadUserDataAndSync() {
-            if (!isOnline) {
-                console.log("Offline. Skipping sync.");
+            if (!isOnline || !netlifyIdentity.currentUser()) {
+                console.log("Offline or not logged in. Skipping sync.");
                 await updateDashboard();
                 return;
             }
+
             showToast('Syncing your data...', 'info');
 
-            const lastSynced = localStorage.getItem('lastSynced');
-
-            const allDecks = await getAllDataFromDB('decks');
-            const allKnowledge = await getAllDataFromDB('userKnowledgeState');
-
             try {
+                const lastSynced = localStorage.getItem('lastSynced');
+
+                const allDecks = await getAllDataFromDB('decks');
+                const allKnowledge = await getAllDataFromDB('userKnowledgeState');
+
+                const dirtyDecks = lastSynced 
+                    ? allDecks.filter(deck => deck.lastModified && new Date(deck.lastModified) > new Date(lastSynced))
+                    : allDecks;
+
+                const dirtyKnowledgeStates = lastSynced
+                    ? allKnowledge.filter(state => state.lastModified && new Date(state.lastModified) > new Date(lastSynced))
+                    : allKnowledge;
+
                 const token = await netlifyIdentity.currentUser().jwt();
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 25000); 
+
                 const response = await fetch('/.netlify/functions/sync', {
                     method: 'POST',
+                    signal: controller.signal, 
                     headers: {
                         'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({
                         lastSynced: lastSynced,
-                        dirtyDecks: allDecks,
-                        dirtyKnowledgeStates: allKnowledge
+                        dirtyDecks: dirtyDecks, 
+                        dirtyKnowledgeStates: dirtyKnowledgeStates
                     })
                 });
 
-                if (!response.ok) throw new Error('Sync failed on the server.');
+                clearTimeout(timeoutId); 
+
+                if (!response.ok) {
+                    throw new Error(`Sync failed with status: ${response.status}`);
+                }
 
                 const syncResult = await response.json();
 
@@ -7893,16 +7913,20 @@ For v1.20 (final version before total redo):
                 }
 
                 localStorage.setItem('lastSynced', syncResult.newTimestamp);
-
                 showToast('Sync complete!', 'success');
 
             } catch (error) {
                 console.error('Sync Error:', error);
-                showToast('Could not sync data. Working in offline mode.', 'error');
+                if (error.name === 'AbortError') {
+                    showToast('Sync timed out. Data is saved locally.', 'info');
+                } else {
+                    showToast('Could not sync data. Working in offline mode.', 'error');
+                }
             } finally {
                 await updateDashboard();
             }
         }
+
 
         async function initOfflineAuth() {
             if (!isElectron) return;
