@@ -38,4 +38,4 @@ Contributions are welcome! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) fil
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the GNU Affero General Public License v3.0.
