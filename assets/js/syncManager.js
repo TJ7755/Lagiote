@@ -13,6 +13,8 @@ function initializeAuth() {
       console.log('Login successful');
       handleAuthSuccess(user);
       updateAuthUI(user);
+      // If the user logs in, clear guest mode so auth UI reflects real user
+      localStorage.removeItem('guestMode');
       
       // Handle window closing differently based on environment
       if (window.electronAPI?.isElectron) {
@@ -77,6 +79,13 @@ function handleAuthSuccess(user) {
 document.addEventListener('DOMContentLoaded', () => {
   initializeAuth();
 
+  // If the user previously chose to continue as guest, restore that UI state immediately
+  if (localStorage.getItem('guestMode')) {
+    document.getElementById('authView')?.classList.add('hidden');
+    document.getElementById('loggedInView')?.classList.remove('hidden');
+    document.getElementById('appHeader')?.classList.remove('hidden');
+  }
+
   // Set up auth-related click handlers
   document.getElementById('authSignupBtn')?.addEventListener('click', () => {
     netlifyIdentity.open('signup');
@@ -91,7 +100,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('continueAsGuestBtn')?.addEventListener('click', () => {
-    localStorage.setItem('guestMode', 'true');
+    const rememberGuest = document.getElementById('rememberGuestCheckbox')?.checked;
+    if (rememberGuest) {
+      localStorage.setItem('guestMode', 'true');
+    } else {
+      sessionStorage.setItem('guestMode', 'true');
+    }
     document.getElementById('authView').classList.add('hidden');
     document.getElementById('loggedInView').classList.remove('hidden');
   });

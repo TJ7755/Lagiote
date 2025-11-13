@@ -1,4 +1,5 @@
 // Application state management
+import { queueForSync } from './syncManager.js';
 
 // Global application state
 export const state = {
@@ -118,7 +119,9 @@ export function updateDeck(deckId, deckData) {
 }
 
 export function deleteDeck(deckId) {
+    const deletedDeck = {...state.decks[deckId], deleted: true};
     delete state.decks[deckId];
+    queueForSync(deletedDeck); // Queue the deleted deck for syncing with a deletion flag
 }
 
 export function updateAnalytics(analyticsData) {

@@ -1,3 +1,5 @@
+import { queueForSync } from './syncManager.js';
+
 function handleArchetypeChange(select) {
     const cardItem = select.closest('.flashcard-item');
     const standardInputs = cardItem.querySelector('.standard-inputs');
@@ -81,14 +83,16 @@ function editorSaveDeck() {
         };
         saveDataToDB('decks', deck).then(() => {
             showToast('Deck saved successfully!');
+            queueForSync(deck); // Queue the updated deck for syncing
             backToDashboard();
         }).catch(error => {
             showToast('Error saving deck', 'error');
             console.error('Error saving deck:', error);
         });
     } else {
-        createNewDeck(name, category, cards, notes).then(() => {
+        createNewDeck(name, category, cards, notes).then((deck) => {
             showToast('Deck created successfully!');
+            queueForSync(deck); // Queue the new deck for syncing
             backToDashboard();
         }).catch(error => {
             showToast('Error creating deck', 'error');

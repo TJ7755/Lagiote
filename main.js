@@ -380,12 +380,12 @@ ipcMain.handle('generate-distractors', async (event, { question, answer }) => {
   }
 });
 
-ipcMain.handle('gemini-generate-deck', async (event, { documents }) => {
+ipcMain.handle('gemini-generate-deck', async (event, { documents, cardType = 'flashcard' }) => {
   try {
     const response = await fetch(NETLIFY_FUNCTION_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documents })
+      body: JSON.stringify({ documents, cardType })
     });
     return await response.json();
   } catch (error) {

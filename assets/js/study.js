@@ -2,6 +2,7 @@
 import state, { DEFAULT_DECK_SETTINGS } from './state.js';
 import { saveDataToDB } from './db.js';
 import { showToast, getBucketName, shuffleArray, calculateIQS } from './utils.js';
+import { queueForSync } from './syncManager.js';
 import { showView, transitionSubView, updateProgressBar } from './ui.js';
 
 // Initialize study session
@@ -196,6 +197,7 @@ export async function saveStudyProgress() {
     }
 
     await saveDataToDB('decks', deck);
+    queueForSync(deck); // Queue the updated deck for syncing
 }
 
 // Progress Display

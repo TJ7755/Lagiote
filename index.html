@@ -1,8 +1,18 @@
 <!--
 For v1.20 (final version before total redo):
-    1. Sequence Practice tests. This is going to be sooooo good!
-    2. Update analytics so it looks more user friendly and similar to Memory Insights - more charts and more prominence.
--->
+    1. Sequence Practice tests. This is going to be sooooo good! [DONE]
+    2. Update analytics so it looks more user friendly and similar to Memory Insights - more charts and more prominence. [DONE]
+    3. Add gamification - personalised goals, more prominent streaks, leaderboards.
+    4. Add more data during the study mode - showing the mastery and exam urgency in an user friendly way.
+    5. For exam mode, have dynamic cards per day based on time till exam.
+    6. Make image syncing more efficient.
+    7. Add conflict resolving to syncing.
+    8. After a learn mode round is completed, the cards in the 'This round's focus' doesn't update. It only updates after refreshing the page or going back to the dashboard and reclicking Learn.
+    9. The Labels on the cards during Learn mode stay on 'New' forever.
+    10. The predicted forgetting curve needs to be more accurate.
+    11. For offline electron app, to load the home screen, it seems to need wifi. Try to make sure it works offline fully.
+    12. Make it independently runnable - so I can run with just index.html, without any other assets and folders, but make sure the folders are still compatible and do work when accessible.
+    -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -139,6 +149,7 @@ For v1.20 (final version before total redo):
     </script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
+    <script src="./assets/js/sequence-test.js"></script>
     <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
@@ -862,11 +873,20 @@ For v1.20 (final version before total redo):
             <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px;">
                 <button id="authSignupBtn" class="btn btn-prominent" style="width: 100%; max-width: 300px;">Sign Up for Free</button>
                 <button id="authLoginBtn" class="btn btn-secondary" style="width: 100%; max-width: 300px;">Log In</button>
-                <button id="continueAsGuestBtn" class="btn" style="background: none; color: var(--primary-color); box-shadow: none; margin-top: 10px;">Continue as a Guest</button>
+                <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; margin-top: 10px;">
+                    <button id="continueAsGuestBtn" class="btn" style="background: none; color: var(--primary-color); box-shadow: none;">Continue as a Guest</button>
+                    <div class="checkbox-group" style="font-size: 0.9rem;">
+                        <input type="checkbox" id="rememberGuestCheckbox" checked>
+                        <label for="rememberGuestCheckbox">Remember on this device</label>
+                    </div>
+                </div>
             </div>
 
             <p style="font-size: 0.9rem; color: var(--secondary-text); margin-top: 30px;">
                 By signing up, you can sync your progress across devices and access our full library of features.
+            </p><br>
+            <p style="font-size: 0.8rem; color: var(--secondary-text);">
+                Note: Sign up and Log in only available on website. Visit lagiote-revise.netlify.app to register.
             </p>
         </div>
     </div>
@@ -1139,12 +1159,19 @@ For v1.20 (final version before total redo):
                             <option value="topic">Topic / Filename Only</option>
                         </select>
                     </div>
-                     <div class="form-group">
+                    <div class="form-group">
                         <label for="aiPromptSelection">AI Prompt</label>
                         <div class="form-group-inline">
                             <select id="aiPromptSelection" style="flex-grow:1;"></select>
                             <button id="editPromptBtn" class="btn btn-secondary hidden" style="padding: 12px 15px;">Edit</button>
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiCardType">Card Type</label>
+                        <select id="aiCardType">
+                            <option value="flashcard" selected>Flashcard</option>
+                            <option value="sequence">Sequence (ordered steps)</option>
+                        </select>
                     </div>
                      <div class="form-group">
                         <label for="flashcard-count-setting">Max Flashcards per Document</label>
@@ -1399,6 +1426,7 @@ For v1.20 (final version before total redo):
                     <div class="flashcard-inner">
                         <div class="flashcard-front">
                             <div id="cardBucketInfo">New</div>
+                            <div id="cardStatsInfo" style="position: absolute; top: 15px; right: 20px; font-size: 0.9rem; text-align: right;"></div>
                             <div id="cardQuestionContent">
                                 <div class="question" id="cardQuestion"></div>
                             </div>
@@ -1477,6 +1505,7 @@ For v1.20 (final version before total redo):
                 <option value="flashcard">Flashcards</option>
                 <option value="multiple_choice">Multiple Choice</option>
                 <option value="type">Type Answer</option>
+                <option value="sequence">Sequence Practice</option>
                 <option value="mixed">Mixed Types</option>
             </select>
         </div>
@@ -1523,21 +1552,37 @@ For v1.20 (final version before total redo):
         </div>
         <div id="testCardView" class="hidden sub-view">
             <div class="round-info" id="testCardInfo">Question 1 of 10</div>
-            <div class="flashcard">
-                <div class="flashcard-inner">
-                    <div class="flashcard-front">
-                        <div class="question" id="testQuestion"></div>
-                    </div><br><br><br><br>
-                    <br>
-                    <div class="flashcard-back">
-                        <div id="testAnswerContent" class="hidden">
-                            <div class="answer" id="testAnswer"></div>
-                        </div>
+            
+            <!-- New Sequence Test View -->
+            <div id="testSequenceView" class="hidden" style="width: 100%;">
+                <div class="flashcard-front">
+                    <h3 style="margin-bottom: 20px;">Put these items in the correct order:</h3>
+                    <div id="testDragDropList" class="deck-cards-list" style="max-height: none; border-style: dashed;">
                     </div>
-                    <br><br><br>
+                </div>
+                <div class="answer-buttons">
+                    <button id="testCheckSequenceBtn" class="btn btn-show" onclick="checkTestSequence()">Check Order</button>
                 </div>
             </div>
-            <div id="testOptions" class="hidden"></div>
+
+            <!-- Regular Test View -->
+            <div id="testRegularView">
+                <div class="flashcard">
+                    <div class="flashcard-inner">
+                        <div class="flashcard-front">
+                            <div class="question" id="testQuestion"></div>
+                        </div><br><br><br><br>
+                        <br>
+                        <div class="flashcard-back">
+                            <div id="testAnswerContent" class="hidden">
+                                <div class="answer" id="testAnswer"></div>
+                            </div>
+                        </div>
+                        <br><br><br>
+                    </div>
+                </div>
+                <div id="testOptions" class="hidden"></div>
+            </div>
             <div style="text-align: center; margin-top: 30px;">
                 <textarea id="testAnswerInput" class="form-group textarea hidden" placeholder="Type your answer here..."></textarea>
                 <div id="testAccentButtonsContainer" class="accent-buttons hidden"></div>
@@ -1850,10 +1895,14 @@ For v1.20 (final version before total redo):
     <div class="section-title" style="padding-top: 20px;">Your Learning Analytics</div>
     
     <div class="settings-container" style="margin-bottom: 30px;">
-        <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+        <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
             <div class="stat">
                 <div class="stat-value" id="analyticsStreak">0 days</div>
-                <div class="stat-label">Current Study Streak</div>
+                <div class="stat-label"></div>Current Streak</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="dailyGoalStat">0 / 15m</div>
+                <div class="stat-label">Daily Goal</div>
             </div>
             <div class="stat">
                 <div class="stat-value" id="analyticsTotalTime">0m</div>
@@ -2059,63 +2108,68 @@ For v1.20 (final version before total redo):
     };
 
     window.onload = async function () {
-        console.log('Test 1: Script is starting!');
+        console.log('Script is starting! Online:', navigator.onLine);
+        
+        await initDB();
+        console.log('Database initialized.');
 
-        if (
-            typeof window.netlifyIdentity === 'object' &&
-            typeof window.netlifyIdentity.on === 'function'
-        ) {
-
-        window.netlifyIdentity.on('init', async user => {
-            console.log('Netlify Identity .on("init") event has fired.');
-
-            await initDB();
-            console.log('Database initialized.');
-
-            window.netlifyIdentity.on('login', async user => {
-                handleGuestToUserTransition();
-                await updateUIAfterLogin(user);
-                runSmartCoachChecks('dashboardLoad');
-            });
-
-            window.netlifyIdentity.on('logout', () => {
-                deleteDataFromDB('appData', 'userSession');
-                updateUIAfterLogout();
-            });
-
+        const handleOfflineOrGuest = async () => {
+            console.log('Entering offline/guest mode.');
             await loadSavedData();
             setupEventListeners();
-            loadCookieConsent();
-
-            if (user) {
-                await updateUIAfterLogin(user);
-                runSmartCoachChecks('dashboardLoad');
-            } else {
-                showView('authView', true);
-            }
-
-            updateOnlineStatusUI();
-        });
-
-
-            console.log('Netlify Identity script loaded successfully.');
-            window.netlifyIdentity.init();
-        } else {
-
-            console.warn(
-                '⚠️ Netlify Identity widget could not be loaded. ' +
-                'Continuing in offline/guest mode (no authentication).'
-            );
-
-            await initDB();
-            console.log('Database initialized (offline mode).');
-
-            await loadSavedData();
-            setupEventListeners();
-
+            document.getElementById('appHeader').classList.remove('hidden');
+            document.getElementById('loggedInView').classList.remove('hidden');
             showView('dashboard', true);
             updateOnlineStatusUI();
             runSmartCoachChecks('dashboardLoad');
+        };
+
+        const isRememberedGuest = localStorage.getItem('guestMode') === 'true';
+        const isSessionGuest = sessionStorage.getItem('guestMode') === 'true';
+
+        if (isRememberedGuest || isSessionGuest) {
+            console.log('Continuing as guest.');
+            await handleOfflineOrGuest();
+            return;
+        }
+        
+        if (!navigator.onLine) {
+            console.warn('App is offline. Bypassing Netlify Identity.');
+            await handleOfflineOrGuest();
+            return;
+        }
+
+        if (typeof window.netlifyIdentity === 'object' && typeof window.netlifyIdentity.on === 'function') {
+            console.log('Netlify Identity is available. Initializing...');
+            window.netlifyIdentity.on('init', async user => {
+                console.log('Netlify Identity .on("init") event fired.');
+
+                window.netlifyIdentity.on('login', async u => {
+                    handleGuestToUserTransition();
+                    await updateUIAfterLogin(u);
+                    runSmartCoachChecks('dashboardLoad');
+                });
+
+                window.netlifyIdentity.on('logout', () => {
+                    deleteDataFromDB('appData', 'userSession');
+                    updateUIAfterLogout();
+                });
+
+                await loadSavedData();
+                setupEventListeners();
+                loadCookieConsent();
+
+                if (user) {
+                    await updateUIAfterLogin(user);
+                } else {
+                    showView('authView', true);
+                }
+                updateOnlineStatusUI();
+            });
+            window.netlifyIdentity.init();
+        } else {
+            console.warn('Netlify Identity widget failed to load. Entering offline/guest mode.');
+            await handleOfflineOrGuest();
         }
     };
 
@@ -2734,7 +2788,15 @@ For v1.20 (final version before total redo):
         document.getElementById('authSignupBtn').addEventListener('click', () => netlifyIdentity.open('signup'));
         document.getElementById('authLoginBtn').addEventListener('click', () => netlifyIdentity.open('login'));
         document.getElementById('continueAsGuestBtn').addEventListener('click', () => {
-            localStorage.setItem('hasBeenGuest', 'true');
+            // Only persist guest choice if remember checkbox is checked
+            const rememberGuest = document.getElementById('rememberGuestCheckbox').checked;
+            if (rememberGuest) {
+                localStorage.setItem('guestMode', 'true');
+            } else {
+                // If not remembering, set a session-only flag
+                sessionStorage.setItem('guestMode', 'true');
+            }
+
             const appHeader = document.getElementById('appHeader');
             if (appHeader) {
                 appHeader.classList.remove('hidden');
@@ -2743,8 +2805,6 @@ For v1.20 (final version before total redo):
             const loggedInEl = document.getElementById('loggedInView');
             if (loggedInEl) {
                 loggedInEl.classList.remove('hidden');
-            } else {
-                console.warn('⚠️ Element #loggedInView not found – skipping class toggle.');
             }
 
             const bannerEl = document.getElementById('guestPromptBanner');
@@ -2765,10 +2825,9 @@ For v1.20 (final version before total redo):
                 `;
                 banner.innerHTML = `
                     <strong>Welcome, Guest!</strong><br>
-                    Your progress is stored locally. Sign up to sync across devices.
+                    Your progress is stored ${rememberGuest ? 'on this device' : 'until you close the app'}. Sign up to sync across devices.
                 `;
                 document.body.appendChild(banner);
-                console.warn('⚠️ Element #guestPromptBanner not found – no banner displayed.');
             }
 
             loadCookieConsent();
@@ -2946,6 +3005,11 @@ For v1.20 (final version before total redo):
     }
     
     function showToast(message, type = 'info', duration = 3000, icon = null) {
+        if (globalSettings.enableToasts === false) {
+            if (type !== 'error') {
+                return;
+            }
+        }
         if (globalSettings.enableToasts === false) {
             return;
         }
@@ -3194,6 +3258,7 @@ For v1.20 (final version before total redo):
         document.getElementById('usernameInput').value = settings?.username || '';
         document.getElementById('enableInStudyEditing').checked = settings?.enableInStudyEditing || false;
         document.getElementById('toggleExamPlanBanner').checked = !settings?.hideExamPlanBanner;
+        document.getElementById('enableToastsToggle').checked = (settings?.enableToasts !== false);
         showView('settingsView');
     }
 
@@ -3201,10 +3266,18 @@ For v1.20 (final version before total redo):
         if (activeView === 'editorView' && !isEditorClean()) {
             showConfirmModal(
                 'You have unsaved changes. Are you sure you want to leave?',
-                () => { 
+                async () => { 
+                    // If clicking the logo, force a full page reload to ensure all UI state is reset
+                    if (isFromLogo) {
+                        // end any active session first
+                        if (currentDeckId && currentMode) endSession();
+                        // reload the application
+                        window.location.reload();
+                        return;
+                    }
                     transitionView('dashboard'); 
                     if (currentDeckId && currentMode) endSession();
-                    resetDashboardState(true); // Call our new helper
+                    resetDashboardState(true);
                 }
             );
             return;
@@ -3212,9 +3285,22 @@ For v1.20 (final version before total redo):
 
         if (activeView !== 'dashboard') {
             if (currentDeckId && currentMode) await endSession();
-            showView('dashboard', false, () => resetDashboardState(isFromLogo));
+            if (isFromLogo) {
+                // Force a full reload of the app so the dashboard is guaranteed fresh
+                if (currentDeckId && currentMode) await endSession();
+                window.location.reload();
+                return;
+            } else {
+                showView('dashboard', false, () => resetDashboardState(isFromLogo));
+            }
         } else {
-            resetDashboardState(isFromLogo);
+            if (isFromLogo) {
+                // Reload the full app to clear transient state
+                window.location.reload();
+                return;
+            } else {
+                resetDashboardState(isFromLogo);
+            }
         }
     }
 
@@ -3451,7 +3537,7 @@ For v1.20 (final version before total redo):
                 if (deck.typeHint === 'Sequence') {
                     actionButtonsHTML = `
                         <button class="action-btn learn-btn spaced-btn" style="grid-column: 1 / 3;" onclick="event.stopPropagation(); startSequenceSession('${deck.id}')">
-                            Practice Sequence
+                            Learn Sequence
                         </button>
                     `;
                 } else {
@@ -3730,10 +3816,18 @@ For v1.20 (final version before total redo):
         document.getElementById('deckTitle').value = deck.name;
         document.getElementById('deckCategory').value = deck.category;
         document.getElementById('deckNotes').value = deck.notes || '';
+        // Ensure the editor knows the deck type (Sequence vs General/Standard)
+        const deckTypeHintEl = document.getElementById('deckTypeHint');
+        if (deckTypeHintEl) deckTypeHintEl.value = deck.typeHint || 'General';
+
         const container = document.getElementById('flashcardsContainer');
         container.innerHTML = '';
         editorCardCounter = 0;
-        deck.cards.forEach(card => editorAddNewCard(card));
+        // Choose proper add method based on deck typeHint
+        const addType = (deck.typeHint === 'Sequence') ? 'Sequence' : 'Standard';
+        deck.cards.forEach(card => editorAddNewCard(addType, card));
+        // Make sure editor view (buttons, sortable) matches the deck type
+        toggleEditorView(deck.typeHint || 'General');
         currentDeckId = deckId;
     }
 
@@ -3993,16 +4087,17 @@ For v1.20 (final version before total redo):
         button.closest('.image-controls').nextElementSibling.nextElementSibling.click();
     }
 
-    function handleImageFile(input) {
+    async function handleImageFile(input) {
         const file = input.files[0];
         if (file && file.type.startsWith('image/')) {
             const reader = new FileReader();
-            reader.onload = e => {
+            reader.onload = async e => {
                 const dataUrl = e.target.result;
+                const compressedUrl = await compressImage(dataUrl);
                 const preview = input.previousElementSibling;
                 const dataInput = input.nextElementSibling;
-                preview.innerHTML = `<img src="${dataUrl}">`;
-                dataInput.value = dataUrl;
+                preview.innerHTML = `<img src="${compressedUrl}">`;
+                dataInput.value = compressedUrl;
             };
             reader.readAsDataURL(file);
         }
@@ -4210,6 +4305,7 @@ For v1.20 (final version before total redo):
         globalSettings.enableInStudyEditing = document.getElementById('enableInStudyEditing').checked;
         globalSettings.enableInStudyEditing = document.getElementById('enableInStudyEditing').checked;
         globalSettings.hideExamPlanBanner = !document.getElementById('toggleExamPlanBanner').checked;
+        globalSettings.enableToasts = document.getElementById('enableToastsToggle').checked;
         await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
         showToast('Settings saved!');
     }
@@ -4578,6 +4674,14 @@ For v1.20 (final version before total redo):
                 else poolSize = 3;
                 
                 studyState.activeLearningPool = nonMasteredCards.slice(0, poolSize);
+                const poolList = document.getElementById('activePoolList');
+                if (studyState.activeLearningPool.length > 0) {
+                     poolList.innerHTML = studyState.activeLearningPool.map(card => 
+                        `<div class="deck-card-item" style="padding: 10px; border: none;">${card.question}</div>`
+                    ).join('');
+                } else {
+                    poolList.innerHTML = `<p style="text-align: center; color: var(--secondary-text);">No more cards to learn in this session!</p>`;
+                }
                 studyState.roundCards = shuffleArray(studyState.activeLearningPool);
 
             } else if (currentMode === 'review') {
@@ -4697,6 +4801,8 @@ For v1.20 (final version before total redo):
 
 
         async function showNextCard() {
+            const cardStatsInfo = document.getElementById('cardStatsInfo');
+            if(cardStatsInfo) cardStatsInfo.innerHTML = '';
             document.getElementById('flashcardViewContainer').classList.add('hidden');
             document.getElementById('passiveReviewView').classList.add('hidden');
             document.getElementById('dragDropView').classList.add('hidden');
@@ -4717,6 +4823,20 @@ For v1.20 (final version before total redo):
                 }
 
                 const card = studyState.roundCards[studyState.currentCardIndex];
+                
+                if (card && studyState.knowledgeStates) {
+                    const state = studyState.knowledgeStates.get(card.id);
+                    if (state) {
+                        const masteryPercent = Math.round(state.masteryScore * 100);
+                        const pRecall = calculatePRecall(state.stability, state.lastReviewed);
+                        const urgency = (1 - pRecall) * 100;
+                        
+                        document.getElementById('cardStatsInfo').innerHTML = `
+                            <div style="font-weight: 500;">Mastery: <span style="color: var(--primary-color);">${masteryPercent}%</span></div>
+                            <div style="font-size: 0.8rem; color: var(--secondary-text);">Urgency: ${urgency.toFixed(0)}%</div>
+                        `;
+                    }
+                }
                 
                 document.getElementById('flashcardViewContainer').classList.remove('hidden');
                 document.getElementById('cardQuestion').innerHTML = card.question;
@@ -4741,7 +4861,15 @@ For v1.20 (final version before total redo):
 
             if (currentMode === 'sequence') {
                 const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
+                if (!currentChunk) {
+                    showToast("Sequence chunk not found", "error");
+                    endSession();
+                    return;
+                }
                 const card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
+                
+                // Update round info display for sequence mode
+                document.getElementById('cardRoundInfo').textContent = `Chunk ${studyState.currentChunkIndex + 1} - Item ${studyState.currentCardIndex + 1} of ${currentChunk.length}`;
 
                 switch (studyState.sequencePhase) {
                     case 'Passive Review':
@@ -4777,7 +4905,7 @@ For v1.20 (final version before total redo):
                             if (studyState.currentCardIndex === 0) {
                                 qElement.innerHTML = `
                                     <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔹 Forward Chaining 🔹</div>
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Forward Chaining</div>
                                         <div style="font-size: 1.3rem;">What is the <strong>first item</strong> in this sequence?</div>
                                     </div>
                                 `;
@@ -4785,7 +4913,7 @@ For v1.20 (final version before total redo):
                                 const prevCard = currentChunk[studyState.currentCardIndex - 1];
                                 qElement.innerHTML = `
                                     <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔹 Forward Chaining 🔹</div>
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Forward Chaining </div>
                                         <div style="font-size: 1.1rem; margin-bottom: 20px;">What comes <strong>after</strong>:</div>
                                         <div style="
                                             background: var(--input-bg);
@@ -4803,7 +4931,7 @@ For v1.20 (final version before total redo):
                             if (studyState.currentCardIndex === currentChunk.length - 1) {
                                 qElement.innerHTML = `
                                     <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔸 Backward Chaining 🔸</div>
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Backward Chaining</div>
                                         <div style="font-size: 1.3rem;">What is the <strong>last item</strong> in this sequence?</div>
                                     </div>
                                 `;
@@ -4811,7 +4939,7 @@ For v1.20 (final version before total redo):
                                 const nextCard = currentChunk[studyState.currentCardIndex + 1];
                                 qElement.innerHTML = `
                                     <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">🔸 Backward Chaining 🔸</div>
+                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Backward Chaining</div>
                                         <div style="font-size: 1.1rem; margin-bottom: 20px;">What comes <strong>before</strong>:</div>
                                         <div style="
                                             background: var(--input-bg);
@@ -4908,22 +5036,40 @@ For v1.20 (final version before total redo):
 
         async function moveToNextSequencePhase() {
             const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
+            if (!currentChunk || currentChunk.length === 0) {
+                showToast("No more items in this sequence", "info");
+                showComplete();
+                return;
+            }
             let nextPhase = null;
+
+            // For sequences with length 2, simplify the learning process
+            const isShortSequence = currentChunk.length <= 2;
 
             switch (studyState.sequencePhase) {
                 case null:
                     nextPhase = 'Passive Review';
                     break;
                 case 'Passive Review':
-                    nextPhase = 'Forward Chaining';
-                    studyState.currentCardIndex = 0;
+                    // For very short sequences, skip forward/backward chaining
+                    if (isShortSequence) {
+                        nextPhase = 'Drag and Drop';
+                    } else {
+                        nextPhase = 'Forward Chaining';
+                        studyState.currentCardIndex = 0;
+                    }
                     break;
                 case 'Forward Chaining':
                     nextPhase = 'Backward Chaining';
                     studyState.currentCardIndex = currentChunk.length - 1;
                     break;
                 case 'Backward Chaining':
-                    nextPhase = 'Drag and Drop';
+                    if (isShortSequence) {
+                        showComplete();
+                        return;
+                    } else {
+                        nextPhase = 'Drag and Drop';
+                    }
                     break;
                 case 'Drag and Drop':
                     if (studyState.currentChunkIndex > 0) {
@@ -5144,6 +5290,8 @@ For v1.20 (final version before total redo):
 
         async function moveCard(card, correct) {
             const deckIdForThisCard = card.deckId || currentDeckId;
+            const cardInDeck = decks[deckIdForThisCard]?.cards.find(c => c.id === card.id);
+            if(cardInDeck) cardInDeck.isNew = false;
             if (!deckIdForThisCard || !decks[deckIdForThisCard]) {
                 console.error("moveCard failed: Could not determine the card's origin deck.");
                 studyState.currentCardIndex++;
@@ -5151,7 +5299,6 @@ For v1.20 (final version before total redo):
                 return;
             }
             
-            const cardInDeck = decks[deckIdForThisCard].cards.find(c => c.id === card.id);
             if(cardInDeck) cardInDeck.isNew = false;
      
             const lastLog = currentInteractionLog; 
@@ -5777,6 +5924,50 @@ For v1.20 (final version before total redo):
             });
         }
 
+        function compressImage(dataUrl, quality = 0.7, maxSizeKB = 150) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    let width = img.width;
+                    let height = img.height;
+                    const MAX_WIDTH = 1024;
+                    const MAX_HEIGHT = 1024;
+
+                    if (width > height) {
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+                    } else {
+                        if (height > MAX_HEIGHT) {
+                            width *= MAX_HEIGHT / height;
+                            height = MAX_HEIGHT;
+                        }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    let compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                    
+                    // Check size
+                    const head = 'data:image/jpeg;base64,';
+                    const imageSizeKB = Math.round((compressedDataUrl.length - head.length) * 3 / 4 / 1024);
+
+                    if (imageSizeKB > maxSizeKB) {
+                        console.log(`Image too large (${imageSizeKB}KB), further compression needed.`);
+                    }
+                    
+                    resolve(compressedDataUrl);
+                };
+                img.onerror = () => resolve(dataUrl); 
+                img.src = dataUrl;
+            });
+        }
+
         function showConfirmModal(text, onConfirm, title = "Confirm Action") {
             const modal = document.getElementById('confirmActionModal');
             document.getElementById('confirmActionTitle').textContent = title;
@@ -5820,9 +6011,19 @@ For v1.20 (final version before total redo):
                 return;
             }
             
-            practiceTestState.cards = shuffleArray([...deck.cards]).slice(0, numQuestions);
+            // If it's a sequence test, take sequences in their complete form
+            if (testType === 'sequence') {
+                if (deck.typeHint !== 'Sequence') {
+                    showToast("This deck is not marked as a sequence deck", "error");
+                    return;
+                }
+                practiceTestState.cards = [...deck.cards];
+            } else {
+                practiceTestState.cards = shuffleArray([...deck.cards]).slice(0, numQuestions);
+            }
+            
             practiceTestState.testType = testType;
-            practiceTestState.numQuestions = numQuestions;
+            practiceTestState.numQuestions = testType === 'sequence' ? 1 : numQuestions;
             practiceTestState.currentCardIndex = 0;
             practiceTestState.correctCount = 0;
             practiceTestState.incorrectCount = 0;
@@ -5865,8 +6066,19 @@ For v1.20 (final version before total redo):
                 return;
             }
 
-            const card = practiceTestState.cards[practiceTestState.currentCardIndex];
             const testType = practiceTestState.testType;
+            
+            // Handle sequence test type
+            if (testType === 'sequence') {
+                initSequenceTest(practiceTestState.cards);
+                return;
+            }
+            
+            // Reset views
+            document.getElementById('testSequenceView').classList.add('hidden');
+            document.getElementById('testRegularView').classList.remove('hidden');
+
+            const card = practiceTestState.cards[practiceTestState.currentCardIndex];
             let currentTestType = testType;
             if (testType === 'mixed') {
                 currentTestType = Math.random() > 0.5 ? 'multiple_choice' : 'type';
@@ -6424,8 +6636,13 @@ For v1.20 (final version before total redo):
                     const newMastery = (oldMastery * (1 - performanceWeight)) + (performance * performanceWeight);
 
                     let newStability;
-                    if (wasCorrect) newStability = oldStability + (0.1 * oldMastery * performanceModifier); // Also boost stability gain
-                    else newStability = oldStability - (0.2 * oldMastery);
+                    if (wasCorrect) {
+                        const stabilityGain = 0.4 * oldMastery * iqs * performanceModifier;
+                        newStability = oldStability + stabilityGain;
+                    } else {
+                        const stabilityLoss = 0.4 * oldStability;
+                        newStability = oldStability - stabilityLoss;
+                    }
                     
                     state.masteryScore = Math.max(0.01, Math.min(0.99, newMastery)); 
                     state.stability = Math.max(0.1, newStability); 
@@ -7010,31 +7227,46 @@ For v1.20 (final version before total redo):
             loaderIcon.classList.remove('hidden');
             document.getElementById('flashcard-summary').classList.add('hidden');
 
-            try {
+                try {
                 const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 30000));
+                const selectedType = document.getElementById('aiCardType') ? document.getElementById('aiCardType').value : 'flashcard';
                 let apiPromise;
 
                 if (isElectron) {
-                    apiPromise = window.electronAPI.generateDeck({ documents: documentsForAi });
+                    apiPromise = window.electronAPI.generateDeck({ documents: documentsForAi, cardType: selectedType });
                 } else {
                     apiPromise = fetch('/.netlify/functions/getAiCompletion', {
                         method: 'POST',
-                        body: JSON.stringify({ documents: documentsForAi })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ documents: documentsForAi, cardType: selectedType })
                     }).then(response => {
                         if (!response.ok) {
                             throw new Error(`Server function error: ${response.status}`);
                         }
                         return response.json();
                     }).then(result => {
-                        if (!result.flashcardText) {
-                            throw new Error('Server function returned empty response.');
+                        // result may be { type: 'flashcard', cards: [...] } or { type: 'sequence', sequences: [...] } or legacy { type: 'flashcard-legacy', flashcardText }
+                        if (!result) throw new Error('Empty response from server function.');
+
+                        if (result.type === 'flashcard' && Array.isArray(result.cards)) {
+                            return result.cards.map(c => ({ question: c.question || c.q || '', answer: c.answer || c.a || '' }));
                         }
-                        return result.flashcardText.split('\n').map(line => {
-                            const parts = line.split('\t');
-                            return parts.length === 2 && parts[0].trim() && parts[1].trim() 
-                                ? { question: parts[0].trim(), answer: parts[1].trim() } 
-                                : null;
-                        }).filter(Boolean);
+
+                        if (result.type === 'flashcard-legacy' && result.flashcardText) {
+                            return result.flashcardText.split('\n').map(line => {
+                                const parts = line.split('\t');
+                                return parts.length === 2 && parts[0].trim() && parts[1].trim()
+                                    ? { question: parts[0].trim(), answer: parts[1].trim() }
+                                    : null;
+                            }).filter(Boolean);
+                        }
+
+                        if (result.type === 'sequence' && Array.isArray(result.sequences)) {
+                            // For sequences, return array where each item has a special shape so renderAiGeneratedCards knows to display steps
+                            return result.sequences.map(s => ({ _isSequence: true, title: s.title || s.term || s.name || '', description: s.description || s.desc || s.note || '', steps: s.steps || [] }));
+                        }
+
+                        throw new Error('Unexpected response format from AI function.');
                     });
                 }
                 const generatedCards = await Promise.race([timeoutPromise, apiPromise]);
@@ -7069,17 +7301,38 @@ For v1.20 (final version before total redo):
                     </div>`;
             } else {
                 // If there are cards, build the list HTML.
-                listContainer.innerHTML = cards.map((card, index) => `
-                    <div class="generated-card" data-index="${index}">
-                        <div class="question">${card.question}</div>
-                        <div class="answer">${card.answer}</div>
-                        <div class="generated-card-actions">
-                            <button class="generated-card-action-btn delete" title="Delete Card" onclick="deleteGeneratedCard(${index})">&times;</button>
-                        </div>
-                    </div>
-                `).join('');
+                listContainer.innerHTML = cards.map((card, index) => {
+                    if (card._isSequence) {
+                        const stepsHtml = (card.steps || []).map(s => `<li>${s}</li>`).join('');
+                        return `
+                            <div class="generated-sequence" data-index="${index}">
+                                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                                    <div style="font-weight:700; font-size:1.05rem;">${card.title || 'Sequence'}</div>
+                                    <div class="generated-card-actions">
+                                        <button class="generated-card-action-btn delete" title="Delete Sequence" onclick="deleteGeneratedCard(${index})">&times;</button>
+                                    </div>
+                                </div>
+                                ${card.description ? `<div style="color:var(--secondary-text); margin-top:6px;">${card.description}</div>` : ''}
+                                <ol style="margin-top:8px; padding-left:18px; color:var(--text-color);">${stepsHtml}</ol>
+                            </div>
+                        `;
+                    } else {
+                        return `
+                            <div class="generated-card" data-index="${index}">
+                                <div class="question">${card.question}</div>
+                                <div class="answer">${card.answer}</div>
+                                <div class="generated-card-actions">
+                                    <button class="generated-card-action-btn delete" title="Delete Card" onclick="deleteGeneratedCard(${index})">&times;</button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }).join('');
             }
-            document.getElementById('flashcard-count').textContent = `Generated Flashcards (${cards.length})`;
+            // Update heading to be generic
+            const heading = document.getElementById('flashcard-count');
+            const isSequence = cards.length > 0 && cards[0]._isSequence;
+            heading.textContent = isSequence ? `Generated Sequences (${cards.length})` : `Generated Flashcards (${cards.length})`;
         }
 
         function deleteGeneratedCard(index) {
@@ -7099,10 +7352,32 @@ For v1.20 (final version before total redo):
                 return;
             }
 
-            const finalCards = cards.map(c => ({
-                id: Date.now() + Math.random(),
-                question: c.question,
-                answer: c.answer,
+            // If these are sequences, create a Sequence deck
+            if (cards[0] && cards[0]._isSequence) {
+                const finalCards = cards.map((s, idx) => ({
+                    id: Date.now() + Math.random() + idx,
+                    question: s.description || '',
+                    answer: s.title || '',
+                    order: idx + 1,
+                    isNew: true,
+                    questionImage: '',
+                    answerImage: ''
+                }));
+
+                await createNewDeck(deckName, 'Other', finalCards, '', 'Sequence');
+                showToast(`Sequence deck "${deckName}" created successfully!`, 'success');
+                backToDashboard();
+                return;
+            }
+
+            // Default: standard flashcards
+            const finalCards = cards.map((c, idx) => ({
+                id: Date.now() + Math.random() + idx,
+                question: c.question || '',
+                answer: c.answer || '',
+                questionImage: '',
+                answerImage: '',
+                order: 0,
                 isNew: true
             }));
 
@@ -7509,9 +7784,21 @@ For v1.20 (final version before total redo):
 
             prioritizedCards.sort((a, b) => b.priorityScore - a.priorityScore);
             
-            const sessionSize = 50; // This could be a user setting later
-            return prioritizedCards.slice(0, sessionSize);
-        }
+                const minSessionSize = 15;
+                const maxSessionSize = 50;
+                const highIntensityDays = 30;
+
+                let sessionSize;
+
+                if (totalDaysRemaining >= highIntensityDays) {
+                    sessionSize = minSessionSize;
+                } else {
+                    const progress = (highIntensityDays - totalDaysRemaining) / (highIntensityDays - 1);
+                    sessionSize = Math.round(minSessionSize + (maxSessionSize - minSessionSize) * progress);
+                }
+                
+                return prioritizedCards.slice(0, sessionSize);
+            }
 
         function showExamPlanModal() {
             const deckSelector = document.getElementById('examPlanDeckSelector');
@@ -7904,15 +8191,28 @@ For v1.20 (final version before total redo):
 
                 const syncResult = await response.json();
 
-                for (const deck of syncResult.updatedDecks) {
-                    await saveDataToDB('decks', deck); 
-                    decks[deck.id] = deck; 
-                }
-                for (const state of syncResult.updatedKnowledgeStates) {
-                    await saveDataToDB('userKnowledgeState', state);
-                }
+                    const deckTransaction = db.transaction(['decks'], 'readwrite');
+                    const deckStore = deckTransaction.objectStore('decks');
+                    for (const serverDeck of syncResult.updatedDecks) {
+                        deckStore.put(serverDeck); 
+                        decks[serverDeck.id] = serverDeck;
+                    }
 
-                localStorage.setItem('lastSynced', syncResult.newTimestamp);
+                    const knowledgeTransaction = db.transaction(['userKnowledgeState'], 'readwrite');
+                    const knowledgeStore = knowledgeTransaction.objectStore('userKnowledgeState');
+                    for (const serverState of syncResult.updatedKnowledgeStates) {
+                        knowledgeStore.put(serverState);
+                    }
+                    
+                    if (syncResult.deletedDeckIds && syncResult.deletedDeckIds.length > 0) {
+                        const deleteDeckTrans = db.transaction(['decks'], 'readwrite');
+                        syncResult.deletedDeckIds.forEach(id => {
+                            deleteDeckTrans.objectStore('decks').delete(id);
+                            delete decks[id];
+                        });
+                    }
+
+                    localStorage.setItem('lastSynced', syncResult.newTimestamp);
                 showToast('Sync complete!', 'success');
 
             } catch (error) {
