@@ -10,22 +10,46 @@
     <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
     <script>
         window.onload = async function () {
-            console.log('Test 1: Script is starting!');
+        console.log('Script is starting! Online:', navigator.onLine);
+        await initDB();
+        console.log('Database initialized.');
 
-            if (
-                typeof window.netlifyIdentity === 'object' &&
-                typeof window.netlifyIdentity.on === 'function'
-            ) {
+        const handleOfflineOrGuest = async () => {
+            console.log('Entering offline/guest mode.');
+            await loadSavedData();
+            setupEventListeners();
+            document.getElementById('appHeader').classList.remove('hidden');
+            document.getElementById('loggedInView').classList.remove('hidden');
+            showView('dashboard', true);
+            updateOnlineStatusUI();
+            runSmartCoachChecks('dashboardLoad');
+        };
 
+        const isRememberedGuest = localStorage.getItem('guestMode') === 'true';
+
+        if (isRememberedGuest) {
+            console.log('Continuing as remembered guest.');
+            await handleOfflineOrGuest();
+            return;
+        }
+
+        if (!navigator.onLine) {
+            console.warn('App is offline. Showing auth view for guest selection.');
+            await loadSavedData();
+            setupEventListeners();
+            showView('authView', true);
+            updateOnlineStatusUI();
+            return;
+        }
+
+        if (typeof window.netlifyIdentity === 'object' && typeof window.netlifyIdentity.on === 'function') {
+            console.log('Netlify Identity is available. Initializing...');
             window.netlifyIdentity.on('init', async user => {
-                console.log('Netlify Identity .on("init") event has fired.');
+                console.log('Netlify Identity .on("init") event fired.');
 
-                await initDB();
-                console.log('Database initialized.');
-
-                window.netlifyIdentity.on('login', async user => {
+                window.netlifyIdentity.on('login', async u => {
                     handleGuestToUserTransition();
-                    await updateUIAfterLogin(user);
+                    await updateUIAfterLogin(u);
                     runSmartCoachChecks('dashboardLoad');
                 });
 
@@ -40,35 +64,20 @@
 
                 if (user) {
                     await updateUIAfterLogin(user);
-                    runSmartCoachChecks('dashboardLoad');
                 } else {
                     showView('authView', true);
                 }
-
                 updateOnlineStatusUI();
             });
-
-
-                console.log('Netlify Identity script loaded successfully.');
-                window.netlifyIdentity.init();
-            } else {
-
-                console.warn(
-                    'Netlify Identity widget could not be loaded. ' +
-                    'Continuing in offline/guest mode (no authentication).'
-                );
-
-                await initDB();
-                console.log('Database initialized (offline mode).');
-
-                await loadSavedData();
-                setupEventListeners();
-
-                showView('dashboard', true);
-                updateOnlineStatusUI();
-                runSmartCoachChecks('dashboardLoad');
-            }
-        };
+            window.netlifyIdentity.init();
+        } else {
+            console.warn('Netlify Identity widget failed to load despite being online. Showing auth view.');
+            await loadSavedData();
+            setupEventListeners();
+            showView('authView', true);
+            updateOnlineStatusUI();
+        }
+    };
     </script>
     <script id="termly-script" data-src="https://app.termly.io/resource-blocker/acc0f1f0-9746-4ec5-a629-1def23043b13?autoBlock=on"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD"></script>
@@ -847,6 +856,7 @@
             <p id="loadingMessage" style="font-size: 1.1rem; color: var(--secondary-text); font-weight: 500;">Loading...</p>
         </div>
     </div>
+    
     <div id="dynamicToast" class="toast"></div>
     <div id="authView" class="container view-container">
         <div style="text-align: center; max-width: 600px;">
@@ -887,7 +897,7 @@
             </div>
             <div class="welcome-text">
                 <h1 id="welcomeMessage">Lagiote Revise</h1>
-                <span style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.20</span>
+                <span style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.21</span>
                 <div id="onlineStatusIndicator" style="display: flex; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 5px; margin-left: 15px;">
                     <div id="onlineStatusDot" style="width: 10px; height: 10px; border-radius: 50%;"></div>
                     <span id="onlineStatusText" style="font-size: 0.8rem; font-weight: 500;"></span>
@@ -1885,7 +1895,7 @@
         <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
             <div class="stat">
                 <div class="stat-value" id="analyticsStreak">0 days</div>
-                <div class="stat-label"></div>Current Streak</div>
+                <div class="stat-label">Current Streak</div>
             </div>
             <div class="stat">
                 <div class="stat-value" id="dailyGoalStat">0 / 15m</div>
@@ -1920,7 +1930,6 @@
         </div>
     </div>
 </div>
-
 <script>
     console.log('Test 1: Script is starting!');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
@@ -6346,7 +6355,6 @@
             });
         }
 
-        // Add this new function to render the deck breakdown chart
         function renderAnalyticsDeckBreakdownChart(deckData) {
             const canvasId = 'analyticsDeckBreakdownChart';
             if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
