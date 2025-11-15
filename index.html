@@ -1,4 +1,5 @@
 <!--
+
     -->
 
 <!DOCTYPE html>
@@ -897,7 +898,7 @@
             </div>
             <div class="welcome-text">
                 <h1 id="welcomeMessage">Lagiote Revise</h1>
-                <span style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.21</span>
+                <span style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.211</span>
                 <div id="onlineStatusIndicator" style="display: flex; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 5px; margin-left: 15px;">
                     <div id="onlineStatusDot" style="width: 10px; height: 10px; border-radius: 50%;"></div>
                     <span id="onlineStatusText" style="font-size: 0.8rem; font-weight: 500;"></span>
@@ -1399,7 +1400,7 @@
         <div id="cardView" class="hidden sub-view">
             <div id="passiveReviewView" class="hidden" style="width: 100%;">
                 <div class="flashcard-front" style="text-align: left;">
-                    <h3 style="text-align: center; margin-bottom: 20px;">Let's learn these:</h3>
+                    <h3 style="text-align: center; margin-bottom: 20px;">Let's learn these!</h3>
                     <ol id="passiveReviewList" style="padding-left: 40px; font-size: 1.2rem; line-height: 1.8;"></ol>
                 </div>
                 <div class="answer-buttons">
@@ -1973,12 +1974,11 @@
         activeLearningPool: [],
         knowledgeStates: new Map(),
         incorrectInThisRound: [],
-        incorrectInThisRound: [],
-        sequencePhase: 'Forward Chaining', 
+        sequencePhase: null,
         sequenceCards: [],      
         sequenceChunks: [],     
-        currentChunkIndex: 0,  
-        sequencePhase: null,
+        currentChunkIndex: 0,
+        correctDragDropOrder: [],
         preGeneratedDistractors: new Map()
     };
     const DEFAULT_DECK_SETTINGS = { learnMode: 'flashcard', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
@@ -2885,11 +2885,6 @@
                         modal.classList.add('show');
 
                         document.getElementById('resumeStudyBtn').onclick = () => modal.classList.remove('show');
-                        document.getElementById('restartCardBtn').onclick = () => {
-                            modal.classList.remove('show');
-                            studyState.currentCardIndex--; 
-                            showNextCard(); 
-                        };
                     }
                 }
             }
@@ -4864,7 +4859,6 @@
                 }
                 const card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
                 
-                // Update round info display for sequence mode
                 document.getElementById('cardRoundInfo').textContent = `Chunk ${studyState.currentChunkIndex + 1} - Item ${studyState.currentCardIndex + 1} of ${currentChunk.length}`;
 
                 switch (studyState.sequencePhase) {
@@ -4894,8 +4888,6 @@
                         document.getElementById('dontKnowBtn').classList.remove('hidden');
                         
                         const qElement = document.getElementById('cardQuestion');
-                        const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
-                        const card = currentChunk[studyState.currentCardIndex];
                         
                         if (studyState.sequencePhase === 'Forward Chaining') {
                             if (studyState.currentCardIndex === 0) {
@@ -4951,6 +4943,38 @@
                             }
                         }
                         startInteractionLog(card.id);
+                        break;
+                    case 'Drag and Drop':
+                        document.getElementById('dragDropView').classList.remove('hidden');
+                        setupDragDropView(currentChunk);
+                        document.getElementById('cardRoundInfo').textContent = `Chunk ${studyState.currentChunkIndex + 1} - Arrange in Order`;
+                        simpleButtons.classList.add('hidden');
+                        break;
+                    case 'Weakest Link':
+                        checkBtn.onclick = checkSequenceAnswer;
+                        dontKnowBtn.onclick = dontKnowSequenceAnswer;
+                        document.getElementById('flashcardViewContainer').classList.remove('hidden');
+                        document.getElementById('writeAnswerInput').classList.remove('hidden');
+                        document.getElementById('checkAnswerBtn').classList.remove('hidden');
+                        document.getElementById('dontKnowBtn').classList.remove('hidden');
+                        const weakestCard = studyState.roundCards[studyState.currentCardIndex];
+                        document.getElementById('cardQuestion').innerHTML = weakestCard.question;
+                        document.getElementById('cardAnswer').innerHTML = weakestCard.answer;
+                        document.getElementById('cardRoundInfo').textContent = `Weakest Link - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
+                        startInteractionLog(weakestCard.id);
+                        break;
+                    case 'InterChunkReview':
+                        checkBtn.onclick = checkSequenceAnswer;
+                        dontKnowBtn.onclick = dontKnowSequenceAnswer;
+                        document.getElementById('flashcardViewContainer').classList.remove('hidden');
+                        document.getElementById('writeAnswerInput').classList.remove('hidden');
+                        document.getElementById('checkAnswerBtn').classList.remove('hidden');
+                        document.getElementById('dontKnowBtn').classList.remove('hidden');
+                        const reviewCard = studyState.roundCards[studyState.currentCardIndex];
+                        document.getElementById('cardQuestion').innerHTML = reviewCard.question;
+                        document.getElementById('cardAnswer').innerHTML = reviewCard.answer;
+                        document.getElementById('cardRoundInfo').textContent = `Quick Review - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
+                        startInteractionLog(reviewCard.id);
                         break;
 
                 }
@@ -5657,12 +5681,27 @@
 
                 if (activeView !== 'studyMode' || document.getElementById('cardView').classList.contains('hidden')) return;
 
-                if (currentMode === 'sequence' && (e.key === 'Enter' || e.key === 'ArrowUp')) {
+                if (currentMode === 'sequence' && (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === ' ')) {
                     const writeInput = document.getElementById('writeAnswerInput');
+                    const dragDropBtn = document.getElementById('checkDragDropBtn');
+                    const passiveReviewView = document.getElementById('passiveReviewView');
+                    
                     if (!writeInput.classList.contains('hidden') && !writeInput.disabled) {
                         e.preventDefault();
                         checkSequenceAnswer();
                         return; 
+                    }
+                    
+                    if (dragDropBtn && !dragDropBtn.classList.contains('hidden')) {
+                        e.preventDefault();
+                        checkDragDropOrder();
+                        return;
+                    }
+                    
+                    if (passiveReviewView && !passiveReviewView.classList.contains('hidden') && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        moveToNextSequencePhase();
+                        return;
                     }
                 }
 
@@ -7385,8 +7424,11 @@
             const list = document.getElementById('dragDropList');
             const shuffledChunk = shuffleArray([...chunk]);
             
+            // Store the correct order for verification (as strings for data attribute comparison)
+            studyState.correctDragDropOrder = chunk.map(card => String(card.id));
+            
             list.innerHTML = shuffledChunk.map((card, idx) => `
-                <div class="deck-card-item drag-item" data-id="${card.id}" style="
+                <div class="deck-card-item drag-item" data-id="${String(card.id)}" style="
                     cursor: grab;
                     padding: 20px;
                     margin-bottom: 12px;
@@ -7398,21 +7440,8 @@
                     gap: 15px;
                     transition: all 0.3s;
                 ">
-                    <div style="
-                        background: var(--primary-color);
-                        color: white;
-                        width: 32px;
-                        height: 32px;
-                        border-radius: 50%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-weight: 600;
-                        flex-shrink: 0;
-                    ">${idx + 1}</div>
                     <div style="flex-grow: 1;">
                         <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 4px;">${card.answer}</div>
-                        ${card.question ? `<div style="color: var(--secondary-text); font-size: 0.9rem;">${card.question}</div>` : ''}
                     </div>
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="color: var(--secondary-text); flex-shrink: 0;">
                         <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
@@ -7439,36 +7468,36 @@
 
 
         function checkDragDropOrder() {
-            const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
             const listItems = document.querySelectorAll('#dragDropList .deck-card-item');
+            const correctOrder = studyState.correctDragDropOrder;
             let isCorrect = true;
             let incorrectCount = 0;
 
+            // Debug logging
+            const currentOrder = Array.from(listItems).map(item => item.dataset.id);
+            console.log('Correct order:', correctOrder);
+            console.log('Current order:', currentOrder);
+
             listItems.forEach((item, index) => {
                 const cardId = item.dataset.id;
-                const numberBadge = item.querySelector('div[style*="border-radius: 50%"]');
                 
-                if (cardId !== currentChunk[index].id) {
+                console.log(`Position ${index}: cardId="${cardId}" vs correctId="${correctOrder[index]}" - Match: ${cardId === correctOrder[index]}`);
+                
+                if (cardId !== correctOrder[index]) {
                     isCorrect = false;
                     incorrectCount++;
                     item.style.borderColor = 'var(--danger-color)';
                     item.style.backgroundColor = '#fff5f5';
-                    if (numberBadge) {
-                        numberBadge.style.backgroundColor = 'var(--danger-color)';
-                    }
                 } else {
                     item.style.borderColor = 'var(--success-color)';
                     item.style.backgroundColor = '#f0fff4';
-                    if (numberBadge) {
-                        numberBadge.style.backgroundColor = 'var(--success-color)';
-                    }
                 }
             });
             
             if (document.body.classList.contains('dark-mode')) {
                 listItems.forEach((item, index) => {
                     const cardId = item.dataset.id;
-                    if (cardId !== currentChunk[index].id) {
+                    if (cardId !== correctOrder[index]) {
                         item.style.backgroundColor = '#c5303030';
                     } else {
                         item.style.backgroundColor = '#2c7a7b';
@@ -7486,10 +7515,6 @@
                     listItems.forEach(item => {
                         item.style.borderColor = 'var(--border-color)';
                         item.style.backgroundColor = 'var(--card-bg)';
-                        const numberBadge = item.querySelector('div[style*="border-radius: 50%"]');
-                        if (numberBadge) {
-                            numberBadge.style.backgroundColor = 'var(--primary-color)';
-                        }
                     });
                 }, 2000);
             }
@@ -7508,7 +7533,17 @@
             const userAnswer = userInput.value.trim();
             const correctAnswer = card.answer.trim();
             
-            const isCorrect = (userAnswer.toLowerCase() === correctAnswer.toLowerCase());
+            // Strip HTML tags and normalize whitespace for comparison
+            const stripHTML = (str) => {
+                const div = document.createElement('div');
+                div.innerHTML = str;
+                return div.textContent || div.innerText || '';
+            };
+            
+            const normalizedUserAnswer = stripHTML(userAnswer).toLowerCase();
+            const normalizedCorrectAnswer = stripHTML(correctAnswer).toLowerCase();
+            
+            const isCorrect = (normalizedUserAnswer === normalizedCorrectAnswer);
 
             logInteraction({ cardID: card.id, wasCorrect: isCorrect, userAnswer: userAnswer, questionType: 'Sequence' });
             
