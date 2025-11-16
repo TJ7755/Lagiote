@@ -8,22 +8,47 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lagiote Revise</title>
-    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+    <!-- Netlify Identity loaded conditionally -->
+    <script>
+        // Load Netlify Identity only when online
+        if (navigator.onLine) {
+            const script = document.createElement('script');
+            script.src = 'https://identity.netlify.com/v1/netlify-identity-widget.js';
+            script.onerror = () => console.warn('Failed to load Netlify Identity');
+            document.head.appendChild(script);
+        }
+    </script>
     <script>
         window.onload = async function () {
         console.log('Script is starting! Online:', navigator.onLine);
-        await initDB();
-        console.log('Database initialized.');
+        
+        try {
+            await initDB();
+            console.log('Database initialized.');
+        } catch (error) {
+            console.error('Failed to initialize database:', error);
+            // Still continue - database might have been partially initialized
+        }
 
         const handleOfflineOrGuest = async () => {
             console.log('Entering offline/guest mode.');
-            await loadSavedData();
+            try {
+                await loadSavedData();
+            } catch (error) {
+                console.warn('Error loading saved data:', error);
+            }
             setupEventListeners();
-            document.getElementById('appHeader').classList.remove('hidden');
-            document.getElementById('loggedInView').classList.remove('hidden');
+            const appHeader = document.getElementById('appHeader');
+            const loggedInView = document.getElementById('loggedInView');
+            if (appHeader) appHeader.classList.remove('hidden');
+            if (loggedInView) loggedInView.classList.remove('hidden');
             showView('dashboard', true);
             updateOnlineStatusUI();
-            runSmartCoachChecks('dashboardLoad');
+            try {
+                runSmartCoachChecks('dashboardLoad');
+            } catch (error) {
+                console.warn('Error running smart coach checks:', error);
+            }
         };
 
         const isRememberedGuest = localStorage.getItem('guestMode') === 'true';
@@ -36,10 +61,7 @@
 
         if (!navigator.onLine) {
             console.warn('App is offline. Showing auth view for guest selection.');
-            await loadSavedData();
-            setupEventListeners();
-            showView('authView', true);
-            updateOnlineStatusUI();
+            await handleOfflineOrGuest();
             return;
         }
 
@@ -61,7 +83,11 @@
 
                 await loadSavedData();
                 setupEventListeners();
-                loadCookieConsent();
+                try {
+                    loadCookieConsent();
+                } catch (error) {
+                    console.warn('Error loading cookie consent:', error);
+                }
 
                 if (user) {
                     await updateUIAfterLogin(user);
@@ -72,58 +98,97 @@
             });
             window.netlifyIdentity.init();
         } else {
-            console.warn('Netlify Identity widget failed to load despite being online. Showing auth view.');
-            await loadSavedData();
-            setupEventListeners();
-            showView('authView', true);
-            updateOnlineStatusUI();
+            console.warn('Netlify Identity widget failed to load. Entering offline mode.');
+            await handleOfflineOrGuest();
         }
     };
     </script>
-    <script id="termly-script" data-src="https://app.termly.io/resource-blocker/acc0f1f0-9746-4ec5-a629-1def23043b13?autoBlock=on"></script>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD"></script>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-86DQ5HTDV9"></script>
+    <!-- Analytics and third-party scripts loaded conditionally -->
+    <script>
+        // Only load analytics if online
+        if (navigator.onLine) {
+            // Google Tag Manager
+            const gtagScript1 = document.createElement('script');
+            gtagScript1.async = true;
+            gtagScript1.src = 'https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD';
+            gtagScript1.onerror = () => console.warn('Failed to load Google Analytics 1');
+            document.head.appendChild(gtagScript1);
+
+            const gtagScript2 = document.createElement('script');
+            gtagScript2.async = true;
+            gtagScript2.src = 'https://www.googletagmanager.com/gtag/js?id=G-86DQ5HTDV9';
+            gtagScript2.onerror = () => console.warn('Failed to load Google Analytics 2');
+            document.head.appendChild(gtagScript2);
+        }
+    </script>
     <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
-
     gtag('config', 'G-86DQ5HTDV9');
     </script>
     <script>
+        // Timeout for Netlify Identity initialization (5 seconds)
+        let netlifyInitTimeout = null;
+        
         async function loadNetlifyIdentity() {
             if (!navigator.onLine) {
-            console.warn("Offline mode: Netlify Identity disabled");
-            window.netlifyOffline = true;
-            return;
+                console.warn("Offline mode: Netlify Identity disabled");
+                window.netlifyOffline = true;
+                return;
             }
 
             const script = document.createElement('script');
             script.src = "https://identity.netlify.com/v1/netlify-identity-widget.js";
-            script.onload = () => {
-            console.log("Netlify Identity loaded");
-
-            if (window.netlifyIdentity) {
-                window.netlifyIdentity.on('login', user => {
-                console.log("🔐 Logged in:", user.email);
-                localStorage.setItem('userToken', user.token.access_token);
-                document.dispatchEvent(new CustomEvent('user-logged-in', { detail: user }));
-                });
-
-                window.netlifyIdentity.on('logout', () => {
-                console.log("👋 Logged out");
-                localStorage.removeItem('userToken');
-                });
-
-                window.netlifyIdentity.init();
-            }
+            script.onerror = () => {
+                console.warn("Netlify Identity script failed to load");
+                clearTimeout(netlifyInitTimeout);
+                // Fallback: treat as offline
+                if (!window.netlifyOffline) {
+                    window.netlifyOffline = true;
+                }
             };
+            script.onload = () => {
+                console.log("Netlify Identity loaded");
+                clearTimeout(netlifyInitTimeout);
+
+                if (window.netlifyIdentity) {
+                    window.netlifyIdentity.on('login', user => {
+                        console.log("🔐 Logged in:", user.email);
+                        localStorage.setItem('userToken', user.token.access_token);
+                        document.dispatchEvent(new CustomEvent('user-logged-in', { detail: user }));
+                    });
+
+                    window.netlifyIdentity.on('logout', () => {
+                        console.log("👋 Logged out");
+                        localStorage.removeItem('userToken');
+                    });
+
+                    window.netlifyIdentity.init();
+                }
+            };
+            
+            // Set a timeout - if Netlify Identity doesn't load in 5 seconds, continue offline
+            netlifyInitTimeout = setTimeout(() => {
+                console.warn("Netlify Identity load timeout - proceeding offline");
+                if (!window.netlifyOffline) {
+                    window.netlifyOffline = true;
+                }
+                // Trigger the fallback UI if window.onload hasn't fired yet
+                if (document.readyState === 'interactive' || document.readyState === 'loading') {
+                    window.dispatchEvent(new Event('netlify-timeout'));
+                }
+            }, 5000);
+
             document.head.appendChild(script);
         }
 
         window.addEventListener('online', () => {
             console.log("🌐 Back online: reloading identity...");
-            loadNetlifyIdentity();
+            if (!window.netlifyOffline || window.netlifyOffline === true) {
+                delete window.netlifyOffline;
+                loadNetlifyIdentity();
+            }
         });
 
         window.addEventListener('offline', () => {
@@ -137,15 +202,48 @@
     <script src="./assets/js/mammoth.browser.min.js"></script>
     <script src="./assets/js/chart.js"></script>
     <script>
-    if (window.netlifyIdentity) {
+    // Check for Netlify Identity safely
+    if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
         window.netlifyIdentity.on('login', async (user) => {
         const token = user.token.access_token;
         window.opener?.postMessage({ type: 'AUTH_TOKEN', token }, '*');
         });
     }
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
+    <!-- CDN libraries loaded conditionally for offline support -->
+    <script>
+        function loadCDNScript(src, onload) {
+            if (!navigator.onLine) {
+                console.warn('Offline: Skipping CDN script', src);
+                if (onload) onload();
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = src;
+            script.onerror = () => {
+                console.warn('Failed to load CDN script:', src);
+                if (onload) onload();
+            };
+            if (onload && !src.includes('module')) {
+                script.onload = onload;
+            }
+            document.head.appendChild(script);
+        }
+        
+        // Load Sortable.js with timeout fallback
+        loadCDNScript('https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js', () => {
+            console.log('Sortable.js loaded or skipped');
+        });
+        
+        // Load Transformers with timeout fallback
+        if (navigator.onLine) {
+            const transformersScript = document.createElement('script');
+            transformersScript.type = 'module';
+            transformersScript.src = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+            transformersScript.onerror = () => console.warn('Failed to load Transformers library');
+            document.head.appendChild(transformersScript);
+        }
+    </script>
     <script src="./assets/js/sequence-test.js"></script>
     <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
@@ -939,7 +1037,7 @@
                 Create an account to save your progress, sync across devices, and access the curricula library.
             </p>
             <div style="margin-top: 40px;">
-                <button class="btn btn-prominent" onclick="netlifyIdentity.open('signup');">Create Free Account</button>
+                <button class="btn btn-prominent" onclick="if(typeof window.netlifyIdentity !== 'undefined') window.netlifyIdentity.open('signup');">Create Free Account</button>
             </div>
         </div>
         <div id="loggedInView" class="hidden">
@@ -2771,19 +2869,35 @@
 
 
     function setupEventListeners() {
-        netlifyIdentity.on('login', user => {
-            handleGuestToUserTransition();
-            updateUIAfterLogin(user);
-        });
+        // Only set up Netlify Identity listeners if it's available
+        if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
+            window.netlifyIdentity.on('login', user => {
+                handleGuestToUserTransition();
+                updateUIAfterLogin(user);
+            });
 
-        netlifyIdentity.on('logout', () => {
-            deleteDataFromDB('appData', 'userSession');
-            updateUIAfterLogout();
-        });
+            window.netlifyIdentity.on('logout', () => {
+                deleteDataFromDB('appData', 'userSession');
+                updateUIAfterLogout();
+            });
+        }
 
-        document.getElementById('authSignupBtn').addEventListener('click', () => netlifyIdentity.open('signup'));
-        document.getElementById('authLoginBtn').addEventListener('click', () => netlifyIdentity.open('login'));
-        document.getElementById('continueAsGuestBtn').addEventListener('click', () => {
+        const authSignupBtn = document.getElementById('authSignupBtn');
+        const authLoginBtn = document.getElementById('authLoginBtn');
+        
+        authSignupBtn?.addEventListener('click', () => {
+            if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
+                window.netlifyIdentity.open('signup');
+            }
+        });
+        
+        authLoginBtn?.addEventListener('click', () => {
+            if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
+                window.netlifyIdentity.open('login');
+            }
+        });
+        
+        document.getElementById('continueAsGuestBtn')?.addEventListener('click', () => {
             // Only persist guest choice if remember checkbox is checked
             const rememberGuest = document.getElementById('rememberGuestCheckbox').checked;
             if (rememberGuest) {
@@ -2980,7 +3094,9 @@
 
         document.getElementById('logoutBtn').addEventListener('click', (e) => {
             e.preventDefault();
-            netlifyIdentity.logout();
+            if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
+                window.netlifyIdentity.logout();
+            }
         });
 
         document.getElementById('deckTypeHint').addEventListener('change', (e) => {
@@ -6893,6 +7009,11 @@
                         generatedDistractors = result.distractors;
                     }
 
+                    // Check if response is offline error from Electron main process
+                    if (generatedDistractors?.offline) {
+                        throw new Error("Offline: " + (generatedDistractors.message || "Cannot generate distractors"));
+                    }
+
                     if (generatedDistractors && generatedDistractors.length >= 3) {
                         const cardInDeck = deckForThisCard.cards.find(c => c.id === correctCard.id);
                         if (cardInDeck) {
@@ -6907,7 +7028,12 @@
                     }
                 } catch (error) {
                     console.error("Failed to generate/cache distractors, falling back to random.", error);
-                    showToast("Couldn't generate smart options, using random.", "error");
+                    const errorMsg = error.message || "Error generating options";
+                    if (errorMsg.includes('Offline')) {
+                        console.log("Offline mode detected, using random distractors");
+                    } else {
+                        showToast("Couldn't generate smart options, using random.", "warning");
+                    }
                 }
             }
             
@@ -7305,6 +7431,11 @@
                 }
                 const generatedCards = await Promise.race([timeoutPromise, apiPromise]);
 
+                // Check if response is offline error from Electron main process
+                if (generatedCards?.offline) {
+                    throw new Error(generatedCards.message || "Cannot generate cards offline");
+                }
+
                 if (!generatedCards || generatedCards.length === 0) {
                     throw new Error("AI did not return any cards.");
                 }
@@ -7313,7 +7444,12 @@
                 document.getElementById('flashcard-summary').classList.remove('hidden');
             } catch (error) {
                 console.error("Deck generation failed:", error);
-                showToast("Sorry, the AI failed to generate cards. Please try again or check your connection.", "error");
+                const errorMsg = error.message || "Unknown error";
+                if (errorMsg.includes('offline')) {
+                    showToast("Cannot generate cards while offline. Try again when you have internet.", "error");
+                } else {
+                    showToast("Sorry, the AI failed to generate cards. Please try again or check your connection.", "error");
+                }
             } finally {
                 // --- Reset UI State ---
                 processBtn.disabled = false;

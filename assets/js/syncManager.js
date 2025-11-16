@@ -25,7 +25,9 @@ function initializeAuth() {
         }
       } else {
         // In web browser
-        netlifyIdentity.close();
+        if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
+          netlifyIdentity.close();
+        }
       }
     });
 
@@ -88,15 +90,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Set up auth-related click handlers
   document.getElementById('authSignupBtn')?.addEventListener('click', () => {
-    netlifyIdentity.open('signup');
+    if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
+      netlifyIdentity.open('signup');
+    }
   });
 
   document.getElementById('authLoginBtn')?.addEventListener('click', () => {
-    netlifyIdentity.open('login');
+    if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
+      netlifyIdentity.open('login');
+    }
   });
 
   document.getElementById('logoutBtn')?.addEventListener('click', () => {
-    netlifyIdentity.logout();
+    if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
+      netlifyIdentity.logout();
+    }
   });
 
   document.getElementById('continueAsGuestBtn')?.addEventListener('click', () => {
@@ -135,13 +143,25 @@ export async function syncQueuedData() {
   }
 
   console.log(`Attempting to sync ${queued.length} items...`);
-  const result = await window.electronAPI.syncData({ decks: queued, token });
+  try {
+    const result = await window.electronAPI.syncData({ decks: queued, token });
 
-  if (result?.success !== false) {
-    console.log("Sync successful, clearing queue");
-    localStorage.removeItem('pendingSync');
-  } else {
-    console.warn("Sync failed; keeping data queued:", result.error);
+    // Handle offline response from main process
+    if (result?.offline) {
+      console.warn("Sync unavailable (offline):", result.message);
+      // Data remains queued and will sync when online
+      return;
+    }
+
+    if (result?.success !== false && !result?.error) {
+      console.log("Sync successful, clearing queue");
+      localStorage.removeItem('pendingSync');
+    } else {
+      console.warn("Sync failed; keeping data queued:", result.error);
+    }
+  } catch (error) {
+    console.error("Sync error (will retry when online):", error);
+    // Keep data queued for retry
   }
 }
 

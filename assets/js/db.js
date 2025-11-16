@@ -6,7 +6,10 @@ export async function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open('StudyStackDB', 4);
 
-        request.onerror = event => reject("Error opening DB: " + event.target.errorCode);
+        request.onerror = event => {
+            const errorMsg = (event.target.error && event.target.error.message) || event.target.errorCode || 'Unknown error';
+            reject("Error opening DB: " + errorMsg);
+        };
         
         request.onsuccess = event => {
             db = event.target.result;
@@ -40,45 +43,81 @@ export async function initDB() {
 
 // Save data to a store
 export async function saveDataToDB(storeName, data) {
+    if (!db) {
+        console.warn('Database not initialized, skipping save to', storeName);
+        return Promise.resolve();
+    }
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction([storeName], 'readwrite');
-        const store = transaction.objectStore(storeName);
-        const request = store.put(data);
-        request.onsuccess = () => resolve();
-        request.onerror = event => reject("Error saving data: " + event.target.error);
+        try {
+            const transaction = db.transaction([storeName], 'readwrite');
+            const store = transaction.objectStore(storeName);
+            const request = store.put(data);
+            request.onsuccess = () => resolve();
+            request.onerror = event => reject("Error saving data: " + (event.target.error && event.target.error.message || event.target.error));
+        } catch (error) {
+            console.warn('Error in saveDataToDB:', error);
+            resolve();
+        }
     });
 }
 
 // Get data from a store
 export async function getDataFromDB(storeName, key) {
+    if (!db) {
+        console.warn('Database not initialized, cannot get from', storeName);
+        return Promise.resolve(undefined);
+    }
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction([storeName], 'readonly');
-        const store = transaction.objectStore(storeName);
-        const request = store.get(key);
-        request.onsuccess = event => resolve(event.target.result);
-        request.onerror = event => reject("Error getting data: " + event.target.error);
+        try {
+            const transaction = db.transaction([storeName], 'readonly');
+            const store = transaction.objectStore(storeName);
+            const request = store.get(key);
+            request.onsuccess = event => resolve(event.target.result);
+            request.onerror = event => reject("Error getting data: " + (event.target.error && event.target.error.message || event.target.error));
+        } catch (error) {
+            console.warn('Error in getDataFromDB:', error);
+            resolve(undefined);
+        }
     });
 }
 
 // Get all data from a store
 export async function getAllDataFromDB(storeName) {
+    if (!db) {
+        console.warn('Database not initialized, cannot get all from', storeName);
+        return Promise.resolve([]);
+    }
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction([storeName], 'readonly');
-        const store = transaction.objectStore(storeName);
-        const request = store.getAll();
-        request.onsuccess = event => resolve(event.target.result);
-        request.onerror = event => reject("Error getting all data: " + event.target.error);
+        try {
+            const transaction = db.transaction([storeName], 'readonly');
+            const store = transaction.objectStore(storeName);
+            const request = store.getAll();
+            request.onsuccess = event => resolve(event.target.result);
+            request.onerror = event => reject("Error getting all data: " + (event.target.error && event.target.error.message || event.target.error));
+        } catch (error) {
+            console.warn('Error in getAllDataFromDB:', error);
+            resolve([]);
+        }
     });
 }
 
 // Delete data from a store
 export async function deleteDataFromDB(storeName, key) {
+    if (!db) {
+        console.warn('Database not initialized, skipping delete from', storeName);
+        return Promise.resolve();
+    }
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction([storeName], 'readwrite');
-        const store = transaction.objectStore(storeName);
-        const request = store.delete(key);
-        request.onsuccess = () => resolve();
-        request.onerror = event => reject("Error deleting data: " + event.target.error);
+        try {
+            const transaction = db.transaction([storeName], 'readwrite');
+            const store = transaction.objectStore(storeName);
+            const request = store.delete(key);
+            request.onsuccess = () => resolve();
+            request.onerror = event => reject("Error deleting data: " + (event.target.error && event.target.error.message || event.target.error));
+        } catch (error) {
+            console.warn('Error in deleteDataFromDB:', error);
+            resolve();
+        }
     });
 }
 

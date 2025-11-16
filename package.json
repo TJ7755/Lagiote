@@ -14,7 +14,7 @@
   "config": {
     "forge": {
       "packagerConfig": {
-        "icon": "assets/icon"
+        "icon": "assets/icon.ico"
       },
       "makers": [
         {
@@ -22,35 +22,6 @@
           "config": {
             "name": "LagioteRevise",
             "setupExe": "LagioteRevise-Setup.exe"
-          }
-        },
-        {
-          "name": "@electron-forge/maker-zip",
-          "platforms": [
-            "darwin"
-          ]
-        },
-        {
-          "name": "@electron-forge/maker-dmg",
-          "config": {
-            "format": "ULFO",
-            "icon": "assets/logo/icon.icns"
-          }
-        },
-        {
-          "name": "@electron-forge/maker-deb",
-          "config": {
-            "options": {
-              "icon": "assets/logo/icon.png"
-            }
-          }
-        },
-        {
-          "name": "@electron-forge/maker-rpm",
-          "config": {
-            "options": {
-              "icon": "assets/logo/icon.png"
-            }
           }
         }
       ]

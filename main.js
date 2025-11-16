@@ -30,14 +30,37 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'), 
+      sandbox: true,
+      // Enable offline support
+      disableBlinkFeatures: 'AutoplayPolicy'
     },
   });
 
   win.loadFile(path.join(__dirname, 'index.html'));
 
+  // Handle load failures - show basic error but don't crash
   win.webContents.on('did-fail-load', (_, errorCode, errorDesc) => {
     console.error(`Failed to load page: ${errorCode} - ${errorDesc}`);
+    // Retry loading after a delay
+    setTimeout(() => {
+      console.log('Retrying page load...');
+      win.loadFile(path.join(__dirname, 'index.html'));
+    }, 2000);
   });
+
+  // Log to help debug offline issues
+  win.webContents.on('did-finish-load', () => {
+    console.log('Main window loaded successfully');
+  });
+
+  // Handle errors in the renderer process
+  win.webContents.on('crashed', () => {
+    console.error('Renderer process crashed');
+    // Reload to recover
+    win.reload();
+  });
+
+  return win;
 }
 
 async function createLoginWindow() {
@@ -368,12 +391,32 @@ ipcMain.handle('open-login-window', async () => {
 
 ipcMain.handle('generate-distractors', async (event, { question, answer }) => {
   try {
-    const response = await fetch(DISTRACTOR_FUNCTION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer })
-    });
-    return await response.json();
+    // Check if online
+    if (!require('os').platform() || process.versions.electron) {
+      // Try to detect offline by attempting a simple check
+      try {
+        const response = await Promise.race([
+          fetch(DISTRACTOR_FUNCTION_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, answer })
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return await response.json();
+      } catch (fetchError) {
+        console.error('Distractor generation error:', fetchError.message);
+        // Return offline error response
+        return {
+          error: 'offline',
+          message: 'Cannot generate distractors offline. Saved decks will work without AI features.',
+          offline: true
+        };
+      }
+    }
   } catch (error) {
     console.error('Distractor generation error:', error);
     throw error;
@@ -382,31 +425,61 @@ ipcMain.handle('generate-distractors', async (event, { question, answer }) => {
 
 ipcMain.handle('gemini-generate-deck', async (event, { documents, cardType = 'flashcard' }) => {
   try {
-    const response = await fetch(NETLIFY_FUNCTION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documents, cardType })
-    });
+    // Attempt to fetch with timeout
+    const response = await Promise.race([
+      fetch(NETLIFY_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documents, cardType })
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 10000))
+    ]);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
     return await response.json();
   } catch (error) {
     console.error('AI generation error:', error);
-    throw error;
+    // Return user-friendly offline error
+    return {
+      error: 'offline',
+      message: 'Cannot generate cards offline. Please check your internet connection or try again later.',
+      offline: true,
+      originalError: error.message
+    };
   }
 });
 
 ipcMain.handle('sync-data', async (event, { decks, token }) => {
   try {
-    const response = await fetch('https://lagiote-revise.netlify.app/.netlify/functions/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(decks)
-    });
+    // Attempt to sync with timeout
+    const response = await Promise.race([
+      fetch('https://lagiote-revise.netlify.app/.netlify/functions/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(decks)
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 10000))
+    ]);
+    
+    if (!response.ok) {
+      throw new Error(`Sync failed with status ${response.status}`);
+    }
+    
     return await response.json();
   } catch (error) {
     console.error('Sync error:', error);
-    throw error;
+    // Return offline response - data will sync when back online
+    return {
+      error: 'offline',
+      message: 'Cannot sync offline. Your changes will be saved locally and synced when online.',
+      offline: true,
+      originalError: error.message
+    };
   }
 });
