@@ -12,15 +12,6 @@ These are the notes of planned features.
     <title>Lagiote Revise</title>
     
     <script>
-        
-        if (navigator.onLine) {
-            const script = document.createElement('script');
-            script.src = 'https://identity.netlify.com/v1/netlify-identity-widget.js';
-            script.onerror = () => console.warn('Failed to load Netlify Identity');
-            document.head.appendChild(script);
-        }
-    </script>
-    <script>
         window.onload = async function () {
         console.log('Script is starting! Online:', navigator.onLine);
         
@@ -67,42 +58,8 @@ These are the notes of planned features.
             return;
         }
 
-        if (typeof window.netlifyIdentity === 'object' && typeof window.netlifyIdentity.on === 'function') {
-            console.log('Netlify Identity is available. Initializing...');
-            window.netlifyIdentity.on('init', async user => {
-                console.log('Netlify Identity .on("init") event fired.');
-
-                window.netlifyIdentity.on('login', async u => {
-                    handleGuestToUserTransition();
-                    await updateUIAfterLogin(u);
-                    runSmartCoachChecks('dashboardLoad');
-                });
-
-                window.netlifyIdentity.on('logout', () => {
-                    deleteDataFromDB('appData', 'userSession');
-                    updateUIAfterLogout();
-                });
-
-                await loadSavedData();
-                setupEventListeners();
-                try {
-                    loadCookieConsent();
-                } catch (error) {
-                    console.warn('Error loading cookie consent:', error);
-                }
-
-                if (user) {
-                    await updateUIAfterLogin(user);
-                } else {
-                    showView('authView', true);
-                }
-                updateOnlineStatusUI();
-            });
-            window.netlifyIdentity.init();
-        } else {
-            console.warn('Netlify Identity widget failed to load. Entering offline mode.');
-            await handleOfflineOrGuest();
-        }
+        // Authentication will be handled by Auth0 (to be implemented)
+        await handleOfflineOrGuest();
     };
     </script>
     
@@ -139,89 +96,9 @@ These are the notes of planned features.
             }
         })();
     </script>
-    <script>
-        
-        let netlifyInitTimeout = null;
-        
-        async function loadNetlifyIdentity() {
-            if (!navigator.onLine) {
-                console.warn("Offline mode: Netlify Identity disabled");
-                window.netlifyOffline = true;
-                return;
-            }
-
-            const script = document.createElement('script');
-            script.src = "https://identity.netlify.com/v1/netlify-identity-widget.js";
-            script.onerror = () => {
-                console.warn("Netlify Identity script failed to load");
-                clearTimeout(netlifyInitTimeout);
-                
-                if (!window.netlifyOffline) {
-                    window.netlifyOffline = true;
-                }
-            };
-            script.onload = () => {
-                console.log("Netlify Identity loaded");
-                clearTimeout(netlifyInitTimeout);
-
-                if (window.netlifyIdentity) {
-                    window.netlifyIdentity.on('login', user => {
-                        console.log("🔐 Logged in:", user.email);
-                        localStorage.setItem('userToken', user.token.access_token);
-                        document.dispatchEvent(new CustomEvent('user-logged-in', { detail: user }));
-                    });
-
-                    window.netlifyIdentity.on('logout', () => {
-                        console.log("👋 Logged out");
-                        localStorage.removeItem('userToken');
-                    });
-
-                    window.netlifyIdentity.init();
-                }
-            };
-            
-            
-            netlifyInitTimeout = setTimeout(() => {
-                console.warn("Netlify Identity load timeout - proceeding offline");
-                if (!window.netlifyOffline) {
-                    window.netlifyOffline = true;
-                }
-                
-                if (document.readyState === 'interactive' || document.readyState === 'loading') {
-                    window.dispatchEvent(new Event('netlify-timeout'));
-                }
-            }, 5000);
-
-            document.head.appendChild(script);
-        }
-
-        window.addEventListener('online', () => {
-            console.log("🌐 Back online: reloading identity...");
-            if (!window.netlifyOffline || window.netlifyOffline === true) {
-                delete window.netlifyOffline;
-                loadNetlifyIdentity();
-            }
-        });
-
-        window.addEventListener('offline', () => {
-            console.warn("📴 Offline mode activated");
-            window.netlifyOffline = true;
-        });
-
-        window.addEventListener('DOMContentLoaded', loadNetlifyIdentity);
-    </script>
     <script src="./assets/js/pdf.min.js"></script>
     <script src="./assets/js/mammoth.browser.min.js"></script>
     <script src="./assets/js/chart.js"></script>
-    <script>
-    
-    if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
-        window.netlifyIdentity.on('login', async (user) => {
-        const token = user.token.access_token;
-        window.opener?.postMessage({ type: 'AUTH_TOKEN', token }, '*');
-        });
-    }
-    </script>
     
     <script>
         function loadCDNScript(src, onload) {
@@ -1049,7 +926,7 @@ These are the notes of planned features.
                 Create an account to save your progress, sync across devices, and access the curricula library.
             </p>
             <div style="margin-top: 40px;">
-                <button class="btn btn-prominent" onclick="if(typeof window.netlifyIdentity !== 'undefined') window.netlifyIdentity.open('signup');">Create Free Account</button>
+                <button class="btn btn-prominent" onclick="console.log('Signup will be implemented with Auth0');">Create Free Account</button>
             </div>
         </div>
         <div id="loggedInView" class="hidden">
@@ -2220,43 +2097,13 @@ These are the notes of planned features.
         }
         
         if (!navigator.onLine) {
-            console.warn('App is offline. Bypassing Netlify Identity.');
+            console.warn('App is offline. Entering guest mode.');
             await handleOfflineOrGuest();
             return;
         }
 
-        if (typeof window.netlifyIdentity === 'object' && typeof window.netlifyIdentity.on === 'function') {
-            console.log('Netlify Identity is available. Initializing...');
-            window.netlifyIdentity.on('init', async user => {
-                console.log('Netlify Identity .on("init") event fired.');
-
-                window.netlifyIdentity.on('login', async u => {
-                    handleGuestToUserTransition();
-                    await updateUIAfterLogin(u);
-                    runSmartCoachChecks('dashboardLoad');
-                });
-
-                window.netlifyIdentity.on('logout', () => {
-                    deleteDataFromDB('appData', 'userSession');
-                    updateUIAfterLogout();
-                });
-
-                await loadSavedData();
-                setupEventListeners();
-                loadCookieConsent();
-
-                if (user) {
-                    await updateUIAfterLogin(user);
-                } else {
-                    showView('authView', true);
-                }
-                updateOnlineStatusUI();
-            });
-            window.netlifyIdentity.init();
-        } else {
-            console.warn('Netlify Identity widget failed to load. Entering offline/guest mode.');
-            await handleOfflineOrGuest();
-        }
+        // Authentication will be handled by Auth0 (to be implemented)
+        await handleOfflineOrGuest();
     };
 
     function handleGuestToUserTransition() {
@@ -2856,31 +2703,16 @@ These are the notes of planned features.
 
     function setupEventListeners() {
         
-        if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
-            window.netlifyIdentity.on('login', user => {
-                handleGuestToUserTransition();
-                updateUIAfterLogin(user);
-            });
-
-            window.netlifyIdentity.on('logout', () => {
-                deleteDataFromDB('appData', 'userSession');
-                updateUIAfterLogout();
-            });
-        }
-
+        // Authentication event listeners will be handled by Auth0 (to be implemented)
         const authSignupBtn = document.getElementById('authSignupBtn');
         const authLoginBtn = document.getElementById('authLoginBtn');
         
         authSignupBtn?.addEventListener('click', () => {
-            if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
-                window.netlifyIdentity.open('signup');
-            }
+            console.log('Signup will be implemented with Auth0');
         });
         
         authLoginBtn?.addEventListener('click', () => {
-            if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
-                window.netlifyIdentity.open('login');
-            }
+            console.log('Login will be implemented with Auth0');
         });
         
         document.getElementById('continueAsGuestBtn')?.addEventListener('click', () => {
@@ -3093,9 +2925,8 @@ These are the notes of planned features.
 
         document.getElementById('logoutBtn').addEventListener('click', (e) => {
             e.preventDefault();
-            if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
-                window.netlifyIdentity.logout();
-            }
+            console.log('Logout will be implemented with Auth0');
+            // TODO: Implement Auth0 logout
         });
 
         document.getElementById('deckTypeHint').addEventListener('change', (e) => {
@@ -4002,7 +3833,9 @@ These are the notes of planned features.
                 updateDashboard();
             }
             showToast(`Deck "${deckName}" deleted.`);
-            if (isOnline && netlifyIdentity.currentUser()) {
+            // TODO: Replace with Auth0 authentication check
+            const userToken = localStorage.getItem('userToken');
+            if (isOnline && userToken) {
                 await loadUserDataAndSync();
             }
             
@@ -8550,7 +8383,9 @@ These are the notes of planned features.
         }
 
         async function loadUserDataAndSync() {
-            if (!isOnline || !netlifyIdentity.currentUser()) {
+            // TODO: Implement Auth0 authentication check
+            const userToken = localStorage.getItem('userToken');
+            if (!isOnline || !userToken) {
                 console.log("Offline or not logged in. Skipping sync.");
                 await updateDashboard();
                 return;
@@ -8572,7 +8407,8 @@ These are the notes of planned features.
                     ? allKnowledge.filter(state => state.lastModified && new Date(state.lastModified) > new Date(lastSynced))
                     : allKnowledge;
 
-                const token = await netlifyIdentity.currentUser().jwt();
+                // TODO: Get token from Auth0 instead
+                const token = userToken;
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 25000); 
 
@@ -8639,7 +8475,7 @@ These are the notes of planned features.
             const savedSession = await getDataFromDB('appData', 'userSession');
             if (savedSession && new Date(savedSession.expires_at) > new Date()) {
                 console.log("Found valid offline session. Logging in locally.");
-                netlifyIdentity.currentUser = () => savedSession.user;
+                // TODO: Implement Auth0 offline session handling
                 updateUIAfterLogin(savedSession.user);
             } else {
                 console.log("No offline session found.");

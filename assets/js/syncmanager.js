@@ -1,48 +1,14 @@
 
 function initializeAuth() {
-  if (typeof netlifyIdentity !== 'undefined') {
-    netlifyIdentity.on('init', user => {
-      console.log('Netlify Identity initialized');
-      updateAuthUI(user);
-      if (user) {
-        handleAuthSuccess(user);
-      }
-    });
-
-    netlifyIdentity.on('login', user => {
-      console.log('Login successful');
-      handleAuthSuccess(user);
-      updateAuthUI(user);
-      
-      localStorage.removeItem('guestMode');
-      
-      
-      if (window.electronAPI?.isElectron) {
-        
-        const loginWindow = window.self;
-        if (loginWindow !== window.top) {
-          loginWindow.close();
-        }
-      } else {
-        
-        if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
-          netlifyIdentity.close();
-        }
-      }
-    });
-
-    netlifyIdentity.on('logout', () => {
-      console.log('Logged out');
-      localStorage.removeItem('userToken');
-      localStorage.removeItem('userId');
-      updateAuthUI(null);
-    });
-
-    netlifyIdentity.init({
-      APIUrl: 'https://lagiote-revise.netlify.app/.netlify/identity'
-    });
+  // TODO: Implement Auth0 authentication
+  console.log('Auth initialization - to be implemented with Auth0');
+  // For now, check if user is already logged in
+  const userToken = localStorage.getItem('userToken');
+  if (userToken) {
+    // TODO: Validate token and get user info from Auth0
+    updateAuthUI({ email: 'user@example.com' }); // Placeholder
   } else {
-    console.error('Netlify Identity Widget not loaded');
+    updateAuthUI(null);
   }
 }
 
@@ -90,21 +56,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   
   document.getElementById('authSignupBtn')?.addEventListener('click', () => {
-    if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
-      netlifyIdentity.open('signup');
-    }
+    // TODO: Implement Auth0 signup
+    console.log('Signup will be implemented with Auth0');
   });
 
   document.getElementById('authLoginBtn')?.addEventListener('click', () => {
-    if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
-      netlifyIdentity.open('login');
-    }
+    // TODO: Implement Auth0 login
+    console.log('Login will be implemented with Auth0');
   });
 
   document.getElementById('logoutBtn')?.addEventListener('click', () => {
-    if (typeof netlifyIdentity !== 'undefined' && netlifyIdentity) {
-      netlifyIdentity.logout();
-    }
+    // TODO: Implement Auth0 logout
+    console.log('Logout will be implemented with Auth0');
+    localStorage.removeItem('userToken');
+    localStorage.removeItem('userId');
+    updateAuthUI(null);
   });
 
   document.getElementById('continueAsGuestBtn')?.addEventListener('click', () => {

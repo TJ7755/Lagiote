@@ -1,355 +1,55 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <title>Authentication</title>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://lagiote-revise.netlify.app https://*.netlify.com https://*.gotrue.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://identity.netlify.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://lagiote-revise.netlify.app https://*.netlify.com https://*.gotrue.com;">
-    <script>
-        if (navigator.onLine) {
-            const script = document.createElement('script');
-            script.type = 'text/javascript';
-            script.src = 'https://identity.netlify.com/v1/netlify-identity-widget.js';
-            script.onload = () => debugLog('Widget script loaded successfully');
-            script.onerror = () => debugLog('Failed to load widget script');
-            const timeout = setTimeout(() => {
-                if (!window.netlifyIdentity) {
-                    debugLog('Widget script timeout - proceeding');
-                }
-            }, 5000);
-            script.onload = () => {
-                clearTimeout(timeout);
-                debugLog('Widget script loaded successfully');
-            };
-            script.onerror = () => {
-                clearTimeout(timeout);
-                debugLog('Failed to load widget script');
-            };
-            document.head.appendChild(script);
-        } else {
-            debugLog('Offline mode - skipping Netlify Identity');
-        }
-    </script>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f7fafc;
-            position: relative;
-        }
-        .loading {
-            text-align: center;
-            color: #4a5568;
-            margin-bottom: 20px;
-        }
-        .status {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 4px;
-            text-align: center;
-        }
-        .status.error {
-            background-color: #fed7d7;
-            color: #c53030;
-        }
-        .status.success {
-            background-color: #c6f6d5;
-            color: #2f855a;
-        }
-        #debug {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            right: 10px;
-            background: rgba(0,0,0,0.9);
-            color: #00ff00;
-            padding: 15px;
-            font-family: monospace;
-            font-size: 13px;
-            max-height: 300px;
-            overflow-y: auto;
-            border-radius: 4px;
-            border: 1px solid #666;
-            display: block;
-            z-index: 1000;
-        }
-        #debug:empty {
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="loading">Initializing authentication...</div>
-    <div id="status"></div>
-    <div id="debug"></div>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auth0 Authentication - Lagiote</title>
+    <link rel="stylesheet" href="assets/css/auth0-auth.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Loading State -->
+      <div id="loading" class="loading-state">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Loading...</div>
+      </div>
 
-    <script>
-        function debugLog(message, type = 'info') {
-            const timestamp = new Date().toISOString();
-            const formattedMessage = `[${timestamp}] ${type.toUpperCase()}: ${message}`;
-            console.log(formattedMessage);
-            
-            const debug = document.getElementById('debug');
-            const msgElement = document.createElement('div');
-            msgElement.innerHTML = formattedMessage;
-            if (type === 'error') {
-                msgElement.style.color = '#ff4444';
-            }
-            debug.appendChild(msgElement);
-            debug.scrollTop = debug.scrollHeight;
-        }
+      <!-- Error State -->
+      <div id="error" class="error-state" style="display: none;">
+        <div class="error-title">Oops!</div>
+        <div class="error-message">Something went wrong</div>
+        <div id="error-details" class="error-sub-message"></div>
+        <button id="retry-btn" class="button retry">Try Again</button>
+      </div>
 
-        function updateStatus(message, type = 'info') {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = 'status ' + type;
-        }
+      <!-- Main Content -->
+      <div id="app" class="main-card-wrapper" style="display: none;">
+        <img 
+          src="https://cdn.auth0.com/quantum-assets/dist/latest/logos/auth0/auth0-lockup-en-ondark.png" 
+          alt="Auth0 Logo" 
+          class="auth0-logo"
+        />
+        <h1 class="main-title">Welcome to Lagiote</h1>
+        
+        <!-- Logged Out State -->
+        <div id="logged-out" class="action-card">
+          <p class="action-text">Get started by signing in to your account</p>
+          <button id="login-btn" class="button login">Log In</button>
+        </div>
 
-        window.onerror = function(msg, url, line, col, error) {
-            debugLog(`Error: ${msg} at ${url}:${line}:${col}`, 'error');
-            if (error && error.stack) {
-                debugLog(`Stack: ${error.stack}`, 'error');
-            }
-            return false;
-        };
-                async function tryInitialize() {
-        window.onunhandledrejection = function(event) {
-            debugLog(`Unhandled Promise Rejection: ${event.reason}`, 'error');
-            return false;
-        };
+        <!-- Logged In State -->
+        <div id="logged-in" class="logged-in-section" style="display: none;">
+          <div class="logged-in-message">✅ Successfully authenticated!</div>
+          <h2 class="profile-section-title">Your Profile</h2>
+          <div id="profile" class="profile-card"></div>
+          <button id="logout-btn" class="button logout">Log Out</button>
+        </div>
+      </div>
+    </div>
 
-        debugLog('Authentication page loaded');
-
-        function tryInitialize() {
-            debugLog('Checking for Netlify Identity Widget...');
-            
-            if (typeof window.netlifyIdentity === 'undefined' && typeof netlifyIdentity === 'undefined') {
-                debugLog('Widget not found yet, will retry');
-                return false;
-            }
-
-            if (typeof window.netlifyIdentity === 'undefined') {
-                window.netlifyIdentity = netlifyIdentity;
-            }
-
-            debugLog('Widget found! Available methods: ' + Object.keys(window.netlifyIdentity).join(', '));
-
-            try {
-                debugLog('Attempting initialization');
-                window.netlifyIdentity.init({
-                    APIUrl: 'https://lagiote-revise.netlify.app/.netlify/identity',
-                    locale: {
-                        error: {
-                            default: 'An error occurred during authentication',
-                            connection: 'Unable to connect to authentication service',
-                            invalidCredentials: 'Invalid email or password',
-                            emailNotConfirmed: 'Please confirm your email address'
-                        }
-                    }
-                });
-
-                window.netlifyIdentity.on('init', user => {
-                    debugLog('Init event received, user: ' + (user ? 'logged in' : 'not logged in'));
-                    updateStatus('Authentication initialized', 'success');
-                    
-                    if (!user) {
-                        debugLog('Opening login modal');
-                        
-                        const waitForDOM = () => {
-                            return new Promise((resolve) => {
-                                if (document.readyState === 'complete') {
-                                    resolve();
-                                } else {
-                                    window.addEventListener('load', resolve);
-                                }
-                            });
-                        };
-
-                        const tryOpenLogin = async () => {
-                            let attempts = 0;
-                            const maxAttempts = 3;
-                            
-                            while (attempts < maxAttempts) {
-                                attempts++;
-                                try {
-                                    debugLog(`Attempting to open login modal (attempt ${attempts}/${maxAttempts})`);
-                                    
-                                    if (typeof window.netlifyIdentity === 'undefined') {
-                                        throw new Error('Netlify Identity widget not found');
-                                    }
-
-                                    await new Promise(resolve => setTimeout(resolve, 500));
-                                    
-                                    try {
-                                        window.netlifyIdentity.close();
-                                    } catch (e) {
-                                        debugLog('No previous modal to close');
-                                    }
-
-                                    await new Promise(resolve => setTimeout(resolve, 500));
-                                    
-                                    window.netlifyIdentity.open('login');
-                                    debugLog('Login modal opened successfully');
-                                    return true;
-                                } catch (e) {
-                                    debugLog(`Failed to open login modal (attempt ${attempts}): ${e.toString()}`, 'error');
-                                    if (attempts < maxAttempts) {
-                                        debugLog(`Retrying in ${attempts * 1000}ms...`);
-                                        await new Promise(resolve => setTimeout(resolve, attempts * 1000));
-                                    } else {
-                                        debugLog('Failed to open login modal after all attempts', 'error');
-                                        updateStatus('Failed to open login dialog', 'error');
-                                        if (window.electronAPI) {
-                                            window.electronAPI.handleAuthError({
-                                                code: 'LOGIN_MODAL_FAILED',
-                                                message: 'Failed to open login modal after multiple attempts',
-                                                details: e.toString()
-                                            });
-                                        }
-                                        return false;
-                                    }
-                                }
-                            }
-                        };
-                        
-                        waitForDOM().then(() => {
-                            debugLog('DOM is ready, starting login process');
-                            return new Promise(resolve => setTimeout(resolve, 1500));
-                        }).then(() => {
-                            return tryOpenLogin();
-                        }).catch(error => {
-                            debugLog('Login process failed: ' + error.toString(), 'error');
-                            if (window.electronAPI) {
-                                window.electronAPI.handleAuthError({
-                                    code: 'LOGIN_PROCESS_FAILED',
-                                    message: 'Login process failed',
-                                    details: error.toString()
-                                });
-                            }
-                        });
-                    }
-                });
-
-                window.netlifyIdentity.on('login', user => {
-                    debugLog('Login successful for user: ' + user.email);
-                    updateStatus('Login successful!', 'success');
-                    
-                    const userData = {
-                        type: 'authorization',
-                        user: {
-                            email: user.email,
-                            id: user.id,
-                            token: user.token?.access_token,
-                            metadata: user.user_metadata
-                        }
-                    };
-
-                    try {
-                        if (window.electronAPI) {
-                            debugLog('Sending auth data via electronAPI');
-                            window.electronAPI.sendAuthToMain(userData);
-                        } else {
-                            debugLog('Sending auth data via postMessage');
-                            window.opener.postMessage(userData, 'https://lagiote-revise.netlify.app');
-                        }
-                    } catch (e) {
-                        debugLog('Failed to send auth data: ' + e.toString(), 'error');
-                        updateStatus('Failed to complete login process', 'error');
-                    }
-                    window.netlifyIdentity.on('login', async (user) => {
-                        try {
-                            debugLog('Login successful for user: ' + user.email);
-                            updateStatus('Login successful!', 'success');
-                        
-                            if (!user || !user.token) {
-                                throw new Error('Invalid user data received');
-                            }
-                        
-                            const userData = {
-                                type: 'authorization',
-                                user: {
-                                    email: user.email,
-                                    id: user.id,
-                                    token: user.token?.access_token,
-                                    metadata: user.user_metadata
-                                }
-                            };
-
-                            await new Promise(resolve => setTimeout(resolve, 500));
-
-                            debugLog('Preparing to send auth data');
-                        
-                            if (window.electronAPI) {
-                                debugLog('Sending auth data via electronAPI');
-                                window.electronAPI.sendAuthToMain(userData);
-                            } else {
-                                debugLog('Sending auth data via postMessage');
-                                window.opener.postMessage(userData, 'https://lagiote-revise.netlify.app');
-                            }
-
-                            debugLog('Auth data sent successfully');
-                        } catch (e) {
-                            debugLog('Failed to process login: ' + e.toString(), 'error');
-                            updateStatus('Failed to complete login process', 'error');
-                            if (window.electronAPI) {
-                                window.electronAPI.handleAuthError({
-                                    code: 'LOGIN_PROCESSING_FAILED',
-                                    message: 'Failed to process login data',
-                                    details: e.toString()
-                                });
-                            }
-                        }
-                    });
-
-                window.netlifyIdentity.on('logout', () => {
-                    debugLog('User logged out');
-                    updateStatus('Logged out');
-                });
-
-                window.netlifyIdentity.on('error', err => {
-                    const errorMsg = err.message || JSON.stringify(err);
-                    debugLog('Authentication error: ' + errorMsg, 'error');
-                    updateStatus('Authentication error: ' + errorMsg, 'error');
-                    
-                    if (window.electronAPI) {
-                        window.electronAPI.handleAuthError({
-                            message: errorMsg,
-                            code: err.code || 'UNKNOWN_ERROR',
-                            data: err
-                        });
-                    }
-                });
-
-                return true;
-            } catch (error) {
-                debugLog('Initialization error: ' + error.toString());
-                return false;
-            }
-        }
-
-        if (!tryInitialize()) {
-            debugLog('Initial attempt failed, will retry with delay');
-            window.addEventListener('load', () => {
-                debugLog('Window loaded, trying again');
-                let attempts = 0;
-                const maxAttempts = 5;
-                
-                function attemptInit() {
-                    attempts++;
-                    debugLog(`Attempt ${attempts} of ${maxAttempts}`);
-                    
-                    if (!tryInitialize() && attempts < maxAttempts) {
-                        setTimeout(attemptInit, 1000);
-                    }
-                }
-                
-                setTimeout(attemptInit, 1000);
-            });
-        }
-    </script>
-</body>
+    <!-- Load Auth0 SDK from CDN (works in Electron) -->
+    <script src="https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js"></script>
+    <script src="assets/js/auth0-auth.js"></script>
+  </body>
 </html>
+

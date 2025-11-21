@@ -1,6 +1,28 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fetch = require('node-fetch');
+const fs = require('fs');
+
+// Load environment variables from .env.local
+function loadEnvFile() {
+  const envPath = path.join(__dirname, '.env.local');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    envContent.split('\n').forEach(line => {
+      const match = line.match(/^([^#=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim().replace(/^["']|["']$/g, '');
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    });
+  }
+}
+
+// Load env on startup
+loadEnvFile();
 
 function safeSend(window, channel, ...args) {
   try {
@@ -14,9 +36,10 @@ function safeSend(window, channel, ...args) {
   }
 }
 
-const NETLIFY_FUNCTION_URL = 'https://lagiote-revise.netlify.app/.netlify/functions/getAiCompletion';
-const DISTRACTOR_FUNCTION_URL = 'https://lagiote-revise.netlify.app/.netlify/functions/generateDistractors';
-const AUTOCOMPLETE_FUNCTION_URL = 'https://lagiote-revise.netlify.app/.netlify/functions/gemini-autocomplete';
+const PROXY_URL = process.env.PROXY_URL || 'https://tj7755-lagiote-proxy.hf.space'; // Default or env
+const NETLIFY_FUNCTION_URL = `${PROXY_URL}/api/generate`;
+const DISTRACTOR_FUNCTION_URL = `${PROXY_URL}/api/distractors`;
+const AUTOCOMPLETE_FUNCTION_URL = `${PROXY_URL}/api/autocomplete`;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -26,7 +49,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.js'), 
+      preload: path.join(__dirname, 'preload.js'),
       sandbox: true,
       disableBlinkFeatures: 'AutoplayPolicy'
     },
@@ -63,7 +86,7 @@ async function createLoginWindow() {
   const maxCloseAttempts = 3;
 
   const log = (type, ...args) => {
-    const msg = args.map(arg => 
+    const msg = args.map(arg =>
       typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg
     ).join(' ');
     console.log(`[Auth Main][${type}] ${msg}`);
@@ -77,11 +100,11 @@ async function createLoginWindow() {
 
   return new Promise((resolve, reject) => {
     let cleanupDone = false;
-    
+
     const cleanup = () => {
       if (cleanupDone) return;
       cleanupDone = true;
-      
+
       log('info', 'Cleaning up IPC listeners');
       ipcMain.removeAllListeners('auth-log');
       ipcMain.removeAllListeners('auth-window-ready');
@@ -123,10 +146,11 @@ async function createLoginWindow() {
       console.log('Auth Window Console:', message);
     });
 
+    // Load Auth0 authentication window
     authWindow.loadFile(path.join(__dirname, 'auth.html'));
 
     let windowReady = false;
-    
+
     ipcMain.on('auth-log', (event, data) => {
       log(data.type, data.message);
     });
@@ -144,11 +168,19 @@ async function createLoginWindow() {
       if (authWindow) {
         log('info', 'Auth window content loaded');
         windowReady = true;
-        
-        authWindow.webContents.openDevTools();
-        
+
+        // Get Auth0 configuration from environment
+        const auth0Domain = process.env.VITE_AUTH0_DOMAIN || process.env.AUTH0_DOMAIN;
+        const auth0ClientId = process.env.VITE_AUTH0_CLIENT_ID || process.env.AUTH0_CLIENT_ID;
+
+        if (!auth0Domain || !auth0ClientId) {
+          log('warn', 'Auth0 configuration not found in environment variables');
+          log('warn', 'Please create .env.local file with VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID');
+        }
+
         const initializeWindow = async () => {
           try {
+            // Set up error handlers
             await authWindow.webContents.executeJavaScript(`
               window.onerror = function(msg, url, line, col, error) {
                 console.error('Global error:', msg, 'at', url, ':', line);
@@ -161,45 +193,37 @@ async function createLoginWindow() {
                 return false;
               };
             `);
-            
+
             if (!authWindow || authWindow.isDestroyed()) {
               throw new Error('Window was destroyed during initialization');
             }
-            
-            authWindow.show();
-            log('info', 'Auth window shown');
-            
+
+            // Pass Auth0 configuration to the window
             await authWindow.webContents.executeJavaScript(`
               try {
-                window.addEventListener('message', function(event) {
-                  window.electronAPI?.log('Message received: ' + JSON.stringify(event.data));
-                  if (event.data.type === 'authorization') {
-                    window.electronAPI?.sendAuthToMain(event.data);
-                  }
-                });
+                // Set Auth0 config on window for the auth script to access
+                window.auth0Config = {
+                  domain: ${JSON.stringify(auth0Domain || '')},
+                  clientId: ${JSON.stringify(auth0ClientId || '')}
+                };
                 
-                if (typeof netlifyIdentity === 'undefined') {
-                  window.electronAPI?.log('Netlify Identity not found, reloading script');
-                  const script = document.createElement('script');
-                  script.src = 'https://identity.netlify.com/v1/netlify-identity-widget.js';
-                  script.onload = () => {
-                    window.electronAPI?.log('Widget script reloaded');
-                    window.electronAPI?.markInitialized();
-                  };
-                  script.onerror = (err) => {
-                    window.electronAPI?.log('Widget script reload failed: ' + err, 'error');
-                  };
-                  document.head.appendChild(script);
-                } else {
-                  window.electronAPI?.log('Netlify Identity found, marking initialized');
-                  window.electronAPI?.markInitialized();
+                // Also store in localStorage as fallback
+                if (${JSON.stringify(auth0Domain)}) {
+                  localStorage.setItem('AUTH0_DOMAIN', ${JSON.stringify(auth0Domain)});
                 }
+                if (${JSON.stringify(auth0ClientId)}) {
+                  localStorage.setItem('AUTH0_CLIENT_ID', ${JSON.stringify(auth0ClientId)});
+                }
+                
+                window.electronAPI?.log('Auth0 config injected', 'info');
               } catch (err) {
-                window.electronAPI?.log('Initialization error: ' + err.toString(), 'error');
-                throw err;
+                window.electronAPI?.log('Config injection error: ' + err.toString(), 'error');
               }
             `);
-            
+
+            authWindow.show();
+            log('info', 'Auth window shown');
+
             log('info', 'Window initialization completed');
           } catch (err) {
             log('error', 'Failed to initialize window:', err);
@@ -207,7 +231,7 @@ async function createLoginWindow() {
           }
         };
 
-        setTimeout(initializeWindow, 1000);
+        setTimeout(initializeWindow, 500);
       }
     });
 
@@ -222,7 +246,7 @@ async function createLoginWindow() {
       if (!hasResolved) {
         closeAttempts++;
         log('warn', `Close attempt ${closeAttempts} of ${maxCloseAttempts}`);
-        
+
         if (closeAttempts < maxCloseAttempts) {
           e.preventDefault();
           const choice = require('electron').dialog.showMessageBoxSync(authWindow, {
@@ -245,7 +269,7 @@ async function createLoginWindow() {
     let isClosing = false;
 
     authWindow.on('close', (e) => {
-      log('info', 'Auth window closing event', { 
+      log('info', 'Auth window closing event', {
         hasResolved,
         isInitialized,
         windowReady,
@@ -260,18 +284,18 @@ async function createLoginWindow() {
     });
 
     authWindow.on('closed', () => {
-      log('info', 'Auth window closed', { 
+      log('info', 'Auth window closed', {
         hasResolved,
         isInitialized,
         windowReady
       });
-      
+
       if (!hasResolved) {
         log('error', 'Window closed without resolving');
         safeSend(mainWindow, 'auth-window-closed');
         reject(new Error('Authentication window was closed before completion'));
       }
-      
+
       cleanup();
       authWindow = null;
     });
@@ -327,6 +351,7 @@ async function createLoginWindow() {
 }
 
 app.whenReady().then(() => {
+  app.setAsDefaultProtocolClient("lagioterevise");
   createWindow();
 
   app.on('activate', () => {
@@ -392,11 +417,11 @@ ipcMain.handle('gemini-generate-deck', async (event, { documents, cardType = 'fl
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 10000))
     ]);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error('AI generation error:', error);
@@ -419,11 +444,11 @@ ipcMain.handle('gemini-autocomplete', async (event, { deckContent, currentCard, 
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 15000))
     ]);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error('AI autocomplete error:', error);
@@ -439,7 +464,7 @@ ipcMain.handle('gemini-autocomplete', async (event, { deckContent, currentCard, 
 ipcMain.handle('sync-data', async (event, { decks, token }) => {
   try {
     const response = await Promise.race([
-      fetch('https://lagiote-revise.netlify.app/.netlify/functions/sync', {
+      fetch(`${PROXY_URL}/api/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -449,11 +474,11 @@ ipcMain.handle('sync-data', async (event, { decks, token }) => {
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 10000))
     ]);
-    
+
     if (!response.ok) {
       throw new Error(`Sync failed with status ${response.status}`);
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error('Sync error:', error);

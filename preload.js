@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 1. AI Generation
   generateDeck: async (data) => {
-    // Get the Netlify Identity Token from LocalStorage
+    // Get the Auth Token from LocalStorage (to be replaced with Auth0)
     const token = localStorage.getItem('userToken'); 
     
     const response = await fetch(`${PROXY_URL}/generate`, {
@@ -29,13 +29,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncData: async (data) => {
     const token = localStorage.getItem('userToken');
     
-    // We need to manually extract the User ID from Netlify's storage
-    // because the Proxy cannot decode the cookie/session itself.
+    // TODO: Extract User ID from Auth0 token or session
     let userId = null;
-    const gotrueUser = localStorage.getItem('gotrue.user');
-    if (gotrueUser) {
-      userId = JSON.parse(gotrueUser).id;
-    }
+    // Auth0 implementation will provide user ID differently
     const response = await fetch(`${PROXY_URL}/sync`, {
       method: 'POST',
       headers: {
