@@ -1,0 +1,58 @@
+{
+  "name": "lagiote-revise",
+  "version": "1.0.0",
+  "description": "Lagiote Revise - offline flashcard app",
+  "main": "main.js",
+  "productName": "Lagiote Revise",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TJ7755/Lagiote-revise.git"
+  },
+  "author": "TJ7755",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "make": "electron-forge make"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "icon": "assets/icon.ico"
+      },
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "config": {
+            "name": "LagioteRevise",
+            "setupExe": "LagioteRevise-Setup.exe"
+          }
+        }
+      ]
+    }
+  },
+  "keywords": [],
+  "devDependencies": {
+    "@electron-forge/cli": "^7.9.0",
+    "@electron-forge/maker-deb": "^7.9.0",
+    "@electron-forge/maker-dmg": "^7.9.0",
+    "@electron-forge/maker-rpm": "^7.9.0",
+    "@electron-forge/maker-squirrel": "^7.9.0",
+    "@electron-forge/maker-zip": "^7.9.0",
+    "electron": "^38.1.2"
+  },
+  "dependencies": {
+    "@google/genai": "^1.30.0",
+    "@xenova/transformers": "^2.17.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "electron-squirrel-startup": "^1.0.1",
+    "express": "^5.1.0",
+    "netlify-identity-widget": "^1.9.2",
+    "pg": "^8.16.3",
+    "update-electron-app": "^3.0.0"
+  },
+  "bugs": {
+    "url": "https://github.com/TJ7755/Lagiote-revise/issues"
+  },
+  "homepage": "https://github.com/TJ7755/Lagiote-revise#readme"
+}

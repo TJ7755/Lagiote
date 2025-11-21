@@ -1,0 +1,11 @@
+# netlify.toml
+
+[build]
+  # This tells Netlify where your site's main files are.
+  # If your index.html is in the root, you can just use "."
+  publish = "."
+
+[functions]
+  # This tells Netlify where to find your serverless functions.
+  # This path must match the folder structure you created.
+  directory = "netlify/functions/"
