@@ -10757,11 +10757,14 @@ These are the notes of planned features.
                         throw new Error(syncResult.message || 'Sync failed');
                     }
                 } else {
-                    // Web app fallback - direct fetch
+                    // Web app fallback - direct fetch to HuggingFace proxy
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-                    const response = await fetch('/.netlify/functions/sync', {
+                    const syncUrl = 'https://tj7755-lagiote-proxy.hf.space/api/sync';
+                    console.log('Syncing to:', syncUrl);
+
+                    const response = await fetch(syncUrl, {
                         method: 'POST',
                         signal: controller.signal,
                         headers: {
