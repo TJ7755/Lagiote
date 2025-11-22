@@ -4103,6 +4103,74 @@ These are the notes of planned features.
             await initDB();
             console.log('Database initialized.');
 
+            // Handle Auth0 callback on web (if code/state in URL)
+            if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
+                console.log('Detected Auth0 callback in web environment');
+                try {
+                    console.log('Starting Auth0 callback processing...');
+
+                    // Load Auth0 SDK if not already loaded
+                    if (!window.auth0) {
+                        console.log('Loading Auth0 SDK...');
+                        await new Promise((resolve, reject) => {
+                            const script = document.createElement('script');
+                            script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
+                            script.onload = () => {
+                                console.log('Auth0 SDK loaded successfully');
+                                resolve();
+                            };
+                            script.onerror = (err) => {
+                                console.error('Failed to load Auth0 SDK:', err);
+                                reject(err);
+                            };
+                            document.head.appendChild(script);
+                        });
+                    }
+
+                    const auth0Domain = 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+                    const auth0ClientId = 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                    console.log('Creating Auth0 client...');
+                    const auth0Client = await auth0.createAuth0Client({
+                        domain: auth0Domain,
+                        clientId: auth0ClientId,
+                        authorizationParams: {
+                            redirect_uri: window.location.origin + '/'
+                        }
+                    });
+
+                    console.log('Handling redirect callback...');
+                    await auth0Client.handleRedirectCallback();
+
+                    console.log('Getting user info...');
+                    const user = await auth0Client.getUser();
+                    console.log('User:', user);
+
+                    console.log('Getting token...');
+                    const token = await auth0Client.getTokenSilently();
+                    console.log('Token obtained');
+
+                    // Store auth session
+                    const authResult = {
+                        user: user,
+                        access_token: token,
+                        id_token: token
+                    };
+                    localStorage.setItem('auth0Session', JSON.stringify(authResult));
+                    console.log('Auth session saved to localStorage');
+
+                    // Clean up URL
+                    window.history.replaceState({}, document.title, '/');
+                    console.log('URL cleaned');
+
+                    console.log('Web Auth0 login successful:', user.email);
+                } catch (error) {
+                    console.error('Auth callback error:', error);
+                    console.error('Error stack:', error.stack);
+                    alert('Sign in failed: ' + error.message + '. Please check the console for details.');
+                }
+            }
+
             const handleOfflineOrGuest = async () => {
                 console.log('Entering offline/guest mode.');
                 await loadSavedData();
