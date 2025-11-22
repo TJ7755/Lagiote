@@ -1,30 +1,53 @@
-
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 
 module.exports = {
   packagerConfig: {
     asar: true,
-    icon: './assets/dmg-background.png',
+    icon: './assets/logo/icon', // generic icon path, forge adds extension
   },
-  rebuildConfig: {
-    "forge": {
-    "packagerConfig": {
-      "icon": "assets/logo/icon" 
-  },
+  rebuildConfig: {},
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
       config: {
+        name: 'LagioteRevise',
         setupIcon: './assets/logo/icon.ico',
-        loadingGif: './assets/dmg-background.gif', 
+        setupExe: 'LagioteRevise-Setup.exe'
       },
+      platforms: ['win32'],
+    },
+    {
+      name: '@electron-forge/maker-zip',
+      platforms: ['darwin', 'linux'],
+    },
+    {
+      name: '@electron-forge/maker-deb',
+      config: {
+        options: {
+          icon: './assets/logo/icon.png'
+        }
+      },
+      platforms: ['linux'],
+    },
+    {
+      name: '@electron-forge/maker-rpm',
+      config: {
+        options: {
+          icon: './assets/logo/icon.png'
+        }
+      },
+      platforms: ['linux'],
     },
     {
       name: '@electron-forge/maker-dmg',
       config: {
-        name: 'StudyStack Revise',
+        name: 'Lagiote Revise',
+        icon: './assets/logo/icon.icns',
+        background: './assets/dmg-background.png',
+        format: 'ULFO'
       },
+      platforms: ['darwin'],
     },
   ],
   plugins: [
