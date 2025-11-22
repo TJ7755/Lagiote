@@ -109,7 +109,7 @@ async function createLoginWindow() {
 
   const log = (type, ...args) => {
     const msg = args.map(arg =>
-      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg
+      typeof arg === 'object' && arg !== null ? JSON.stringify(arg, null, 2) : String(arg)
     ).join(' ');
     console.log(`[Auth Main][${type}] ${msg}`);
   };
@@ -154,11 +154,12 @@ async function createLoginWindow() {
       backgroundColor: '#f7fafc',
       minimizable: false,
       maximizable: false,
-      closable: false,
+      closable: true,
       fullscreenable: false
     });
 
-    authWindow.webContents.openDevTools();
+    // Optional: Uncomment to open DevTools for debugging
+    // authWindow.webContents.openDevTools();
 
     authWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
       console.error('Auth window failed to load:', errorCode, errorDescription);
@@ -166,6 +167,38 @@ async function createLoginWindow() {
 
     authWindow.webContents.on('console-message', (event, level, message) => {
       console.log('Auth Window Console:', message);
+    });
+
+    // Intercept navigation to custom protocol (Auth0 callback)
+    authWindow.webContents.on('will-navigate', (event, url) => {
+      log('info', 'Navigation attempt to:', url);
+
+      if (url.startsWith('lagioterevise://')) {
+        event.preventDefault();
+        log('info', 'Intercepted callback URL:', url);
+
+        // Extract the callback URL and send to the auth window to process
+        authWindow.webContents.executeJavaScript(`
+          window.location.href = ${JSON.stringify(url)};
+        `).catch(err => log('error', 'Failed to set callback URL:', err.message));
+      }
+    });
+
+    // Also handle navigation in new windows (popups)
+    authWindow.webContents.setWindowOpenHandler(({ url }) => {
+      log('info', 'Window open attempt to:', url);
+
+      if (url.startsWith('lagioterevise://')) {
+        log('info', 'Intercepted popup callback URL:', url);
+
+        authWindow.webContents.executeJavaScript(`
+          window.location.href = ${JSON.stringify(url)};
+        `).catch(err => log('error', 'Failed to set callback URL:', err.message));
+
+        return { action: 'deny' };
+      }
+
+      return { action: 'allow' };
     });
 
     // Load Auth0 authentication window
@@ -195,39 +228,55 @@ async function createLoginWindow() {
         const auth0Domain = process.env.VITE_AUTH0_DOMAIN || process.env.AUTH0_DOMAIN;
         const auth0ClientId = process.env.VITE_AUTH0_CLIENT_ID || process.env.AUTH0_CLIENT_ID;
 
+        log('info', 'Auth0 domain:', auth0Domain || 'NOT SET');
+        log('info', 'Auth0 clientId:', auth0ClientId ? 'SET' : 'NOT SET');
+
         if (!auth0Domain || !auth0ClientId) {
-          log('warn', 'Auth0 configuration not found in environment variables');
+          log('warn', 'Auth0 config missing!');
+          log('warn', 'Available env keys:', Object.keys(process.env).filter(k => k.includes('AUTH')).join(', '));
           log('warn', 'Please create .env.local file with VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID');
         }
 
         const initializeWindow = async () => {
           try {
             // Set up error handlers
-            await authWindow.webContents.executeJavaScript(`
-              window.onerror = function(msg, url, line, col, error) {
-                console.error('Global error:', msg, 'at', url, ':', line);
-                window.electronAPI?.log('Global error: ' + msg, 'error');
-                return false;
-              };
-              window.onunhandledrejection = function(event) {
-                console.error('Unhandled rejection:', event.reason);
-                window.electronAPI?.log('Unhandled rejection: ' + event.reason, 'error');
-                return false;
-              };
-            `);
+            try {
+              await authWindow.webContents.executeJavaScript(`
+                window.onerror = function(msg, url, line, col, error) {
+                  console.error('Global error:', msg, 'at', url, ':', line);
+                  if (window.electronAPI && window.electronAPI.log) {
+                    window.electronAPI.log('Global error: ' + msg, 'error');
+                  }
+                  return false;
+                };
+                window.onunhandledrejection = function(event) {
+                  console.error('Unhandled rejection:', event.reason);
+                  if (window.electronAPI && window.electronAPI.log) {
+                    window.electronAPI.log('Unhandled rejection: ' + (event.reason ? event.reason.toString() : 'Unknown'), 'error');
+                  }
+                  return false;
+                };
+                true;
+              `);
+            } catch (execError) {
+              log('warn', 'Failed to set up error handlers:', execError.message || 'Unknown error');
+            }
 
             if (!authWindow || authWindow.isDestroyed()) {
               throw new Error('Window was destroyed during initialization');
             }
 
             // Pass Auth0 configuration to the window
-            await authWindow.webContents.executeJavaScript(`
+            log('info', 'Injecting Auth0 config...');
+            const configScript = `
               try {
+                console.log('[Auth Window] Receiving config injection...');
                 // Set Auth0 config on window for the auth script to access
                 window.auth0Config = {
                   domain: ${JSON.stringify(auth0Domain || '')},
                   clientId: ${JSON.stringify(auth0ClientId || '')}
                 };
+                console.log('[Auth Window] Config set:', window.auth0Config);
                 
                 // Also store in localStorage as fallback
                 if (${JSON.stringify(auth0Domain)}) {
@@ -237,19 +286,36 @@ async function createLoginWindow() {
                   localStorage.setItem('AUTH0_CLIENT_ID', ${JSON.stringify(auth0ClientId)});
                 }
                 
-                window.electronAPI?.log('Auth0 config injected', 'info');
+                if (window.electronAPI && window.electronAPI.log) {
+                  window.electronAPI.log('Auth0 config injected successfully', 'info');
+                }
+                true; // Return a serializable value
               } catch (err) {
-                window.electronAPI?.log('Config injection error: ' + err.toString(), 'error');
+                console.error('Config injection error:', err);
+                if (window.electronAPI && window.electronAPI.log) {
+                  window.electronAPI.log('Config injection error: ' + err.toString(), 'error');
+                }
+                false; // Return a serializable value
               }
-            `);
+            `;
+
+            try {
+              await authWindow.webContents.executeJavaScript(configScript);
+            } catch (execError) {
+              log('error', 'Failed to execute config script:', execError.message || execError.toString());
+              throw new Error('Failed to inject Auth0 config: ' + (execError.message || 'Unknown error'));
+            }
 
             authWindow.show();
             log('info', 'Auth window shown');
 
             log('info', 'Window initialization completed');
           } catch (err) {
-            log('error', 'Failed to initialize window:', err);
-            reject(new Error('Failed to initialize auth window: ' + err.message));
+            log('error', 'Failed to initialize window:', err.message || err.toString());
+            reject({
+              message: 'Failed to initialize auth window: ' + (err.message || err.toString()),
+              name: 'AuthWindowError'
+            });
           }
         };
 
@@ -260,7 +326,11 @@ async function createLoginWindow() {
     authWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
       log('error', 'Failed to load auth window:', errorCode, errorDescription);
       if (!hasResolved) {
-        reject(new Error(`Failed to load auth window: ${errorDescription}`));
+        reject({
+          message: `Failed to load auth window: ${errorDescription}`,
+          name: 'AuthWindowLoadError',
+          code: errorCode
+        });
       }
     });
 
@@ -315,7 +385,10 @@ async function createLoginWindow() {
       if (!hasResolved) {
         log('error', 'Window closed without resolving');
         safeSend(mainWindow, 'auth-window-closed');
-        reject(new Error('Authentication window was closed before completion'));
+        reject({
+          message: 'Authentication window was closed before completion',
+          name: 'AuthWindowClosedError'
+        });
       }
 
       cleanup();
@@ -362,11 +435,17 @@ async function createLoginWindow() {
         }).then(() => {
           isClosing = true;
           authWindow.setClosable(true);
-          reject(error);
+          reject({
+            message: error.message || JSON.stringify(error),
+            name: 'AuthError'
+          });
           authWindow.close();
         });
       } else {
-        reject(error);
+        reject({
+          message: error.message || JSON.stringify(error),
+          name: 'AuthError'
+        });
       }
     });
   });
@@ -394,7 +473,12 @@ ipcMain.handle('open-login-window', async () => {
     return await createLoginWindow();
   } catch (error) {
     console.error('Login window error:', error);
-    throw error;
+    // Convert error to a plain object that can be serialized over IPC
+    throw {
+      message: error.message || 'Login window failed',
+      name: error.name || 'Error',
+      stack: error.stack
+    };
   }
 });
 

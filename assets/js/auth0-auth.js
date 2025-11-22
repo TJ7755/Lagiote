@@ -50,15 +50,19 @@ async function initAuth0() {
 
     const { domain, clientId } = getAuth0Config();
 
+    if (!domain || !clientId) {
+      throw new Error('Auth0 configuration missing. Please ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your .env.local file');
+    }
+
     // Validate domain format
-    if (!domain.includes('.auth0.com') && !domain.includes('.us.auth0.com') &&
+    if (domain && !domain.includes('.auth0.com') && !domain.includes('.us.auth0.com') &&
       !domain.includes('.eu.auth0.com') && !domain.includes('.au.auth0.com')) {
       console.warn('Auth0 domain format might be incorrect. Expected format: your-domain.auth0.com');
     }
 
-    // For Electron, we use a custom redirect URI
-    // The redirect will be handled within the Electron window
-    const redirectUri = window.location.origin + window.location.pathname;
+    // For Electron, we use a custom redirect URI with our app's protocol
+    // This is more secure than file:// and works better with Auth0
+    const redirectUri = 'lagioterevise://callback';
 
     auth0Client = await createAuth0Client({
       domain: domain,
@@ -190,27 +194,13 @@ async function displayProfile() {
 // Event handlers
 async function login() {
   try {
-    // For Electron, we can use popup or redirect
-    // Popup is better UX but redirect works too
-    try {
-      await auth0Client.loginWithPopup({
-        authorizationParams: {
-          redirect_uri: window.location.origin + window.location.pathname
-        }
-      });
-      await updateUI();
-    } catch (popupError) {
-      // If popup fails (e.g., blocked), fall back to redirect
-      if (popupError.error === 'popup_closed_by_user') {
-        return; // User closed popup, don't show error
+    // For Electron, we must use redirect (popup doesn't work with custom protocols)
+    console.log('Starting login with redirect...');
+    await auth0Client.loginWithRedirect({
+      authorizationParams: {
+        redirect_uri: 'lagioterevise://callback'
       }
-      console.warn('Popup login failed, trying redirect:', popupError);
-      await auth0Client.loginWithRedirect({
-        authorizationParams: {
-          redirect_uri: window.location.origin + window.location.pathname
-        }
-      });
-    }
+    });
   } catch (err) {
     console.error('Login error:', err);
     showError(err.message);
@@ -222,7 +212,7 @@ async function logout() {
   try {
     await auth0Client.logout({
       logoutParams: {
-        returnTo: window.location.origin + window.location.pathname
+        returnTo: 'lagioterevise://callback'
       }
     });
     // Clear local storage
@@ -271,6 +261,34 @@ retryBtn.addEventListener('click', () => {
   initAuth0();
 });
 
-// Initialize the app
-initAuth0();
+// Wait for config to be injected from main process before initializing
+async function waitForConfigAndInit() {
+  // Check if config is already available
+  if (window.auth0Config && window.auth0Config.domain && window.auth0Config.clientId) {
+    console.log('[Auth Window] Config already available, initializing...');
+    initAuth0();
+    return;
+  }
+
+  // Wait for config injection with timeout
+  let attempts = 0;
+  const maxAttempts = 20; // 2 seconds total (20 * 100ms)
+
+  const checkInterval = setInterval(() => {
+    attempts++;
+
+    if (window.auth0Config && window.auth0Config.domain && window.auth0Config.clientId) {
+      console.log('[Auth Window] Config received after', attempts * 100, 'ms');
+      clearInterval(checkInterval);
+      initAuth0();
+    } else if (attempts >= maxAttempts) {
+      console.error('[Auth Window] Timeout waiting for config injection');
+      clearInterval(checkInterval);
+      showError('Failed to load authentication configuration. Please try again.');
+    }
+  }, 100);
+}
+
+// Initialize the app - wait for config first
+waitForConfigAndInit();
 
