@@ -18,6 +18,7 @@ function loadEnvFile() {
         }
       }
     });
+    console.log('Environment variables loaded from .env.local');
   }
 }
 
@@ -36,7 +37,26 @@ function safeSend(window, channel, ...args) {
   }
 }
 
-const PROXY_URL = process.env.PROXY_URL || 'https://tj7755-lagiote-proxy.hf.space'; // Default or env
+let PROXY_URL = process.env.PROXY_URL || 'https://tj7755-lagiote-proxy.hf.space'; // Default or env
+
+// Fix: If user provides the Web UI URL (huggingface.co/spaces/...), convert it to the direct API URL (.hf.space)
+if (PROXY_URL.includes('huggingface.co/spaces/')) {
+  // Convert https://huggingface.co/spaces/USERNAME/SPACE_NAME -> https://USERNAME-SPACE_NAME.hf.space
+  // Example: https://huggingface.co/spaces/TJ7755/lagiote-proxy -> https://tj7755-lagiote-proxy.hf.space
+  try {
+    const urlObj = new URL(PROXY_URL);
+    const pathParts = urlObj.pathname.split('/').filter(p => p);
+    // pathParts should be ['spaces', 'USERNAME', 'SPACE_NAME']
+    if (pathParts.length >= 3 && pathParts[0] === 'spaces') {
+      const username = pathParts[1];
+      const spacename = pathParts[2];
+      PROXY_URL = `https://${username}-${spacename}.hf.space`;
+      console.log(`[Config] Converted Web URL to API URL: ${PROXY_URL}`);
+    }
+  } catch (e) {
+    console.error('[Config] Failed to parse/convert PROXY_URL:', e);
+  }
+}
 const NETLIFY_FUNCTION_URL = `${PROXY_URL}/api/generate`;
 const DISTRACTOR_FUNCTION_URL = `${PROXY_URL}/api/distractors`;
 const AUTOCOMPLETE_FUNCTION_URL = `${PROXY_URL}/api/autocomplete`;
@@ -67,6 +87,8 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => {
     console.log('Main window loaded successfully');
+    // Inject the PROXY_URL into the renderer console for debugging verification
+    win.webContents.executeJavaScript(`console.log('[Main Process] Using Proxy URL: ${PROXY_URL}')`).catch(() => { });
   });
 
   win.webContents.on('crashed', () => {
@@ -425,9 +447,10 @@ ipcMain.handle('gemini-generate-deck', async (event, { documents, cardType = 'fl
     return await response.json();
   } catch (error) {
     console.error('AI generation error:', error);
+    console.error('Error details:', error.message, error.stack);
     return {
       error: 'offline',
-      message: 'Cannot generate cards offline. Please check your internet connection or try again later.',
+      message: error.message || 'Cannot generate cards offline. Please check your internet connection or try again later.',
       offline: true,
       originalError: error.message
     };
