@@ -70,6 +70,62 @@ These are the notes of planned features.
                 return;
             }
 
+            // Handle Auth0 callback on web (if code/state in URL)
+            if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
+                console.log('Detected Auth0 callback in web environment');
+                try {
+                    showToast('Completing sign in...', 'info');
+
+                    // Load Auth0 SDK if not already loaded
+                    if (!window.auth0) {
+                        await new Promise((resolve, reject) => {
+                            const script = document.createElement('script');
+                            script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
+                            script.onload = resolve;
+                            script.onerror = reject;
+                            document.head.appendChild(script);
+                        });
+                    }
+
+                    const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+                    const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                    const auth0Client = await auth0.createAuth0Client({
+                        domain: auth0Domain,
+                        clientId: auth0ClientId,
+                        authorizationParams: {
+                            redirect_uri: window.location.origin + window.location.pathname
+                        }
+                    });
+
+                    await auth0Client.handleRedirectCallback();
+                    const user = await auth0Client.getUser();
+                    const token = await auth0Client.getTokenSilently();
+
+                    // Store auth session
+                    const authResult = {
+                        user: user,
+                        access_token: token,
+                        id_token: token
+                    };
+                    localStorage.setItem('auth0Session', JSON.stringify(authResult));
+
+                    // Clean up URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+
+                    console.log('Web Auth0 login successful:', user.email);
+                    showToast('Successfully signed in!', 'success');
+
+                    // Continue with logged in flow
+                    await updateUIAfterLogin(user);
+                    await handleOfflineOrGuest();
+                    return;
+                } catch (error) {
+                    console.error('Auth callback error:', error);
+                    showToast('Sign in failed. Please try again.', 'error');
+                }
+            }
+
             // Authentication will be handled by Auth0 (to be implemented)
             await handleOfflineOrGuest();
         };
@@ -4692,17 +4748,54 @@ These are the notes of planned features.
             // Guest Signup Button in Header
             document.getElementById('guestSignupBtn')?.addEventListener('click', async () => {
                 console.log('Opening Auth0 signup window from header...');
-                try {
-                    const authResult = await window.electronAPI.openLoginWindow();
-                    if (authResult && authResult.user) {
-                        console.log('Signup/Login successful:', authResult.user);
-                        localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                        await updateUIAfterLogin(authResult.user);
-                        location.reload();
+
+                // Check if we're in Electron or web
+                if (window.electronAPI && window.electronAPI.openLoginWindow) {
+                    // Electron environment - use Electron auth window
+                    try {
+                        const authResult = await window.electronAPI.openLoginWindow();
+                        if (authResult && authResult.user) {
+                            console.log('Signup/Login successful:', authResult.user);
+                            localStorage.setItem('auth0Session', JSON.stringify(authResult));
+                            await updateUIAfterLogin(authResult.user);
+                            location.reload();
+                        }
+                    } catch (error) {
+                        console.error('Signup error:', error);
+                        showToast('Signup failed. Please try again.', 'error');
                     }
-                } catch (error) {
-                    console.error('Signup error:', error);
-                    showToast('Signup failed. Please try again.', 'error');
+                } else {
+                    // Web environment - use Auth0 web SDK
+                    try {
+                        // Load Auth0 config from environment or meta tags
+                        const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+                        const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                        if (!window.auth0) {
+                            showToast('Loading authentication...', 'info');
+                            // Dynamically load Auth0 SDK
+                            await new Promise((resolve, reject) => {
+                                const script = document.createElement('script');
+                                script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
+                                script.onload = resolve;
+                                script.onerror = reject;
+                                document.head.appendChild(script);
+                            });
+                        }
+
+                        const auth0Client = await auth0.createAuth0Client({
+                            domain: auth0Domain,
+                            clientId: auth0ClientId,
+                            authorizationParams: {
+                                redirect_uri: window.location.origin + window.location.pathname
+                            }
+                        });
+
+                        await auth0Client.loginWithRedirect();
+                    } catch (error) {
+                        console.error('Web auth error:', error);
+                        showToast('Authentication failed. Please try again.', 'error');
+                    }
                 }
             });
 
