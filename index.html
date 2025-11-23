@@ -11060,18 +11060,7 @@ These are the notes of planned features.
                             lastSynced: lastSynced,
                             dirtyDecks: dirtyDecks,
                             dirtyKnowledgeStates: dirtyKnowledgeStates
-                        })
-                    });
-
-                    clearTimeout(timeoutId);
-
-                    if (!response.ok) {
-                        throw new Error(`Sync failed with status: ${response.status}`);
-                    }
-
-                    syncResult = await response.json();
-                }
-
+                                ```
                 const deckTransaction = db.transaction(['decks'], 'readwrite');
                 const deckStore = deckTransaction.objectStore('decks');
                 for (const serverDeck of syncResult.updatedDecks) {
@@ -11149,16 +11138,16 @@ These are the notes of planned features.
                 }
 
                 grid.innerHTML = curricula.map(curriculum => `
-                    < div class="deck-card" style = "border-color: var(--success-color);" >
-                        <div class="deck-card-main-clickable">
-                            <div class="deck-header">
-                                <div class="deck-category" style="background-color: #e6fffa; color: #317b75;">Curriculum</div>
-                                <div class="deck-name">${curriculum.title}</div>
-                                <div class="deck-info">${curriculum.description || 'No description.'}</div>
-                            </div>
-                        </div>
+                                < div class= "deck-card" style = "border-color: var(--success-color);" >
+                                <div class="deck-card-main-clickable">
+                                    <div class="deck-header">
+                                        <div class="deck-category" style="background-color: #e6fffa; color: #317b75;">Curriculum</div>
+                                        <div class="deck-name">${curriculum.title}</div>
+                                        <div class="deck-info">${curriculum.description || 'No description.'}</div>
+                                    </div>
+                                </div>
                     </div >
-                    `).join('');
+                        `).join('');
 
             } catch (error) {
                 console.error('Library Error:', error);
@@ -11181,7 +11170,7 @@ These are the notes of planned features.
 
         function generateDiffHTML(s1, s2) {
             const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${escape(s1)}</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${ escape(s1) }</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
         }
 
 
@@ -11269,7 +11258,7 @@ These are the notes of planned features.
                         appVersion: document.querySelector('#welcomeMessage + span')?.textContent || 'Unknown',
                         platform: navigator.platform,
                         userAgent: navigator.userAgent,
-                        screenResolution: `${window.screen.width}x${window.screen.height} `,
+                        screenResolution: `${ window.screen.width }x${ window.screen.height } `,
                         username: userSettings?.username || 'Anonymous'
                     },
                     stats: {
@@ -11292,7 +11281,7 @@ These are the notes of planned features.
                 // 5. Create Filename with Date and Username
                 const safeName = (userSettings?.username || 'User').replace(/[^a-z0-9]/gi, '_');
                 const dateStr = new Date().toISOString().split('T')[0];
-                const fileName = `Lagiote_Data_${safeName}_${dateStr}.json`;
+                const fileName = `Lagiote_Data_${ safeName }_${ dateStr }.json`;
 
                 // 6. Trigger Download
                 const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
