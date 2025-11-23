@@ -39,8 +39,8 @@ export function calculateIQS(logData, userBaseline = { latency: 1500, fluency: 1
     const W_corrections = 0.25;
     const W_attempts = 0.25;
 
-    const iqs = (W_latency * v_latency) + (W_fluency * v_fluency) + 
-                (W_corrections * v_corrections) + (W_attempts * v_attempts);
+    const iqs = (W_latency * v_latency) + (W_fluency * v_fluency) +
+        (W_corrections * v_corrections) + (W_attempts * v_attempts);
 
     return Math.max(0, Math.min(1, iqs));
 }
@@ -55,10 +55,10 @@ export function getBucketName(index, maxBuckets) {
 
 export function formatDate(dateString) {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
+    return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
     });
 }
 
@@ -100,19 +100,37 @@ export function generateId() {
 
 
 export function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    container.appendChild(toast);
-    
-    
-    toast.offsetHeight;
-    
-    toast.classList.add('show');
+    const messageBar = document.getElementById('messageBar');
+    if (!messageBar) {
+        console.warn('Message bar not found, message:', message);
+        return;
+    }
+
+    // Set message content
+    messageBar.textContent = message;
+
+    // Reset classes
+    messageBar.className = 'message-bar';
+
+    // Add type class
+    if (type) {
+        messageBar.classList.add(type);
+    }
+
+    // Show the message bar
+    messageBar.classList.remove('hidden');
+
+    // Trigger animation
     setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 500);
+        messageBar.classList.add('show');
+    }, 10);
+
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+        messageBar.classList.remove('show');
+        setTimeout(() => {
+            messageBar.classList.add('hidden');
+        }, 300);
     }, 3000);
 }
 

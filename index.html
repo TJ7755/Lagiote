@@ -2188,46 +2188,46 @@ These are the notes of planned features.
             gap: 10px;
         }
 
-        #toast-container {
+        /* Message Bar - Unobtrusive top notification */
+        .message-bar {
             position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 2000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .toast {
-            background-color: var(--header-bg);
-            color: var(--text-color);
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1999;
             padding: 12px 20px;
-            border-radius: 25px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateY(-100%);
             opacity: 0;
-            transform: translateY(20px) scale(0.9);
         }
 
-        .toast.show {
+        .message-bar.show {
+            transform: translateY(0);
             opacity: 1;
-            transform: translateY(0) scale(1);
         }
 
-        .toast.success {
-            background-color: var(--success-color);
+        .message-bar.success {
+            background-color: rgba(72, 187, 120, 0.95);
             color: white;
         }
 
-        .toast.error {
-            background-color: var(--danger-color);
+        .message-bar.error {
+            background-color: rgba(245, 101, 101, 0.95);
+            color: white;
+        }
+
+        .message-bar.info {
+            background-color: rgba(102, 126, 234, 0.95);
+            color: white;
+        }
+
+        .message-bar.warning {
+            background-color: rgba(237, 137, 54, 0.95);
             color: white;
         }
 
@@ -2478,50 +2478,7 @@ These are the notes of planned features.
             background: #5a67d830;
         }
 
-        #dynamicToast {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%) translateY(20px) scale(0.9);
-            z-index: 2000;
-
-            background-color: var(--header-bg);
-            color: var(--text-color);
-            padding: 12px 20px;
-            border-radius: 25px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-            font-size: 15px;
-            font-weight: 500;
-
-            display: flex;
-            align-items: center;
-            gap: 10px;
-
-            transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        #dynamicToast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0) scale(1);
-            pointer-events: auto;
-        }
-
-        #dynamicToast.success {
-            background-color: var(--success-color);
-            color: white;
-        }
-
-        #dynamicToast.error {
-            background-color: var(--danger-color);
-            color: white;
-        }
-
-        #dynamicToast.info {
-            background-color: var(--primary-color);
-            color: white;
-        }
+        /* Old toast styles removed - using message bar instead */
 
 
         .exam-plans-container {
@@ -2748,7 +2705,8 @@ These are the notes of planned features.
         </div>
     </div>
 
-    <div id="dynamicToast" class="toast"></div>
+    <!-- Message Bar - Unobtrusive notification system -->
+    <div id="messageBar" class="message-bar hidden"></div>
     <div id="authView" class="container view-container">
         <div style="text-align: center; max-width: 600px;">
             <div class="logo" style="margin: 0 auto 20px auto; width: 80px; height: 80px;">
@@ -5283,9 +5241,6 @@ These are the notes of planned features.
                     return;
                 }
             }
-            if (globalSettings.enableToasts === false) {
-                return;
-            }
             toastQueue.push({ message, type, duration, icon });
             if (!isToastVisible) {
                 processToastQueue();
@@ -5299,28 +5254,42 @@ These are the notes of planned features.
             }
 
             isToastVisible = true;
+            const messageItem = toastQueue.shift();
+            const messageBar = document.getElementById('messageBar');
 
-            const toastData = toastQueue.shift();
-
-            const toastElement = document.getElementById('dynamicToast');
-
-            let toastContent = '';
-            if (toastData.icon) {
-                toastContent += `<div style="width: 20px; height: 20px;">${toastData.icon}</div>`;
+            if (!messageBar) {
+                console.error('Message bar element not found');
+                isToastVisible = false;
+                return;
             }
-            toastContent += `<span>${toastData.message}</span>`;
-            toastElement.innerHTML = toastContent;
 
-            toastElement.className = `toast ${toastData.type}`;
-            setTimeout(() => toastElement.classList.add('show'), 10);
+            // Set message content
+            messageBar.textContent = messageItem.message;
 
+            // Reset classes
+            messageBar.className = 'message-bar';
+
+            // Add type class
+            if (messageItem.type) {
+                messageBar.classList.add(messageItem.type);
+            }
+
+            // Show the message bar
+            messageBar.classList.remove('hidden');
+
+            // Trigger animation
             setTimeout(() => {
-                toastElement.classList.remove('show');
+                messageBar.classList.add('show');
+            }, 10);
 
+            // Auto-dismiss after duration
+            setTimeout(() => {
+                messageBar.classList.remove('show');
                 setTimeout(() => {
-                    processToastQueue();
-                }, 500);
-            }, toastData.duration);
+                    messageBar.classList.add('hidden');
+                    processToastQueue(); // Process next message if any
+                }, 300); // Wait for slide-up animation
+            }, messageItem.duration);
         }
 
         async function runSmartCoachChecks(context, data = {}) {
@@ -7593,14 +7562,50 @@ These are the notes of planned features.
                 return;
             }
             async function logout() {
-                localStorage.removeItem('auth0Session');
-                document.getElementById('userProfileMenu').classList.add('hidden');
-                document.getElementById('guestSignupBtn').classList.remove('hidden');
-                document.getElementById('loggedInView').classList.add('hidden');
-                document.getElementById('loggedOutView').classList.remove('hidden');
-                document.getElementById('appHeader').classList.add('hidden');
-                showView('dashboard', true);
-                location.reload();
+                try {
+                    // Get Auth0 configuration
+                    const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-sxs00xsv43d5qfx7.us.auth0.com';
+                    const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                    // Load Auth0 SDK if needed
+                    if (!window.auth0) {
+                        const script = document.createElement('script');
+                        script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
+                        document.head.appendChild(script);
+                        await new Promise(resolve => script.onload = resolve);
+                    }
+
+                    // Create Auth0 client
+                    const auth0Client = await auth0.createAuth0Client({
+                        domain: auth0Domain,
+                        clientId: auth0ClientId,
+                        authorizationParams: {
+                            redirect_uri: window.location.origin
+                        }
+                    });
+
+                    // Clear local storage first
+                    localStorage.removeItem('auth0Session');
+
+                    // Update UI
+                    document.getElementById('userProfileMenu').classList.add('hidden');
+                    document.getElementById('guestSignupBtn').classList.remove('hidden');
+                    document.getElementById('loggedInView').classList.add('hidden');
+                    document.getElementById('loggedOutView').classList.remove('hidden');
+                    document.getElementById('appHeader').classList.add('hidden');
+
+                    // Call Auth0 logout
+                    await auth0Client.logout({
+                        logoutParams: {
+                            returnTo: window.location.origin
+                        }
+                    });
+                } catch (error) {
+                    console.error('Logout error:', error);
+                    // Fallback: just clear session and reload
+                    localStorage.removeItem('auth0Session');
+                    location.reload();
+                }
             }
 
             document.getElementById('showAnswerBtn').classList.add('hidden');
@@ -9970,7 +9975,11 @@ These are the notes of planned features.
 
         function addTextAsDocument() {
             const text = document.getElementById('ai-text-input').value.trim();
-            if (!text) return;
+            console.log('Add text as document clicked, text length:', text.length);
+            if (!text) {
+                showToast('Please enter some text first', 'warning');
+                return;
+            }
             const doc = {
                 id: Date.now() + Math.random(),
                 name: `Pasted Text - ${new Date().toLocaleTimeString()}`,
@@ -9979,8 +9988,10 @@ These are the notes of planned features.
                 status: 'done'
             };
             documentsForAi.push(doc);
+            console.log('Document added, total documents:', documentsForAi.length);
             renderDocumentList();
             document.getElementById('ai-text-input').value = '';
+            showToast('Text added successfully', 'success');
         }
 
         function removeDocument(index) {
@@ -11114,11 +11125,48 @@ These are the notes of planned features.
 
                 if (!syncResult) throw new Error("No sync result received.");
 
+                console.log('Sync result received:', {
+                    updatedDecks: syncResult.updatedDecks?.length || 0,
+                    updatedKnowledgeStates: syncResult.updatedKnowledgeStates?.length || 0
+                });
+
+                // Improved conflict resolution: merge decks intelligently
                 const deckTransaction = db.transaction(['decks'], 'readwrite');
                 const deckStore = deckTransaction.objectStore('decks');
+
+                // Get all local decks first for comparison
+                const localDecksMap = new Map();
+                allDecks.forEach(deck => localDecksMap.set(deck.id, deck));
+
+                let conflictsResolved = 0;
                 for (const serverDeck of syncResult.updatedDecks) {
+                    const localDeck = localDecksMap.get(serverDeck.id);
+
+                    if (localDeck) {
+                        // Conflict resolution: compare timestamps
+                        const serverTime = serverDeck.lastModified ? new Date(serverDeck.lastModified) : new Date(0);
+                        const localTime = localDeck.lastModified ? new Date(localDeck.lastModified) : new Date(0);
+
+                        if (localTime > serverTime) {
+                            // Local version is newer, keep it
+                            console.log(`Conflict: Local version of "${localDeck.name}" is newer, keeping local`);
+                            conflictsResolved++;
+                            continue;  // Skip this server deck
+                        } else if (serverTime.getTime() === localTime.getTime()) {
+                            // Same timestamp, check if content is actually different
+                            if (JSON.stringify(localDeck) === JSON.stringify(serverDeck)) {
+                                continue; // Identical, no need to update
+                            }
+                        }
+                    }
+
+                    // Update with server version
                     deckStore.put(serverDeck);
                     decks[serverDeck.id] = serverDeck;
+                }
+
+                if (conflictsResolved > 0) {
+                    showToast(`Sync complete. ${conflictsResolved} local change(s) preserved.`, 'info');
                 }
 
                 const knowledgeTransaction = db.transaction(['userKnowledgeState'], 'readwrite');
