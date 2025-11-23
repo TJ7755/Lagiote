@@ -11092,7 +11092,7 @@ These are the notes of planned features.
                         delete decks[id];
                     });
                 }
-                ```
+
                 localStorage.setItem('lastSynced', syncResult.newTimestamp);
                 showToast('Sync complete!', 'success');
 
@@ -11181,7 +11181,7 @@ These are the notes of planned features.
 
         function generateDiffHTML(s1, s2) {
             const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${ escape(s1) }</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${escape(s1)}</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
         }
 
 
@@ -11269,7 +11269,7 @@ These are the notes of planned features.
                         appVersion: document.querySelector('#welcomeMessage + span')?.textContent || 'Unknown',
                         platform: navigator.platform,
                         userAgent: navigator.userAgent,
-                        screenResolution: `${ window.screen.width }x${ window.screen.height } `,
+                        screenResolution: `${window.screen.width}x${window.screen.height} `,
                         username: userSettings?.username || 'Anonymous'
                     },
                     stats: {
@@ -11292,7 +11292,7 @@ These are the notes of planned features.
                 // 5. Create Filename with Date and Username
                 const safeName = (userSettings?.username || 'User').replace(/[^a-z0-9]/gi, '_');
                 const dateStr = new Date().toISOString().split('T')[0];
-                const fileName = `Lagiote_Data_${ safeName }_${ dateStr }.json`;
+                const fileName = `Lagiote_Data_${safeName}_${dateStr}.json`;
 
                 // 6. Trigger Download
                 const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
