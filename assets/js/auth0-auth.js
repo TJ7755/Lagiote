@@ -35,12 +35,13 @@ function getAuth0Config() {
   // Get from window config (injected by main process) or localStorage
   const domain = config.domain || localStorage.getItem('AUTH0_DOMAIN');
   const clientId = config.clientId || localStorage.getItem('AUTH0_CLIENT_ID');
+  const audience = config.audience || localStorage.getItem('AUTH0_AUDIENCE');
 
   if (!domain || !clientId) {
     console.warn('Auth0 configuration missing. Please check your .env.local file for VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID');
   }
 
-  return { domain, clientId };
+  return { domain, clientId, audience };
 }
 
 // Initialize Auth0 client
@@ -48,7 +49,7 @@ async function initAuth0() {
   try {
     showLoading();
 
-    const { domain, clientId } = getAuth0Config();
+    const { domain, clientId, audience } = getAuth0Config();
 
     if (!domain || !clientId) {
       throw new Error('Auth0 configuration missing. Please ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your .env.local file');
@@ -64,7 +65,7 @@ async function initAuth0() {
     // This is more secure than file:// and works better with Auth0
     const redirectUri = 'lagioterevise://callback';
 
-    auth0Client = await createAuth0Client({
+    const auth0Options = {
       domain: domain,
       clientId: clientId,
       authorizationParams: {
@@ -73,7 +74,13 @@ async function initAuth0() {
       // Use popup mode for Electron (better UX)
       useRefreshTokens: true,
       cacheLocation: 'localstorage'
-    });
+    };
+
+    if (audience) {
+      auth0Options.authorizationParams.audience = audience;
+    }
+
+    auth0Client = await createAuth0Client(auth0Options);
 
     // Check if user is returning from login (redirect callback)
     if (window.location.search.includes('code=') && window.location.search.includes('state=')) {

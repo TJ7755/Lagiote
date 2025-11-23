@@ -1,7 +1,5 @@
 <!--
 These are the notes of planned features.
-    1. In manual card creation mode, include Gemini APi to have suggestions for the card. The Gemini API should have access to the entire deck content already created manually by the user, with instructions to finish off the card the user is working on. This means that they can seamlessly use advanced LLM autocomplete with the click of the key Tab.
-    2. Detect user light/dark mode device settings and then apply accordingly.
 -->
 
 <!DOCTYPE html>
@@ -199,21 +197,21 @@ These are the notes of planned features.
         gtag('config', 'G-86DQ5HTDV9');
     </script>
     <script>
-        // Early theme detection to prevent flash of wrong theme
-        // Apply system preference immediately (saved preference will override in loadSavedData)
         (function () {
-            const applyTheme = () => {
-                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                    document.documentElement.classList.add('dark-mode');
+            const applyTheme = (isDark) => {
+                const target = document.documentElement;
+                if (isDark) {
+                    target.classList.add('dark-mode');
                     if (document.body) document.body.classList.add('dark-mode');
+                } else {
+                    target.classList.remove('dark-mode');
+                    if (document.body) document.body.classList.remove('dark-mode');
                 }
             };
 
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', applyTheme);
-            } else {
-                applyTheme();
-            }
+            const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            applyTheme(systemDark);
         })();
     </script>
     <script src="./assets/js/pdf.min.js"></script>
@@ -254,6 +252,9 @@ These are the notes of planned features.
         }
     </script>
     <script src="./assets/js/sequence-test.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
@@ -1459,7 +1460,26 @@ These are the notes of planned features.
             font-size: 1.1rem;
             padding: 20px;
             border-radius: 12px;
+            border: 2px solid var(--border-color);
             transition: all 0.3s;
+
+            background-color: var(--input-bg);
+            color: var(--text-color);
+
+            color-scheme: light dark;
+        }
+
+        .dark-mode #writeAnswerInput {
+            background-color: #2d3748;
+            color: #e2e8f0;
+            border-color: #4a5568;
+        }
+
+        #writeAnswerInput:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: var(--input-focus-bg);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
         }
 
         #writeAnswerInput:focus {
@@ -2682,6 +2702,37 @@ These are the notes of planned features.
             transform: scale(1.05);
             box-shadow: 0 8px 20px var(--shadow-color);
         }
+
+        .session-progress-wrapper {
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto 20px auto;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .session-progress-track {
+            flex-grow: 1;
+            height: 8px;
+            background-color: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .session-progress-fill {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .session-stats {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--secondary-text);
+            white-space: nowrap;
+        }
     </style>
 </head>
 
@@ -3233,6 +3284,21 @@ These are the notes of planned features.
 
                 <button class="btn" onclick="saveStudySettings()">Save Study Settings</button>
 
+            </div>
+            <div class="settings-section">
+                <h2>Data Contribution</h2>
+                <p style="color: var(--secondary-text); font-size: 0.9rem; margin-bottom: 15px;">
+                    Help improve Lagiote Revise by exporting your study data.
+                    You can email the generated file to the developer for analysis.
+                </p>
+                <button class="btn btn-secondary" onclick="generateFullDataExport()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                        stroke="currentColor" width="20" height="20" style="vertical-align: middle; margin-right: 8px;">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                    </svg>
+                    Export Research Data
+                </button>
             </div>
             <div class="settings-section">
                 <h2>Danger Zone</h2>
@@ -4894,12 +4960,13 @@ These are the notes of planned features.
                                 document.head.appendChild(script);
                             });
                         }
-
                         const auth0Client = await auth0.createAuth0Client({
                             domain: auth0Domain,
                             clientId: auth0ClientId,
                             authorizationParams: {
-                                redirect_uri: window.location.origin + window.location.pathname
+                                redirect_uri: window.location.origin + '/',
+                                audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
+                                scope: 'openid profile email'
                             }
                         });
 
@@ -5523,45 +5590,38 @@ These are the notes of planned features.
             const darkModeToggle = document.getElementById('darkModeToggle');
             let shouldBeDark = false;
 
-            // If user has manually set a preference, use it
             if (globalSettings.darkMode !== undefined) {
                 shouldBeDark = globalSettings.darkMode;
             } else {
-                // Otherwise, detect system preference
                 shouldBeDark = detectSystemDarkMode();
             }
 
-            // Apply the theme
             if (shouldBeDark) {
+                document.documentElement.classList.add('dark-mode');
                 document.body.classList.add('dark-mode');
             } else {
+                document.documentElement.classList.remove('dark-mode');
                 document.body.classList.remove('dark-mode');
             }
 
-            // Update toggle to reflect current state
             if (darkModeToggle) {
                 darkModeToggle.checked = shouldBeDark;
             }
         }
 
         function setupSystemThemeListener() {
-            // Listen for system theme changes
             if (window.matchMedia) {
                 const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
-                // Handle changes to system preference
                 const handleSystemThemeChange = (e) => {
-                    // Only auto-update if user hasn't manually set a preference
                     if (globalSettings.darkMode === undefined) {
                         applyDarkModePreference();
                     }
                 };
 
-                // Modern browsers
                 if (mediaQuery.addEventListener) {
                     mediaQuery.addEventListener('change', handleSystemThemeChange);
                 } else {
-                    // Fallback for older browsers
                     mediaQuery.addListener(handleSystemThemeChange);
                 }
             }
@@ -6519,9 +6579,17 @@ These are the notes of planned features.
         function closeNameModal() { }
 
         async function toggleDarkMode() {
-            // User is manually toggling, so save their preference
-            document.body.classList.toggle('dark-mode');
-            globalSettings.darkMode = document.body.classList.contains('dark-mode');
+            const html = document.documentElement;
+            const body = document.body;
+
+            html.classList.toggle('dark-mode');
+            if (html.classList.contains('dark-mode')) {
+                body.classList.add('dark-mode');
+            } else {
+                body.classList.remove('dark-mode');
+            }
+
+            globalSettings.darkMode = html.classList.contains('dark-mode');
             await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
         }
 
@@ -6590,43 +6658,106 @@ These are the notes of planned features.
             currentDeckId = deckId;
             const deck = decks[deckId];
 
-            deck.settings = {
-                ...DEFAULT_DECK_SETTINGS,
-                ...(deck.settings || {})
-            };
-            if (!deck.settings.learnMode) deck.settings.learnMode = 'flashcard';
-
-            if (deck.cards.length > 0 && typeof deck.cards[0].archetype === 'undefined') {
-                showToast("Performing first‑time analysis…", "info", 2000);
-                await processDeckContent(deck);
-                await saveDataToDB('decks', deck);
-            }
+            deck.settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
 
             const allKnowledge = await getAllDataFromDB('userKnowledgeState');
             studyState.knowledgeStates = new Map(allKnowledge.map(k => [k.cardID, k]));
 
             const allCards = deck.cards;
-            const nonMastered = allCards.filter(c => {
+            const candidates = allCards.filter(c => {
                 const mastery = studyState.knowledgeStates.get(c.id)?.masteryScore ?? 0.5;
-                return mastery < 0.95;
+                return mastery < 0.90;
             });
 
-            const poolSize = lastKnownFocusScore >= 0.85 ? 7 :
-                lastKnownFocusScore >= 0.65 ? 5 : 3;
-            studyState.activeLearningPool = shuffleArray(nonMastered).slice(0, poolSize);
+            candidates.sort((a, b) => {
+                const mA = studyState.knowledgeStates.get(a.id)?.masteryScore ?? 0.5;
+                const mB = studyState.knowledgeStates.get(b.id)?.masteryScore ?? 0.5;
+                return mA - mB;
+            });
 
-            assignQuestionTypesToCards(studyState.activeLearningPool, deckId);
+            const sessionSize = 20;
+            studyState.roundCards = candidates.slice(0, sessionSize);
 
-            studyState.roundCards = shuffleArray(studyState.activeLearningPool);
-            studyState.settings = deck.settings;
-            studyState.currentRound = 1;
-            studyState.startTime = new Date();
-            studyState.originPlanId = null;
+            studyState.sessionCardIds = studyState.roundCards.map(c => c.id);
+
+            if (studyState.roundCards.length === 0) {
+                showToast("You've mastered this entire deck!", "success");
+                return;
+            }
+
+            assignQuestionTypesToCards(studyState.roundCards, deckId);
 
             showView('studyMode');
-            document.getElementById('studyTitle').textContent = 'Learning Mode';
+            document.getElementById('studyTitle').textContent = 'Learning Session';
             document.getElementById('studySubtitle').textContent = deck.name;
-            showProgress();
+
+            setupSessionProgressBar();
+            updateSessionProgress();
+
+            transitionSubView(document.getElementById('progressView'), document.getElementById('preGenerationView'));
+
+            const updateProgressUI = (completed, total) => {
+                const percent = total > 0 ? (completed / total) * 100 : 100;
+                document.getElementById('preGenerationProgress').style.width = `${percent}%`;
+                document.getElementById('preGenerationProgressText').textContent = `Generating smart questions... ${completed}/${total}`;
+            };
+
+            await preGenerateAdaptiveQuestions(studyState.roundCards, updateProgressUI);
+
+            studyState.currentCardIndex = 0;
+            studyState.startTime = new Date();
+
+            transitionSubView(document.getElementById('preGenerationView'), document.getElementById('cardView'));
+            showNextCard();
+        }
+
+        function setupSessionProgressBar() {
+            const infoContainer = document.getElementById('cardRoundInfo');
+            infoContainer.innerHTML = '';
+            infoContainer.style.background = 'transparent';
+
+            infoContainer.innerHTML = `
+                <div class="session-progress-wrapper">
+                    <div class="session-stats" id="sessionCounter" style="margin-bottom: 5px;">Calculating...</div>
+                    <div class="session-progress-track">
+                        <div class="session-progress-fill" id="sessionProgressBar"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        async function updateSessionProgress() {
+            if (!studyState.sessionCardIds || studyState.sessionCardIds.length === 0) return;
+
+            const allStates = await getAllDataFromDB('userKnowledgeState');
+            const stateMap = new Map(allStates.map(s => [s.cardID, s]));
+
+            let totalMastery = 0;
+
+            studyState.sessionCardIds.forEach(id => {
+                const state = stateMap.get(id);
+                const score = state ? state.masteryScore : 0.5;
+                totalMastery += score;
+            });
+
+            const avgMastery = totalMastery / studyState.sessionCardIds.length;
+
+            const floor = 0.5;
+            const ceiling = 0.9;
+
+            let visualPercent = ((avgMastery - floor) / (ceiling - floor)) * 100;
+            visualPercent = Math.max(0, Math.min(100, visualPercent));
+
+            const bar = document.getElementById('sessionProgressBar');
+            const text = document.getElementById('sessionCounter');
+
+            if (bar) bar.style.width = `${visualPercent}%`;
+
+            if (text) {
+                const current = (avgMastery * 100).toFixed(0);
+                text.innerHTML = `Progress: <span style="color: var(--primary-color);">${Math.min(100, Math.round(current / 9 * 10))}%</span>`;
+            }
         }
 
         async function startSpacedLearning(deckId) {
@@ -7220,6 +7351,9 @@ These are the notes of planned features.
             const card = studyState.roundCards[studyState.currentCardIndex];
             const questionType = card.questionTypeToShow;
 
+            document.getElementById('accentToggleBtn').classList.add('hidden');
+            document.getElementById('accentButtonsContainer').classList.add('hidden');
+
             switch (questionType) {
                 case 'MultipleChoice':
                     document.getElementById('mcqView').classList.remove('hidden');
@@ -7230,20 +7364,41 @@ These are the notes of planned features.
 
                 case 'Cloze':
                     document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                    const clozeText = card.question.replace(new RegExp(card.answer, 'ig'), '___________');
+                    let clozeText = card.question;
+
+                    // Handle explicit blanks
+                    if (clozeText.includes('___')) {
+                        clozeText = clozeText.replace(/___/g, '___________');
+                    } else if (clozeText.includes('...')) {
+                        clozeText = clozeText.replace(/\.\.\./g, '___________');
+                    } else {
+                        // Standard Cloze: remove answer from question
+                        clozeText = clozeText.replace(new RegExp(escapeRegExp(card.answer), 'ig'), '___________');
+                    }
+
                     document.getElementById('cardQuestion').innerHTML = clozeText;
+
                     document.getElementById('writeAnswerInput').classList.remove('hidden');
                     document.getElementById('checkAnswerBtn').classList.remove('hidden');
                     document.getElementById('dontKnowBtn').classList.remove('hidden');
+
+                    document.getElementById('accentToggleBtn').classList.remove('hidden');
+                    updateAccentButtonsVisibility();
+
                     startInteractionLog(card.id);
                     break;
 
                 case 'Type':
                     document.getElementById('flashcardViewContainer').classList.remove('hidden');
                     document.getElementById('cardQuestion').innerHTML = card.question;
+
                     document.getElementById('writeAnswerInput').classList.remove('hidden');
                     document.getElementById('checkAnswerBtn').classList.remove('hidden');
                     document.getElementById('dontKnowBtn').classList.remove('hidden');
+
+                    document.getElementById('accentToggleBtn').classList.remove('hidden');
+                    updateAccentButtonsVisibility();
+
                     startInteractionLog(card.id);
                     break;
 
@@ -7265,7 +7420,9 @@ These are the notes of planned features.
             writeInput.classList.remove('correct', 'incorrect');
             if (!writeInput.classList.contains('hidden')) setTimeout(() => writeInput.focus(), 100);
 
-            document.getElementById('cardRoundInfo').textContent = `Round ${studyState.currentRound} - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
+            if (currentMode !== 'learn') {
+                document.getElementById('cardRoundInfo').textContent = `Round ${studyState.currentRound} - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
+            }
         }
 
         async function moveToNextSequencePhase() {
@@ -7522,29 +7679,31 @@ These are the notes of planned features.
             const avgFluency = totalFluency / relevantLogs.length;
 
             globalSettings.userBaseline = {
-                latency: avgLatency * 1.2,
-                fluency: avgFluency * 0.9
+                latency: Math.max(3000, avgLatency * 1.5),
+                fluency: avgFluency * 0.8
             };
 
             await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
             console.log("User baseline updated:", globalSettings.userBaseline);
         }
 
-        async function moveCard(card, correct) {
+        async function moveCard(card, correct, questionType = 'Flashcard') {
             const deckIdForThisCard = card.deckId || currentDeckId;
-            const cardInDeck = decks[deckIdForThisCard]?.cards.find(c => c.id === card.id);
-            if (cardInDeck) cardInDeck.isNew = false;
-            if (!deckIdForThisCard || !decks[deckIdForThisCard]) {
+            const deck = decks[deckIdForThisCard];
+
+            if (!deckIdForThisCard || !deck) {
                 console.error("moveCard failed: Could not determine the card's origin deck.");
                 studyState.currentCardIndex++;
                 showNextCard();
                 return;
             }
 
+            const cardInDeck = deck.cards.find(c => c.id === card.id);
             if (cardInDeck) cardInDeck.isNew = false;
 
             const lastLog = currentInteractionLog;
-            const userBaseline = globalSettings.userBaseline || { latency: 1500, fluency: 10 };
+            const userBaseline = globalSettings.userBaseline || { latency: 3000, fluency: 3.0 };
+
             const iqs = calculateIQS({
                 recallLatency: lastLog.recallLatency || 2000,
                 answerFluency: lastLog.answerFluency || 5,
@@ -7552,7 +7711,7 @@ These are the notes of planned features.
                 attemptCount: lastLog.attemptCount || 1
             }, userBaseline);
 
-            await updateKnowledgeState(card, correct, iqs);
+            await updateKnowledgeState(card, correct, iqs, questionType);
 
             const sm2 = new SM2Algorithm();
             const quality = correct ? 4 : 1;
@@ -7571,7 +7730,7 @@ These are the notes of planned features.
                         }
                     } else {
                         showToast("Let's try that one again.", "error");
-                        showNextCard();
+                        showNextCard(); // Stay on card
                     }
                 } else if (studyState.sequencePhase === 'Backward Chaining') {
                     if (correct) {
@@ -7583,7 +7742,7 @@ These are the notes of planned features.
                         }
                     } else {
                         showToast("Let's try that one again.", "error");
-                        showNextCard();
+                        showNextCard(); // Stay on card
                     }
                 } else if (studyState.sequencePhase === 'InterChunkReview') {
                     studyState.sequencePhase = studyState.nextPhaseAfterReview;
@@ -7597,32 +7756,86 @@ These are the notes of planned features.
                         showNextCard();
                     }
                 }
-            } else {
-                if (currentMode === 'learn' && !correct) {
-                    studyState.incorrectInThisRound.push({ ...card });
-                }
-
-                if (currentMode !== 'review') {
-                    if (currentMode === 'review') {
-                        if (correct) {
-                            const index = studyState.stillLearning.findIndex(c => c.id === card.id);
-                            if (index > -1) {
-                                studyState.stillLearning.splice(index, 1);
-                                studyState.correct.push(card);
-                            }
-                        } else {
-                            if (!studyState.lastRoundIncorrect.some(c => c.id === card.id)) {
-                                studyState.lastRoundIncorrect.push(card);
-                            }
-                        }
-                    }
-                }
-
-                studyState.currentCardIndex++;
-                showNextCard();
-                updateFocusMeter();
+                await saveDataToDB('decks', decks[currentDeckId]);
+                return;
             }
 
+            if (currentMode === 'learn') {
+                const updatedState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
+
+                const streak = updatedState ? (updatedState.consecutiveCorrect || 0) : 0;
+                const score = updatedState ? updatedState.masteryScore : 0;
+                const isMastered = score >= 0.90 && streak >= 3;
+
+                if (isMastered) {
+                    studyState.roundCards.splice(studyState.currentCardIndex, 1);
+
+                    studyState.currentCardIndex--;
+
+                    showToast("Card Mastered!", "success", 1000);
+                } else {
+                    const currentCard = studyState.roundCards.splice(studyState.currentCardIndex, 1)[0];
+
+                    // --- DYNAMIC OFFSET CALCULATION ---
+                    // Calculates exactly how many cards to wait before showing this again.
+                    let insertOffset;
+
+                    if (!correct) {
+
+                        insertOffset = Math.max(1, Math.floor(1 + (iqs * 4)));
+                    } else {
+                        let performanceGap = 4 + (iqs * 8);
+                        let streakMultiplier = 1 + (streak * 0.5);
+                        insertOffset = Math.floor(performanceGap * streakMultiplier);
+                    }
+
+                    const fuzz = Math.floor(insertOffset * 0.15);
+                    const randomFuzz = Math.floor(Math.random() * (fuzz * 2 + 1)) - fuzz;
+                    insertOffset = Math.max(1, insertOffset + randomFuzz);
+
+                    const insertIndex = studyState.currentCardIndex + insertOffset;
+
+                    if (insertIndex >= studyState.roundCards.length) {
+                        studyState.roundCards.push(currentCard);
+                    } else {
+                        studyState.roundCards.splice(insertIndex, 0, currentCard);
+                    }
+
+                    studyState.currentCardIndex--;
+                }
+
+                await updateSessionProgress();
+
+                if (studyState.roundCards.length === 0) {
+                    showComplete();
+                    return;
+                }
+
+                if (!correct) {
+                    studyState.incorrectInThisRound.push({ ...card });
+                }
+            }
+
+            if (currentMode === 'review') {
+                if (correct) {
+                    const index = studyState.stillLearning.findIndex(c => c.id === card.id);
+                    if (index > -1) {
+                        studyState.stillLearning.splice(index, 1);
+                        studyState.correct.push(card);
+                    }
+                } else {
+                    if (!studyState.lastRoundIncorrect.some(c => c.id === card.id)) {
+                        studyState.lastRoundIncorrect.push(card);
+                    }
+                }
+            }
+
+            // Advance to next card
+            studyState.currentCardIndex++;
+            showNextCard();
+            updateFocusMeter();
+
+            // Persist deck changes
             await saveDataToDB('decks', decks[currentDeckId]);
         }
 
@@ -7745,13 +7958,17 @@ These are the notes of planned features.
 
         function updateAccentButtonsVisibility() {
             const container = document.getElementById('accentButtonsContainer');
+
             if (globalSettings.showAccents) {
-                populateAccentButtons();
+                if (container.innerHTML.trim() === '') {
+                    populateAccentButtons();
+                }
                 container.classList.remove('hidden');
             } else {
                 container.classList.add('hidden');
             }
         }
+
 
         function populateTestAccentButtons() {
             const accents = ['à', 'â', 'é', 'è', 'ê', 'ë', 'î', 'ï', 'ô', 'ù', 'û', 'ü', 'ç', 'ñ', 'ß', 'ä', 'ö'];
@@ -8997,10 +9214,10 @@ These are the notes of planned features.
             const v_fluency = Math.min(answerFluency / userBaseline.fluency, 1.5) / 1.5;
             const v_corrections = 1 / (1 + totalCorrections);
             const v_attempts = 1 / attemptCount;
-            const W_latency = 0.30;
-            const W_fluency = 0.20;
-            const W_corrections = 0.25;
-            const W_attempts = 0.25;
+            const W_latency = 0.15;
+            const W_fluency = 0.15;
+            const W_corrections = 0.40;
+            const W_attempts = 0.30;
             const iqs = (W_latency * v_latency) + (W_fluency * v_fluency) + (W_corrections * v_corrections) + (W_attempts * v_attempts);
 
             return isNaN(iqs) ? 0.5 : Math.max(0, Math.min(1, iqs));
@@ -9069,73 +9286,59 @@ These are the notes of planned features.
                 const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
                 const store = transaction.objectStore('userKnowledgeState');
 
-                transaction.oncomplete = () => {
-                    resolve();
-                };
-                transaction.onerror = (event) => {
-                    console.error("Database transaction error:", event.target.error);
-                    reject(event.target.error);
-                };
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = (event) => reject(event.target.result);
 
                 const request = store.get(['default_user', card.id]);
 
                 request.onsuccess = () => {
-                    let state = request.result;
+                    let state = request.result || {
+                        userID: 'default_user', cardID: card.id,
+                        masteryScore: 0.5, // 0.0 to 1.0
+                        consecutiveCorrect: 0, // NEW: Track streak for short-term pushing
+                        lastReviewed: new Date().toISOString(),
+                        recallHistory: []
+                    };
 
-                    if (!state) {
-                        state = {
-                            userID: 'default_user', cardID: card.id, masteryScore: 0.5,
-                            stability: 1.0, lastReviewed: new Date().toISOString(), recallHistory: []
-                        };
-                    }
+                    // --- THE CRAMMING ALGORITHM ---
 
+                    // 1. Determine "Hidden Grade" based on IQS (Performance)
+                    // IQS is 0.0 (terrible) to 1.0 (perfect)
+                    // If correct but low IQS (slow), mastery grows slower.
 
-                    const oldMastery = (typeof state.masteryScore === 'number' && !isNaN(state.masteryScore)) ? state.masteryScore : 0.5;
-                    const oldStability = (typeof state.stability === 'number' && !isNaN(state.stability)) ? state.stability : 1.0;
+                    const learningRate = 0.2; // How fast mastery climbs
+                    const penaltyRate = 0.3;  // How fast mastery drops on error
 
-                    let performanceModifier;
                     if (wasCorrect) {
+                        // Bonus for high IQS (Fast/Fluent answers)
+                        const performanceBonus = (iqs > 0.8) ? 1.5 : (iqs < 0.4 ? 0.5 : 1.0);
 
-                        const gainModifiers = { 'MultipleChoice': 1.0, 'Cloze': 1.25, 'Type': 1.5, 'Flashcard': 1.0 };
-                        performanceModifier = gainModifiers[questionType] || 1.0;
+                        // Standard Mastery Growth
+                        state.masteryScore += (1 - state.masteryScore) * learningRate * performanceBonus;
+                        state.consecutiveCorrect = (state.consecutiveCorrect || 0) + 1;
+
+                        // CRAMMING LOGIC:
+                        // If simple mastery > 0.9, we trust it.
+                        // BUT, if they haven't hit a streak of 3, cap mastery at 0.85
+                        // This forces at least 3 successful recalls regardless of how "easy" it feels.
+                        if (state.consecutiveCorrect < 3 && state.masteryScore > 0.85) {
+                            state.masteryScore = 0.85;
+                        }
+
                     } else {
-                        const lossModifiers = { 'MultipleChoice': 1.5, 'Cloze': 1.25, 'Type': 1.0, 'Flashcard': 1.0 };
-                        performanceModifier = lossModifiers[questionType] || 1.0;
+                        // Incorrect
+                        state.masteryScore -= state.masteryScore * penaltyRate;
+                        state.consecutiveCorrect = 0;
                     }
 
-                    let performanceWeight;
-                    if (oldMastery < 0.6) performanceWeight = 0.4;
-                    else if (oldMastery < 0.9) performanceWeight = 0.25;
-                    else performanceWeight = 0.1;
+                    // Clamp scores
+                    state.masteryScore = Math.max(0.01, Math.min(0.99, state.masteryScore));
 
-
-                    performanceWeight *= performanceModifier;
-
-                    const raw_performance = wasCorrect ? (0.5 + (iqs * 0.5)) : 0;
-                    const performance = raw_performance;
-                    const newMastery = (oldMastery * (1 - performanceWeight)) + (performance * performanceWeight);
-
-                    let newStability;
-                    if (wasCorrect) {
-                        const stabilityGain = 0.4 * oldMastery * iqs * performanceModifier;
-                        newStability = oldStability + stabilityGain;
-                    } else {
-                        const stabilityLoss = 0.4 * oldStability;
-                        newStability = oldStability - stabilityLoss;
-                    }
-
-                    state.masteryScore = Math.max(0.01, Math.min(0.99, newMastery));
-                    state.stability = Math.max(0.1, newStability);
                     state.lastReviewed = new Date().toISOString();
                     state.lastModified = new Date().toISOString();
-                    state.recallHistory.push({ date: state.lastReviewed, wasCorrect });
+                    state.recallHistory.push({ date: state.lastReviewed, wasCorrect, iqs });
 
                     store.put(state);
-                };
-
-                request.onerror = (event) => {
-                    console.error("Could not retrieve knowledge state for card:", event.target.error);
-                    reject(event.target.error);
                 };
             });
         }
@@ -9433,7 +9636,9 @@ These are the notes of planned features.
                 case 'MultipleChoice':
                     return allCardsInDeck.length >= 4;
                 case 'Cloze':
-                    return card.question.toLowerCase().includes(card.answer.toLowerCase());
+                    return card.question.toLowerCase().includes(card.answer.toLowerCase()) ||
+                        card.question.includes('___') ||
+                        card.question.includes('...');
                 case 'Type':
                     return true;
                 default:
@@ -10884,10 +11089,15 @@ These are the notes of planned features.
             }
         }
 
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
         function generateDiffHTML(s1, s2) {
             const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${escape(s1)}</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+            return `<span style="background-color: #ffcdd2; text-decoration: line-through;">${escape(s1)}</span> <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
         }
+
 
         function showLoadingScreen(message) {
             const loadingView = document.getElementById('loadingView');
@@ -10937,6 +11147,91 @@ These are the notes of planned features.
                 if (sortableInstance) sortableInstance.destroy();
             }
             editorRenumberCards();
+        }
+
+        async function generateFullDataExport() {
+            // 1. Notify user it started
+            const btn = event.target.closest('button');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner" style="width:16px; height:16px; border-width:2px;"></span> Collecting...';
+            btn.disabled = true;
+
+            try {
+                showToast("Gathering all application data...", "info");
+
+                // 2. Fetch all data stores in parallel
+                const [
+                    decks,
+                    knowledgeStates,
+                    interactionLogs,
+                    examPlans,
+                    userSettings,
+                    analytics
+                ] = await Promise.all([
+                    getAllDataFromDB('decks'),
+                    getAllDataFromDB('userKnowledgeState'),
+                    getAllDataFromDB('interactionLogs'), // This is the most valuable data for analysis
+                    getAllDataFromDB('examPlans'),
+                    getDataFromDB('appData', 'userSettings'),
+                    getDataFromDB('appData', 'analytics')
+                ]);
+
+                // 3. Construct the Research Object
+                const researchData = {
+                    meta: {
+                        exportDate: new Date().toISOString(),
+                        appVersion: document.querySelector('#welcomeMessage + span')?.textContent || 'Unknown',
+                        platform: navigator.platform,
+                        userAgent: navigator.userAgent,
+                        screenResolution: `${window.screen.width}x${window.screen.height}`,
+                        username: userSettings?.username || 'Anonymous'
+                    },
+                    stats: {
+                        totalDecks: decks.length,
+                        totalLogs: interactionLogs.length,
+                        totalKnowledgeStates: knowledgeStates.length
+                    },
+                    // Actual Data
+                    settings: userSettings,
+                    analytics: analytics,
+                    decks: decks,
+                    examPlans: examPlans,
+                    knowledgeStates: knowledgeStates,
+                    interactionLogs: interactionLogs
+                };
+
+                // 4. Convert to Text (Pretty printed JSON)
+                const dataStr = JSON.stringify(researchData, null, 2);
+
+                // 5. Create Filename with Date and Username
+                const safeName = (userSettings?.username || 'User').replace(/[^a-z0-9]/gi, '_');
+                const dateStr = new Date().toISOString().split('T')[0];
+                const fileName = `Lagiote_Data_${safeName}_${dateStr}.json`;
+
+                // 6. Trigger Download
+                const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+
+                const link = document.createElement("a");
+                link.setAttribute("href", url);
+                link.setAttribute("download", fileName);
+                document.body.appendChild(link);
+                link.click();
+
+                // Cleanup
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                showToast("Data export complete! Please email this file.", "success");
+
+            } catch (error) {
+                console.error("Export failed:", error);
+                showToast("Failed to export data. See console.", "error");
+            } finally {
+                // Restore button
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
         }
     </script>
 </body>
