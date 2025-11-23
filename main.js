@@ -1,6 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const fetch = require('node-fetch');
 const fs = require('fs');
 
 // Load environment variables from .env.local

@@ -12,13 +12,14 @@ if not defined NODE_EXE (
   exit /b 1
 )
 for %%D in ("%NODE_EXE%") do set "NODE_DIR=%%~dpD"
+set "PATH=%NODE_DIR%;%PATH%"
 set "NPM_CMD="
 if exist "%NODE_DIR%npm.cmd" set "NPM_CMD=%NODE_DIR%npm.cmd"
 if exist "%PROJ_DIR%node_modules\.bin\npm.cmd" set "NPM_CMD=%PROJ_DIR%node_modules\.bin\npm.cmd"
 if defined NPM_CMD (
   pushd "%PROJ_DIR%"
   echo Running: "%NPM_CMD%" install
-  "%NPM_CMD%" install
+  call "%NPM_CMD%" install
   popd
 ) else (
   echo npm not found next to node.exe or in project. Skipping install step.
@@ -26,7 +27,8 @@ if defined NPM_CMD (
 pushd "%PROJ_DIR%"
 if exist "node_modules\.bin\electron.cmd" (
   echo Launching Electron...
-  node_modules\.bin\electron.cmd .
+  set "ELECTRON_RUN_AS_NODE="
+  call node_modules\.bin\electron.cmd .
 ) else (
   echo electron not found in node_modules. Try running npm install first or check package.json.
   pause

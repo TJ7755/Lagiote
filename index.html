@@ -7,6 +7,8 @@ These are the notes of planned features.
 
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline' https: data: blob: lagioterevise:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lagiote Revise</title>
 
@@ -176,12 +178,13 @@ These are the notes of planned features.
     <script>
 
         if (navigator.onLine) {
-
+            /*
             const gtagScript1 = document.createElement('script');
             gtagScript1.async = true;
             gtagScript1.src = 'https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD';
             gtagScript1.onerror = () => console.warn('Failed to load Google Analytics 1');
             document.head.appendChild(gtagScript1);
+            */
 
             const gtagScript2 = document.createElement('script');
             gtagScript2.async = true;
@@ -2754,7 +2757,7 @@ These are the notes of planned features.
             <div class="welcome-text">
                 <h1 id="welcomeMessage">Lagiote Revise</h1>
                 <span
-                    style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.211</span>
+                    style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.30</span>
                 <div id="onlineStatusIndicator"
                     style="display: flex; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 5px; margin-left: 15px;">
                     <div id="onlineStatusDot" style="width: 10px; height: 10px; border-radius: 50%;"></div>
@@ -3055,7 +3058,8 @@ These are the notes of planned features.
                     <div class="form-group">
                         <textarea id="ai-text-input" placeholder="Or paste your text here..."
                             style="min-height: 150px;"></textarea>
-                        <button id="add-text-btn" class="btn" style="width:100%; margin-top:10px;">Add Text as
+                        <button id="add-text-btn" class="btn" style="width:100%; margin-top:10px;"
+                            onclick="addTextAsDocument()">Add Text as
                             Document</button>
                     </div>
 
@@ -4581,9 +4585,9 @@ These are the notes of planned features.
 
         function initDB() {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open('LagioteDB', 6);
+                const request = indexedDB.open('LagioteDB', 7);
 
-                request.onerror = event => reject("Error opening DB: " + event.target.errorCode);
+                request.onerror = event => reject("Error opening DB: " + (event.target.error ? event.target.error.message : event.target.errorCode));
 
                 request.onsuccess = event => {
                     db = event.target.result;
@@ -4596,6 +4600,9 @@ These are the notes of planned features.
 
                     if (!db.objectStoreNames.contains('decks')) {
                         db.createObjectStore('decks', { keyPath: 'id' });
+                    }
+                    if (!db.objectStoreNames.contains('analyticsQueue')) {
+                        db.createObjectStore('analyticsQueue', { keyPath: 'id' });
                     }
                     if (!db.objectStoreNames.contains('appData')) {
                         db.createObjectStore('appData', { keyPath: 'key' });
@@ -5991,6 +5998,10 @@ These are the notes of planned features.
                     if (!card.sm2Data) {
                         card.sm2Data = sm2.calculateNextReview(card)(3);
                     }
+                    // Ensure each card has a reference to its deck
+                    if (!card.deckId) {
+                        card.deckId = deck.id;
+                    }
                 });
                 decks[deck.id] = deck;
             });
@@ -6459,6 +6470,7 @@ These are the notes of planned features.
             const sm2 = new SM2Algorithm();
             const processedCards = tempDeck.cards.map(c => ({
                 ...c,
+                deckId: deckId,
                 sm2Data: sm2.calculateNextReview(c)(3)
             }));
 
@@ -10002,6 +10014,13 @@ These are the notes of planned features.
             const optionsContainer = document.getElementById('mcqOptions');
             const deckForThisCard = decks[correctCard.deckId];
 
+            if (!deckForThisCard) {
+                console.error("Deck not found for card:", correctCard.id, "DeckID:", correctCard.deckId);
+                console.log("Available decks:", Object.keys(decks));
+                // Fallback to simple flashcard if deck is missing (shouldn't happen)
+                return;
+            }
+
             if (correctCard.distractors && correctCard.distractors.length >= 3) {
                 console.log("Using cached distractors for card:", correctCard.id);
                 const finalOptions = shuffleArray([correctCard.answer, ...correctCard.distractors]);
@@ -10509,10 +10528,12 @@ These are the notes of planned features.
                 }
 
                 if (!cardsArray || cardsArray.length === 0) {
-                    throw new Error("AI did not return any cards.");
+                    console.error('[AI Generation] Empty cards array. Full response:', JSON.stringify(generatedCards, null, 2));
+                    throw new Error("AI did not return any cards. Check console for full response.");
                 }
 
-                renderAiGeneratedCards(cardsArray);
+                // Pass the full object to preserve deckName and deckNotes
+                renderAiGeneratedCards(generatedCards);
                 document.getElementById('flashcard-summary').classList.remove('hidden');
             } catch (error) {
                 console.error("Deck generation failed:", error);
@@ -10534,20 +10555,25 @@ These are the notes of planned features.
         function renderAiGeneratedCards(cardsData) {
             const listContainer = document.getElementById('flashcard-list');
 
-            // Handle both array (legacy) and object with deckName
+            // Handle both array (legacy) and object with deckName/deckNotes
             let cards = [];
             let deckName = null;
+            let deckNotes = null;
 
             if (Array.isArray(cardsData)) {
                 cards = cardsData;
             } else if (cardsData && (cardsData.cards || cardsData.sequences)) {
                 cards = cardsData.cards || cardsData.sequences;
                 deckName = cardsData.deckName;
+                deckNotes = cardsData.deckNotes;
             }
 
             listContainer.dataset.cards = JSON.stringify(cards);
             if (deckName) {
                 listContainer.dataset.deckName = deckName;
+            }
+            if (deckNotes) {
+                listContainer.dataset.deckNotes = deckNotes;
             }
 
             if (cards.length === 0) {
@@ -10604,6 +10630,7 @@ These are the notes of planned features.
             const cards = JSON.parse(listContainer.dataset.cards);
             // Use the deckName from the dataset if available, otherwise fallback to doc name or default
             const aiDeckName = listContainer.dataset.deckName;
+            const aiDeckNotes = listContainer.dataset.deckNotes || '';
             const deckName = aiDeckName || (documentsForAi.length > 0 ? documentsForAi[0].name.split('.')[0] : "New AI Deck");
 
             if (cards.length === 0) {
@@ -10623,7 +10650,7 @@ These are the notes of planned features.
                     answerImage: ''
                 }));
 
-                await createNewDeck(deckName, 'Other', finalCards, '', 'Sequence');
+                await createNewDeck(deckName, 'Other', finalCards, aiDeckNotes, 'Sequence');
                 showToast(`Sequence deck "${deckName}" created successfully!`, 'success');
                 backToDashboard();
                 return;
@@ -10640,7 +10667,7 @@ These are the notes of planned features.
                 isNew: true
             }));
 
-            await createNewDeck(deckName, 'Other', finalCards);
+            await createNewDeck(deckName, 'Other', finalCards, aiDeckNotes);
             showToast(`Deck "${deckName}" created successfully!`, 'success');
             backToDashboard();
         }
