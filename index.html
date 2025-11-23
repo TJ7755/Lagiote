@@ -10691,7 +10691,8 @@ These are the notes of planned features.
                     id: currentEditingPlanId,
                     name: name,
                     examDate: examDate,
-                    deckIds: selectedDecks
+                    deckIds: selectedDecks,
+                    lastModified: new Date().toISOString()
                 };
                 await saveDataToDB('examPlans', updatedPlan);
                 showToast(`Plan "${name}" updated!`, 'success');
@@ -10700,7 +10701,8 @@ These are the notes of planned features.
                     id: Date.now().toString(),
                     name: name,
                     examDate: examDate,
-                    deckIds: selectedDecks
+                    deckIds: selectedDecks,
+                    lastModified: new Date().toISOString()
                 };
                 await saveDataToDB('examPlans', newPlan);
                 showToast(`Exam Plan "${name}" created!`, 'success');
@@ -11000,6 +11002,9 @@ These are the notes of planned features.
 
                 const allDecks = await getAllDataFromDB('decks');
                 const allKnowledge = await getAllDataFromDB('userKnowledgeState');
+                const allExamPlans = await getAllDataFromDB('examPlans');
+                const allInteractionLogs = await getAllDataFromDB('interactionLogs');
+                const userSettings = await getDataFromDB('appData', 'userSettings');
 
                 const dirtyDecks = lastSynced
                     ? allDecks.filter(deck => deck.lastModified && new Date(deck.lastModified) > new Date(lastSynced))
@@ -11008,6 +11013,14 @@ These are the notes of planned features.
                 const dirtyKnowledgeStates = lastSynced
                     ? allKnowledge.filter(state => state.lastModified && new Date(state.lastModified) > new Date(lastSynced))
                     : allKnowledge;
+
+                const dirtyExamPlans = lastSynced
+                    ? allExamPlans.filter(plan => plan.lastModified && new Date(plan.lastModified) > new Date(lastSynced))
+                    : allExamPlans;
+
+                const dirtyInteractionLogs = lastSynced
+                    ? allInteractionLogs.filter(log => log.timestamp && new Date(log.timestamp) > new Date(lastSynced))
+                    : allInteractionLogs;
 
                 // Get token from Auth0 session
                 let token = null;
@@ -11029,12 +11042,19 @@ These are the notes of planned features.
 
                 // Use Electron IPC handler instead of direct fetch
                 let syncResult;
+                const syncPayload = {
+                    lastSynced: lastSynced,
+                    dirtyDecks: dirtyDecks,
+                    dirtyKnowledgeStates: dirtyKnowledgeStates,
+                    dirtyExamPlans: dirtyExamPlans,
+                    dirtyInteractionLogs: dirtyInteractionLogs,
+                    userSettings: userSettings
+                };
+
                 if (window.electronAPI && window.electronAPI.syncData) {
                     // Electron app - use IPC
                     syncResult = await window.electronAPI.syncData({
-                        lastSynced: lastSynced,
-                        dirtyDecks: dirtyDecks,
-                        dirtyKnowledgeStates: dirtyKnowledgeStates,
+                        ...syncPayload,
                         token: token
                     });
 
@@ -11056,11 +11076,20 @@ These are the notes of planned features.
                             'Authorization': `Bearer ${token}`,
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({
-                            lastSynced: lastSynced,
-                            dirtyDecks: dirtyDecks,
-                            dirtyKnowledgeStates: dirtyKnowledgeStates
-                                ```
+                        body: JSON.stringify(syncPayload)
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Sync failed: ${response.status} ${errorText}`);
+                    }
+
+                    syncResult = await response.json();
+                    clearTimeout(timeoutId);
+                }
+
+                if (!syncResult) throw new Error("No sync result received.");
+
                 const deckTransaction = db.transaction(['decks'], 'readwrite');
                 const deckStore = deckTransaction.objectStore('decks');
                 for (const serverDeck of syncResult.updatedDecks) {
@@ -11074,6 +11103,19 @@ These are the notes of planned features.
                     knowledgeStore.put(serverState);
                 }
 
+                if (syncResult.updatedExamPlans) {
+                    const planTransaction = db.transaction(['examPlans'], 'readwrite');
+                    const planStore = planTransaction.objectStore('examPlans');
+                    for (const serverPlan of syncResult.updatedExamPlans) {
+                        planStore.put(serverPlan);
+                    }
+                }
+
+                if (syncResult.updatedSettings) {
+                    await saveDataToDB('appData', { key: 'userSettings', ...syncResult.updatedSettings });
+                    globalSettings = syncResult.updatedSettings;
+                }
+
                 if (syncResult.deletedDeckIds && syncResult.deletedDeckIds.length > 0) {
                     const deleteDeckTrans = db.transaction(['decks'], 'readwrite');
                     syncResult.deletedDeckIds.forEach(id => {
@@ -11082,7 +11124,7 @@ These are the notes of planned features.
                     });
                 }
 
-                localStorage.setItem('lastSynced', syncResult.newTimestamp);
+                localStorage.setItem('lastSynced', syncResult.timestamp || new Date().toISOString());
                 showToast('Sync complete!', 'success');
 
             } catch (error) {
@@ -11170,7 +11212,7 @@ These are the notes of planned features.
 
         function generateDiffHTML(s1, s2) {
             const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${ escape(s1) }</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${escape(s1)}</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
         }
 
 
@@ -11258,7 +11300,7 @@ These are the notes of planned features.
                         appVersion: document.querySelector('#welcomeMessage + span')?.textContent || 'Unknown',
                         platform: navigator.platform,
                         userAgent: navigator.userAgent,
-                        screenResolution: `${ window.screen.width }x${ window.screen.height } `,
+                        screenResolution: `${window.screen.width}x${window.screen.height} `,
                         username: userSettings?.username || 'Anonymous'
                     },
                     stats: {
@@ -11281,7 +11323,7 @@ These are the notes of planned features.
                 // 5. Create Filename with Date and Username
                 const safeName = (userSettings?.username || 'User').replace(/[^a-z0-9]/gi, '_');
                 const dateStr = new Date().toISOString().split('T')[0];
-                const fileName = `Lagiote_Data_${ safeName }_${ dateStr }.json`;
+                const fileName = `Lagiote_Data_${safeName}_${dateStr}.json`;
 
                 // 6. Trigger Download
                 const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
