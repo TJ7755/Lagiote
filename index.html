@@ -10986,13 +10986,28 @@ These are the notes of planned features.
             updateDashboard();
         }
 
+        function getOrCreateGuestID() {
+            let guestId = localStorage.getItem('guestID');
+            if (!guestId) {
+                guestId = crypto.randomUUID();
+                localStorage.setItem('guestID', guestId);
+            }
+            return guestId;
+        }
+
         async function loadUserDataAndSync() {
-            // Check for Auth0 session
-            const savedSession = localStorage.getItem('auth0Session');
-            if (!isOnline || !savedSession) {
-                console.log("Offline or not logged in. Skipping sync.");
+            if (!isOnline) {
+                console.log("Offline. Skipping sync.");
                 await updateDashboard();
                 return;
+            }
+
+            // Check for Auth0 session OR Guest Mode
+            const savedSession = localStorage.getItem('auth0Session');
+            const isGuest = !savedSession;
+
+            if (isGuest) {
+                console.log("Syncing as Guest...");
             }
 
             showToast('Syncing your data...', 'info');
@@ -11024,19 +11039,21 @@ These are the notes of planned features.
 
                 // Get token from Auth0 session
                 let token = null;
-                const savedSession = localStorage.getItem('auth0Session');
+                let guestId = null;
+
                 if (savedSession) {
                     try {
                         const session = JSON.parse(savedSession);
-                        token = session.access_token || session.id_token; // Use access_token if available, fallback to id_token
+                        token = session.access_token || session.id_token;
                     } catch (e) {
                         console.error('Error parsing auth session for sync:', e);
                     }
+                } else {
+                    guestId = getOrCreateGuestID();
                 }
 
-                if (!token) {
-                    console.warn('No auth token found for sync. Aborting.');
-                    showToast('Please log in to sync data.', 'error');
+                if (!token && !guestId) {
+                    console.warn('No auth token or guest ID found for sync. Aborting.');
                     return;
                 }
 
@@ -11055,7 +11072,8 @@ These are the notes of planned features.
                     // Electron app - use IPC
                     syncResult = await window.electronAPI.syncData({
                         ...syncPayload,
-                        token: token
+                        token: token,
+                        guestId: guestId
                     });
 
                     if (syncResult.error) {
@@ -11069,13 +11087,19 @@ These are the notes of planned features.
                     const syncUrl = 'https://tj7755-lagiote-proxy.hf.space/api/sync';
                     console.log('Syncing to:', syncUrl);
 
+                    const headers = {
+                        'Content-Type': 'application/json'
+                    };
+                    if (token) {
+                        headers['Authorization'] = `Bearer ${token}`;
+                    } else if (guestId) {
+                        headers['X-Guest-ID'] = guestId;
+                    }
+
                     const response = await fetch(syncUrl, {
                         method: 'POST',
                         signal: controller.signal,
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
+                        headers: headers,
                         body: JSON.stringify(syncPayload)
                     });
 
