@@ -4201,7 +4201,9 @@ These are the notes of planned features.
                         domain: auth0Domain,
                         clientId: auth0ClientId,
                         authorizationParams: {
-                            redirect_uri: window.location.origin + '/'
+                            redirect_uri: window.location.origin + '/',
+                            audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
+                            scope: 'openid profile email'
                         }
                     });
 
@@ -4886,43 +4888,100 @@ These are the notes of planned features.
 
             authSignupBtn?.addEventListener('click', async () => {
                 console.log('Opening Auth0 signup window...');
-                try {
-                    // Auth0 login window handles both signup and login
-                    const authResult = await window.electronAPI.openLoginWindow();
-                    if (authResult && authResult.user) {
-                        console.log('Signup/Login successful:', authResult.user);
-                        // Save session
-                        localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                        // Update UI
-                        await updateUIAfterLogin(authResult.user);
-                        // Reload app to sync data
-                        location.reload();
+
+                if (window.electronAPI && window.electronAPI.openLoginWindow) {
+                    try {
+                        // Auth0 login window handles both signup and login
+                        const authResult = await window.electronAPI.openLoginWindow();
+                        if (authResult && authResult.user) {
+                            console.log('Signup/Login successful:', authResult.user);
+                            // Save session
+                            localStorage.setItem('auth0Session', JSON.stringify(authResult));
+                            // Update UI
+                            await updateUIAfterLogin(authResult.user);
+                            // Reload app to sync data
+                            location.reload();
+                        }
+                    } catch (error) {
+                        console.error('Signup error:', error);
+                        showToast('Signup failed. Please try again.', 'error');
                     }
-                } catch (error) {
-                    console.error('Signup error:', error);
-                    showToast('Signup failed. Please try again.', 'error');
+                } else {
+                    // Web environment
+                    try {
+                        const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+                        const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                        if (!window.auth0) {
+                            showToast('Loading authentication...', 'info');
+                            await loadCDNScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
+                        }
+
+                        const auth0Client = await auth0.createAuth0Client({
+                            domain: auth0Domain,
+                            clientId: auth0ClientId,
+                            authorizationParams: {
+                                redirect_uri: window.location.origin + '/',
+                                audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
+                                scope: 'openid profile email',
+                                screen_hint: 'signup'
+                            }
+                        });
+
+                        await auth0Client.loginWithRedirect();
+                    } catch (error) {
+                        console.error('Web auth error:', error);
+                        showToast('Authentication failed. Please try again.', 'error');
+                    }
                 }
             });
-
             authLoginBtn?.addEventListener('click', async () => {
                 console.log('Opening Auth0 login window...');
-                try {
-                    const authResult = await window.electronAPI.openLoginWindow();
-                    if (authResult && authResult.user) {
-                        console.log('Login successful:', authResult.user);
-                        // Save session
-                        localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                        // Update UI
-                        await updateUIAfterLogin(authResult.user);
-                        // Reload app to sync data
-                        location.reload();
+
+                if (window.electronAPI && window.electronAPI.openLoginWindow) {
+                    try {
+                        const authResult = await window.electronAPI.openLoginWindow();
+                        if (authResult && authResult.user) {
+                            console.log('Login successful:', authResult.user);
+                            // Save session
+                            localStorage.setItem('auth0Session', JSON.stringify(authResult));
+                            // Update UI
+                            await updateUIAfterLogin(authResult.user);
+                            // Reload app to sync data
+                            location.reload();
+                        }
+                    } catch (error) {
+                        console.error('Login error:', error);
+                        showToast('Login failed. Please try again.', 'error');
                     }
-                } catch (error) {
-                    console.error('Login error:', error);
-                    showToast('Login failed. Please try again.', 'error');
+                } else {
+                    // Web environment
+                    try {
+                        const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+                        const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                        if (!window.auth0) {
+                            showToast('Loading authentication...', 'info');
+                            await loadCDNScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
+                        }
+
+                        const auth0Client = await auth0.createAuth0Client({
+                            domain: auth0Domain,
+                            clientId: auth0ClientId,
+                            authorizationParams: {
+                                redirect_uri: window.location.origin + '/',
+                                audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
+                                scope: 'openid profile email'
+                            }
+                        });
+
+                        await auth0Client.loginWithRedirect();
+                    } catch (error) {
+                        console.error('Web auth error:', error);
+                        showToast('Authentication failed. Please try again.', 'error');
+                    }
                 }
             });
-
             // Guest Signup Button in Header
             document.getElementById('guestSignupBtn')?.addEventListener('click', async () => {
                 console.log('Opening Auth0 signup window from header...');
@@ -8219,10 +8278,31 @@ These are the notes of planned features.
         }
 
         function showComplete() {
+            const endTime = new Date();
+            const durationMs = endTime - studyState.startTime;
+            const minutes = Math.floor(durationMs / 60000);
+            const seconds = Math.floor((durationMs % 60000) / 1000);
+
+            const timeString = minutes > 0
+                ? `${minutes}m ${seconds}s`
+                : `${seconds}s`;
+
+            const totalCards = studyState.originalSessionSize || decks[currentDeckId].cards.length;
+
             const currentSubView = document.querySelector('#studyMode .sub-view:not(.hidden)');
             const completeView = document.getElementById('completeView');
             transitionSubView(currentSubView, completeView);
-            document.getElementById('finalStats').innerHTML = `<div class="stat"><div class="stat-value">${studyState.currentRound}</div><div class="stat-label">Total Rounds</div></div><div class="stat"><div class="stat-value">${decks[currentDeckId].cards.length}</div><div class="stat-label">Cards Mastered</div></div>`;
+
+            document.getElementById('finalStats').innerHTML = `
+                <div class="stat">
+                    <div class="stat-value">${timeString}</div>
+                    <div class="stat-label">Time Taken</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${totalCards}</div>
+                    <div class="stat-label">Cards Mastered</div>
+                </div>
+            `;
         }
 
         async function endSession() {
