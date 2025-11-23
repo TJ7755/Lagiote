@@ -10,15 +10,7 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            platform: win32
-          - os: ubuntu-latest
-            platform: linux
-
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
 
     steps:
       - name: Check out git repository
@@ -34,11 +26,11 @@ jobs:
         run: npm install
 
       - name: Build/make application
-        run: npm run make -- --platform ${{ matrix.platform }}
+        run: npm run make -- --platform win32
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LagioteRevise-${{ matrix.platform }}
+          name: LagioteRevise-Windows
           path: out/make/**/*
           retention-days: 30
