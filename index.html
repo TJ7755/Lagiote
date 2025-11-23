@@ -4230,7 +4230,7 @@ These are the notes of planned features.
                     const session = JSON.parse(savedSession);
                     console.log('Found saved session, loading user data...');
                     await updateUIAfterLogin(session.user);
-                    await loadUserDataAndSync();
+                    // loadUserDataAndSync is called inside updateUIAfterLogin, no need to call again
                     return;
                 } catch (e) {
                     console.error('Invalid session data:', e);
@@ -5198,10 +5198,26 @@ These are the notes of planned features.
             document.getElementById('add-text-btn').addEventListener('click', addTextAsDocument);
             document.getElementById('process-btn').addEventListener('click', processAllDocuments);
 
-            document.getElementById('userProfileBtn').addEventListener('click', (e) => {
-                e.stopPropagation();
-                document.getElementById('userProfileDropdown').classList.toggle('hidden');
-            });
+            const profileBtn = document.getElementById('userProfileBtn');
+            const profileDropdown = document.getElementById('userProfileDropdown');
+
+            console.log('Setting up profile button, element found:', !!profileBtn);
+            console.log('Profile dropdown found:', !!profileDropdown);
+
+            if (profileBtn) {
+                profileBtn.addEventListener('click', (e) => {
+                    console.log('Profile button clicked!');
+                    e.stopPropagation();
+                    if (profileDropdown) {
+                        profileDropdown.classList.toggle('hidden');
+                        console.log('Dropdown toggled, hidden:', profileDropdown.classList.contains('hidden'));
+                    } else {
+                        console.error('Profile dropdown not found');
+                    }
+                });
+            } else {
+                console.error('Profile button not found in DOM');
+            }
 
             document.getElementById('logoutBtn').addEventListener('click', (e) => {
                 e.preventDefault();

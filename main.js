@@ -173,6 +173,12 @@ async function createLoginWindow() {
     authWindow.webContents.on('will-navigate', (event, url) => {
       log('info', 'Navigation attempt to:', url);
 
+      // Allow navigation to Auth0 domains (needed for consent screen to work)
+      if (url.includes('.auth0.com') || url.includes('auth0.com')) {
+        log('info', 'Allowing Auth0 domain navigation:', url);
+        return; // Let it proceed
+      }
+
       if (url.startsWith('lagioterevise://')) {
         event.preventDefault();
         log('info', 'Intercepted callback URL:', url);
@@ -187,6 +193,12 @@ async function createLoginWindow() {
     // Also handle navigation in new windows (popups)
     authWindow.webContents.setWindowOpenHandler(({ url }) => {
       log('info', 'Window open attempt to:', url);
+
+      // Allow Auth0 popups/redirects
+      if (url.includes('.auth0.com') || url.includes('auth0.com')) {
+        log('info', 'Allowing Auth0 popup');
+        return { action: 'allow' };
+      }
 
       if (url.startsWith('lagioterevise://')) {
         log('info', 'Intercepted popup callback URL:', url);
