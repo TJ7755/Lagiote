@@ -4063,6 +4063,334 @@ These are the notes of planned features.
         let activeView = 'dashboard';
         let viewHistory = [];
 
+        // ============================================
+        // ANALYTICS MANAGER
+        // ============================================
+        // Handles batched analytics event collection and submission
+
+        class AnalyticsManager {
+            constructor() {
+                this.eventQueue = [];
+                this.sessionId = this.generateSessionId();
+                this.sessionStartTime = new Date();
+                this.lastFlushTime = new Date();
+                this.flushInterval = 5 * 60 * 1000; // 5 minutes
+                this.maxBatchSize = 50; // flush when queue reaches this size
+                this.isOnline = navigator.onLine;
+                this.currentView = 'dashboard';
+                this.viewStartTime = new Date();
+
+                // Start periodic flush
+                this.startPeriodicFlush();
+
+                // Listen for online/offline events
+                window.addEventListener('online', () => {
+                    this.isOnline = true;
+                    this.flush(); // Send queued events when back online
+                });
+                window.addEventListener('offline', () => {
+                    this.isOnline = false;
+                });
+
+                // Flush on page unload
+                window.addEventListener('beforeunload', () => {
+                    this.flush(true); // synchronous flush
+                });
+
+                // Load any persisted events from IndexedDB
+                this.loadPersistedQueue();
+            }
+
+            generateSessionId() {
+                return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            }
+
+            logEvent(eventType, eventData) {
+                const event = {
+                    type: eventType,
+                    timestamp: new Date().toISOString(),
+                    sessionId: this.sessionId,
+                    ...eventData
+                };
+
+                this.eventQueue.push(event);
+
+                // Persist to IndexedDB immediately
+                this.persistQueue();
+
+                // Flush if queue is getting large
+                if (this.eventQueue.length >= this.maxBatchSize) {
+                    this.flush();
+                }
+            }
+
+            // Session tracking
+            startSession() {
+                this.sessionStartTime = new Date();
+                this.logEvent('system_metric', {
+                    metricType: 'session_start',
+                    metricValue: 1,
+                    severity: 'info',
+                    metadata: {
+                        platform: window.electronAPI ? 'electron' : 'web',
+                        screenSize: `${window.screen.width}x${window.screen.height}`,
+                        userAgent: navigator.userAgent
+                    }
+                });
+            }
+
+            endSession(sessionStats) {
+                const endTime = new Date();
+                const duration = Math.floor((endTime - this.sessionStartTime) / 1000);
+
+                this.logEvent('session', {
+                    startTime: this.sessionStartTime.toISOString(),
+                    endTime: endTime.toISOString(),
+                    duration: duration,
+                    activeDuration: sessionStats?.activeDuration || duration,
+                    focusScore: sessionStats?.focusScore || 1.0,
+                    breakCount: sessionStats?.breakCount || 0,
+                    cardsStudied: sessionStats?.cardsStudied || 0,
+                    decksAccessed: sessionStats?.decksAccessed || [],
+                    accuracyRate: sessionStats?.accuracyRate || 0,
+                    onlineStatus: this.isOnline,
+                    deviceInfo: {
+                        platform: window.electronAPI ? 'electron' : 'web'
+                    }
+                });
+
+                this.flush();
+            }
+
+            // UI interaction tracking
+            trackViewChange(fromView, toView, metadata = {}) {
+                const now = new Date();
+                const viewDuration = Math.floor((now - this.viewStartTime) / 1000);
+
+                this.logEvent('ui_interaction', {
+                    eventType: 'view_change',
+                    fromView: fromView,
+                    toView: toView,
+                    metadata: {
+                        ...metadata,
+                        previousDuration: viewDuration
+                    }
+                });
+
+                this.currentView = toView;
+                this.viewStartTime = now;
+            }
+
+            trackButtonClick(buttonName, metadata = {}) {
+                this.logEvent('ui_interaction', {
+                    eventType: 'button_click',
+                    fromView: this.currentView,
+                    metadata: {
+                        buttonName,
+                        ...metadata
+                    }
+                });
+            }
+
+            trackModalOpen(modalName, metadata = {}) {
+                this.logEvent('ui_interaction', {
+                    eventType: 'modal_open',
+                    fromView: this.currentView,
+                    metadata: {
+                        modalName,
+                        ...metadata
+                    }
+                });
+            }
+
+            trackSettingsChange(settingName, oldValue, newValue) {
+                this.logEvent('ui_interaction', {
+                    eventType: 'settings_change',
+                    metadata: {
+                        settingName,
+                        oldValue,
+                        newValue
+                    }
+                });
+            }
+
+            // Card attempt tracking
+            trackCardAttempt(cardId, attemptData) {
+                this.logEvent('card_attempt', {
+                    cardId,
+                    ...attemptData
+                });
+            }
+
+            // Error pattern tracking
+            trackErrorPattern(cardId, incorrectAnswer, correctAnswer, errorType, similarityScore) {
+                this.logEvent('error_pattern', {
+                    cardId,
+                    incorrectAnswer,
+                    correctAnswer,
+                    errorType,
+                    similarityScore,
+                    metadata: {}
+                });
+            }
+
+            // Learning path tracking
+            trackLearningPath(eventType, data) {
+                this.logEvent('learning_path', {
+                    eventType,
+                    ...data
+                });
+            }
+
+            // System metrics tracking
+            trackSystemMetric(metricType, metricValue, metadata = {}, severity = 'info') {
+                this.logEvent('system_metric', {
+                    metricType,
+                    metricValue,
+                    metadata,
+                    severity
+                });
+            }
+
+            // Persist queue to IndexedDB
+            async persistQueue() {
+                if (!db) return;
+
+                try {
+                    const transaction = db.transaction(['analyticsQueue'], 'readwrite');
+                    const store = transaction.objectStore('analyticsQueue');
+
+                    // Store the entire queue
+                    await store.put({
+                        id: 'pending_events',
+                        events: this.eventQueue,
+                        lastUpdated: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Failed to persist analytics queue:', error);
+                }
+            }
+
+            // Load persisted queue from IndexedDB
+            async loadPersistedQueue() {
+                if (!db) return;
+
+                try {
+                    const transaction = db.transaction(['analyticsQueue'], 'readonly');
+                    const store = transaction.objectStore('analyticsQueue');
+                    const request = store.get('pending_events');
+
+                    request.onsuccess = (event) => {
+                        const data = event.target.result;
+                        if (data && data.events && data.events.length > 0) {
+                            this.eventQueue = data.events;
+                            console.log(`Loaded ${this.eventQueue.length} persisted analytics events`);
+                            // Try to flush them
+                            if (this.isOnline) {
+                                this.flush();
+                            }
+                        }
+                    };
+                } catch (error) {
+                    console.error('Failed to load persisted analytics queue:', error);
+                }
+            }
+
+            // Flush events to server
+            async flush(sync = false) {
+                if (this.eventQueue.length === 0) return;
+
+                if (!this.isOnline) {
+                    console.log('Offline - analytics events queued for later');
+                    return;
+                }
+
+                const eventsToSend = [...this.eventQueue];
+                this.eventQueue = []; // Clear queue optimistically
+
+                const backendUrl = window.BACKEND_URL || 'https://tj7755-lagiote-proxy.hf.space';
+                const endpoint = `${backendUrl}/api/analytics/batch`;
+
+                // Get auth token or guest ID
+                let headers = {
+                    'Content-Type': 'application/json'
+                };
+
+                const savedSession = localStorage.getItem('auth0Session');
+                if (savedSession) {
+                    try {
+                        const session = JSON.parse(savedSession);
+                        headers['Authorization'] = `Bearer ${session.access_token}`;
+                    } catch (e) {
+                        console.error('Failed to parse auth session for analytics');
+                    }
+                } else {
+                    // Guest user
+                    const guestId = localStorage.getItem('guestId') || `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    if (!localStorage.getItem('guestId')) {
+                        localStorage.setItem('guestId', guestId);
+                    }
+                    headers['x-guest-id'] = guestId;
+                }
+
+                try {
+                    const fetchOptions = {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({ events: eventsToSend })
+                    };
+
+                    if (sync) {
+                        // Use sendBeacon for synchronous unload
+                        const blob = new Blob([JSON.stringify({ events: eventsToSend })], { type: 'application/json' });
+                        navigator.sendBeacon(endpoint, blob);
+                    } else {
+                        const response = await fetch(endpoint, fetchOptions);
+
+                        if (!response.ok) {
+                            console.warn(`Analytics batch failed: ${response.status}`);
+                            // Re-queue events on failure
+                            this.eventQueue.unshift(...eventsToSend);
+                        } else {
+                            // Clear persisted queue on success
+                            await this.clearPersistedQueue();
+                        }
+                    }
+
+                    this.lastFlushTime = new Date();
+                } catch (error) {
+                    console.error('Failed to send analytics batch:', error);
+                    // Re-queue events on error
+                    this.eventQueue.unshift(...eventsToSend);
+                    await this.persistQueue();
+                }
+            }
+
+            async clearPersistedQueue() {
+                if (!db) return;
+
+                try {
+                    const transaction = db.transaction(['analyticsQueue'], 'readwrite');
+                    const store = transaction.objectStore('analyticsQueue');
+                    await store.delete('pending_events');
+                } catch (error) {
+                    console.error('Failed to clear persisted analytics queue:', error);
+                }
+            }
+
+            startPeriodicFlush() {
+                setInterval(() => {
+                    const now = new Date();
+                    if (now - this.lastFlushTime >= this.flushInterval) {
+                        this.flush();
+                    }
+                }, 60 * 1000); // Check every minute
+            }
+        }
+
+        // Initialize analytics manager globally
+        let analyticsManager = null;
+
         class SM2Algorithm {
             constructor() {
                 this.defaultInterval = 1;
@@ -4126,6 +4454,10 @@ These are the notes of planned features.
 
             await initDB();
             console.log('Database initialized.');
+
+            // Initialize analytics manager
+            analyticsManager = new AnalyticsManager();
+            console.log('Analytics manager initialized.');
 
             // Handle Auth0 callback on web (if code/state in URL)
             if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
@@ -4283,6 +4615,10 @@ These are the notes of planned features.
                     if (!db.objectStoreNames.contains('examPlans')) {
                         db.createObjectStore('examPlans', { keyPath: 'id' });
                     }
+                    if (!db.objectStoreNames.contains('analyticsQueue')) {
+                        db.createObjectStore('analyticsQueue', { keyPath: 'id' });
+                        console.log("Created 'analyticsQueue' object store.");
+                    }
 
                     if (event.oldVersion > 0 && event.oldVersion < 5) {
                         console.log("Starting database migration for cognitive engine...");
@@ -4378,6 +4714,54 @@ These are the notes of planned features.
                 };
             } catch (error) {
                 console.error("Failed to initiate IndexedDB transaction for logging:", error);
+            }
+
+            // NEW: Also track via analytics manager with detailed card attempt data
+            if (analyticsManager && currentInteractionLog) {
+                const timeToFirstKeystroke = currentInteractionLog.firstKeyPressTime
+                    ? Math.round(currentInteractionLog.firstKeyPressTime - currentInteractionLog.questionLoadTime)
+                    : null;
+
+                const typingDuration = currentInteractionLog.firstKeyPressTime
+                    ? performance.now() - currentInteractionLog.firstKeyPressTime
+                    : 0;
+
+                const typingSpeed = logData.userAnswer && typingDuration > 0
+                    ? (logData.userAnswer.length / (typingDuration / 1000))
+                    : 0;
+
+                analyticsManager.trackCardAttempt(logData.cardID, {
+                    timeToFirstKeystroke,
+                    typingSpeed,
+                    pauseCount: 0, // TODO: Track pauses in typing
+                    backspaceCount: currentInteractionLog.backspaceCount || 0,
+                    deleteCount: currentInteractionLog.deleteCount || 0,
+                    hintUsed: false, // TODO: Track hint usage
+                    attemptNumber: logData.attemptCount || 1,
+                    wasCorrect: logData.wasCorrect,
+                    partialAnswer: logData.userAnswer,
+                    questionType: logData.questionType || 'flashcard'
+                });
+
+                // Track error pattern if incorrect
+                if (!logData.wasCorrect && logData.userAnswer && logData.correctAnswer) {
+                    const similarity = levenshteinDistance(logData.userAnswer, logData.correctAnswer);
+                    const maxLen = Math.max(logData.userAnswer.length, logData.correctAnswer.length);
+                    const similarityScore = maxLen > 0 ? 1 - (similarity / maxLen) : 0;
+
+                    let errorType = 'complete_miss';
+                    if (similarityScore > 0.8) errorType = 'typo';
+                    else if (similarityScore > 0.5) errorType = 'partial';
+                    else if (similarity === 1) errorType = 'substitution';
+
+                    analyticsManager.trackErrorPattern(
+                        logData.cardID,
+                        logData.userAnswer,
+                        logData.correctAnswer,
+                        errorType,
+                        similarityScore
+                    );
+                }
             }
 
             try {
