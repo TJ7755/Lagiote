@@ -20,6 +20,10 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Error: DATABASE_URL secret is not set. Please ensure the DATABASE_URL secret is defined in the repository settings."
+            exit 1
+          fi
           psql "$DATABASE_URL" -f lagiote-proxy/neon-cleanup-job.sql
       
       - name: Log completion
