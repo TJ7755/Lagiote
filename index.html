@@ -7106,12 +7106,17 @@ These are the notes of planned features.
         }
 
         function populateCategoryDropdowns() {
-            const dropdown = document.getElementById('deckCategory');
-            const currentValue = dropdown.value;
-            dropdown.innerHTML = '';
-            categories.forEach(cat => dropdown.innerHTML += `<option value="${cat}">${cat}</option>`);
-            dropdown.innerHTML += `<option value="add_new_category" style="font-style: italic;">+ Add New Category...</option>`;
-            dropdown.value = currentValue;
+            const dropdowns = [document.getElementById('deckCategory'), document.getElementById('importDeckCategory')];
+            dropdowns.forEach(dropdown => {
+                if (!dropdown) return;
+                const currentValue = dropdown.value;
+                dropdown.innerHTML = '';
+                categories.forEach(cat => dropdown.innerHTML += `<option value="${cat}">${cat}</option>`);
+                dropdown.innerHTML += `<option value="add_new_category" style="font-style: italic;">+ Add New Category...</option>`;
+                if (currentValue && currentValue !== 'add_new_category') {
+                    dropdown.value = currentValue;
+                }
+            });
         }
 
         function handleCategoryChange(event) {
@@ -7136,7 +7141,12 @@ These are the notes of planned features.
                     categories.push(newCat);
                     await saveDataToDB('appData', { key: 'categories', data: categories });
                     populateCategoryDropdowns();
-                    document.getElementById('deckCategory').value = newCat;
+
+                    const deckCat = document.getElementById('deckCategory');
+                    if (deckCat) deckCat.value = newCat;
+
+                    const importCat = document.getElementById('importDeckCategory');
+                    if (importCat) importCat.value = newCat;
                 }
                 newCatInput.value = '';
                 closeAddCategoryModal();
