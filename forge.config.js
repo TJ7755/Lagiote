@@ -65,4 +65,16 @@ module.exports = {
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],
+  publishers: [
+    {
+      name: '@electron-forge/publisher-github',
+      config: {
+        repository: {
+          owner: 'TJ7755',
+          name: 'Lagiote-revise'
+        },
+        prerelease: true
+      }
+    }
+  ]
 };

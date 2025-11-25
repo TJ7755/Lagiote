@@ -3284,6 +3284,30 @@ These are the notes of planned features.
                         </div>
                     </div>
                 </div>
+
+                <!-- Centered Pomodoro Timer -->
+                <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
+                    <div id="pomodoroTimer" class="hidden"
+                        style="display: inline-flex; flex-direction: column; align-items: center; padding: 10px; border-radius: 8px; background: rgba(0,0,0,0.05); transition: background 0.3s; box-shadow: 0 2px 8px var(--shadow-color);">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                            <span id="pomodoroMode"
+                                style="font-size: 0.8rem; font-weight: 600; color: var(--secondary-text);">WORK</span>
+                            <span id="pomodoroDisplay"
+                                style="font-family: monospace; font-size: 1.2rem; font-weight: 700;">25:00</span>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <button id="pomodoroPlayPause" onclick="togglePomodoro()"
+                                style="padding: 4px 12px; border: none; border-radius: 4px; background: var(--primary-color); color: white; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">
+                                ▶ Start
+                            </button>
+                            <button onclick="resetPomodoro()"
+                                style="padding: 4px 12px; border: none; border-radius: 4px; background: var(--button-secondary-bg); color: var(--button-secondary-text); cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">
+                                ↻ Reset
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="study-header-actions">
                     <button id="accentToggleBtn" class="header-btn hidden" title="Toggle Accents">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -3458,9 +3482,12 @@ These are the notes of planned features.
             <div id="preGenerationView" class="hidden sub-view">
                 <div class="progress-dashboard" style="text-align: center;">
                     <div class="progress-title">Preparing Smart Questions...</div>
-                    <div class="spinner" style="width: 40px; height: 40px; border-width: 4px; margin: 20px auto;"></div>
-                    <p style="color: var(--secondary-text); margin-bottom: 25px;">This may take a moment. Our AI is
-                        generating some questions for you...</p>
+                    <div style="font-size: 3rem; font-weight: 700; color: var(--primary-color); margin: 20px auto;">
+                        <span id="countdownDisplay">10</span>
+                    </div>
+                    <p style="color: var(--secondary-text); margin-bottom: 25px;">
+                        <span id="countdownText">Loading questions... 10 seconds remaining</span>
+                    </p>
 
                     <div class="progress-bar-container" style="max-width: 300px; margin: 0 auto;">
                         <div class="progress-fill" id="preGenerationProgress" style="width: 0%;"></div>
@@ -3803,6 +3830,36 @@ These are the notes of planned features.
         </div>
     </div>
 
+    <div id="learnModeSetupModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" onclick="closeLearnModeSetupModal()">&times;</span>
+            <h2>Learn Mode Setup</h2>
+            <p>Configure your learning session for this deck.</p>
+            <div class="form-group">
+                <label for="learnModeExamDate">Exam Date (Optional)</label>
+                <input type="date" id="learnModeExamDate">
+                <small style="color: var(--secondary-text);">Set this to prioritize cards you're likely to forget before
+                    the exam.</small>
+            </div>
+            <div class="form-group">
+                <label for="learnModeRetention">Target Retention: <span id="learnModeRetentionValue">80%</span></label>
+                <input type="range" id="learnModeRetention" min="70" max="99" value="80"
+                    oninput="document.getElementById('learnModeRetentionValue').textContent = this.value + '%'">
+                <small style="color: var(--secondary-text);">Higher retention means more cards to review.</small>
+            </div>
+            <div class="form-group">
+                <label for="learnModeMaxCards">Max Cards per Round</label>
+                <input type="number" id="learnModeMaxCards" placeholder="Unlimited" min="5">
+                <small style="color: var(--secondary-text);">Leave empty for unlimited (recommended for
+                    cramming).</small>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeLearnModeSetupModal()">Cancel</button>
+                <button class="btn btn-success" onclick="startLearnModeWithSetup()">Start Learning</button>
+            </div>
+        </div>
+    </div>
+
     <div id="deckSettingsModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <span class="close" onclick="closeDeckSettingsModal()">&times;</span>
@@ -3834,6 +3891,13 @@ These are the notes of planned features.
                                 <label for="adaptiveClozeToggle">Allow Fill-in-the-blank (Cloze)</label>
                             </div>
                         </fieldset>
+                    </div>
+                    <div class="settings-section">
+                        <h4>Tools</h4>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enablePomodoroToggle">
+                            <label for="enablePomodoroToggle">Enable Pomodoro Timer</label>
+                        </div>
                     </div>
                     <div class="form-group">
                         <fieldset class="settings-option-group">
@@ -7080,12 +7144,133 @@ These are the notes of planned features.
             } else showToast('Category name cannot be empty.', 'error');
         }
 
+        function openLearnModeSetupModal() {
+            const modal = document.getElementById('learnModeSetupModal');
+            const deck = decks[currentDeckId];
+
+            // Set default date to today + 7 days if not set
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() + 7);
+            document.getElementById('learnModeExamDate').valueAsDate = defaultDate;
+
+            if (deck.settings && deck.settings.examDate) {
+                document.getElementById('learnModeExamDate').value = deck.settings.examDate;
+            }
+            if (deck.settings && deck.settings.targetRetention) {
+                document.getElementById('learnModeRetention').value = deck.settings.targetRetention * 100;
+                document.getElementById('learnModeRetentionValue').textContent = (deck.settings.targetRetention * 100) + '%';
+            }
+            if (deck.settings && deck.settings.learnModeMaxCards) {
+                document.getElementById('learnModeMaxCards').value = deck.settings.learnModeMaxCards;
+            }
+            modal.classList.add('show');
+        }
+
+        // Pomodoro Timer Logic
+        let pomodoroState = {
+            timeLeft: 25 * 60,
+            isRunning: false,
+            mode: 'work', // 'work' or 'break'
+            intervalId: null
+        };
+
+        function togglePomodoro() {
+            const playPauseBtn = document.getElementById('pomodoroPlayPause');
+            if (pomodoroState.isRunning) {
+                clearInterval(pomodoroState.intervalId);
+                pomodoroState.isRunning = false;
+                if (playPauseBtn) playPauseBtn.textContent = '▶ Start';
+            } else {
+                pomodoroState.isRunning = true;
+                if (playPauseBtn) playPauseBtn.textContent = '⏸ Pause';
+                pomodoroState.intervalId = setInterval(() => {
+                    pomodoroState.timeLeft--;
+                    updatePomodoroDisplay();
+                    if (pomodoroState.timeLeft <= 0) {
+                        completePomodoroPhase();
+                    }
+                }, 1000);
+            }
+        }
+
+        function resetPomodoro() {
+            clearInterval(pomodoroState.intervalId);
+            pomodoroState.isRunning = false;
+            pomodoroState.mode = 'work';
+            pomodoroState.timeLeft = 25 * 60;
+            updatePomodoroDisplay();
+            const playPauseBtn = document.getElementById('pomodoroPlayPause');
+            if (playPauseBtn) playPauseBtn.textContent = '▶ Start';
+            document.getElementById('pomodoroTimer').style.background = 'rgba(0,0,0,0.05)';
+        }
+
+        function completePomodoroPhase() {
+            clearInterval(pomodoroState.intervalId);
+            pomodoroState.isRunning = false;
+            const playPauseBtn = document.getElementById('pomodoroPlayPause');
+            if (playPauseBtn) playPauseBtn.textContent = '▶ Start';
+
+            if (pomodoroState.mode === 'work') {
+                pomodoroState.mode = 'break';
+                pomodoroState.timeLeft = 5 * 60;
+                showToast("Work session complete! Time for a break.", "success");
+                document.getElementById('pomodoroTimer').style.background = 'rgba(72, 187, 120, 0.2)'; // Green tint
+            } else {
+                pomodoroState.mode = 'work';
+                pomodoroState.timeLeft = 25 * 60;
+                showToast("Break over! Back to work.", "info");
+                document.getElementById('pomodoroTimer').style.background = 'rgba(0,0,0,0.05)';
+            }
+            updatePomodoroDisplay();
+        }
+
+        function updatePomodoroDisplay() {
+            const minutes = Math.floor(pomodoroState.timeLeft / 60);
+            const seconds = pomodoroState.timeLeft % 60;
+            document.getElementById('pomodoroDisplay').textContent =
+                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            // Update mode label
+            const modeLabel = document.getElementById('pomodoroMode');
+            if (modeLabel) {
+                modeLabel.textContent = pomodoroState.mode === 'work' ? 'WORK' : 'BREAK';
+            }
+        }
+
+        function closeLearnModeSetupModal() {
+            document.getElementById('learnModeSetupModal').classList.remove('show');
+        }
+
+        async function startLearnModeWithSetup() {
+            const examDate = document.getElementById('learnModeExamDate').value;
+            const retention = document.getElementById('learnModeRetention').value / 100;
+            const maxCards = document.getElementById('learnModeMaxCards').value;
+
+            const deck = decks[currentDeckId];
+            if (!deck.settings) deck.settings = {};
+
+            if (examDate) deck.settings.examDate = examDate;
+            deck.settings.targetRetention = retention;
+            deck.settings.learnModeMaxCards = maxCards ? parseInt(maxCards) : null;
+
+            await saveDataToDB('decks', deck);
+            closeLearnModeSetupModal();
+            startLearnMode(currentDeckId);
+        }
+
         function configureStudy(mode, deckId) {
             currentDeckId = deckId || currentViewingDeckId;
             if (!currentDeckId) return;
 
             if (mode === 'learn') {
-                startLearnMode(currentDeckId);
+                const deck = decks[currentDeckId];
+                // If exam date is not set, or user holds Shift (power user feature?), open modal
+                // For now, just check if exam date is set.
+                if (!deck.settings || !deck.settings.examDate) {
+                    openLearnModeSetupModal();
+                } else {
+                    startLearnMode(currentDeckId);
+                }
             } else if (mode === 'review') {
                 startReviewMode(currentDeckId);
             } else if (mode === 'spaced') {
@@ -7104,18 +7289,50 @@ These are the notes of planned features.
             studyState.knowledgeStates = new Map(allKnowledge.map(k => [k.cardID, k]));
 
             const allCards = deck.cards;
-            const candidates = allCards.filter(c => {
-                const mastery = studyState.knowledgeStates.get(c.id)?.masteryScore ?? 0.5;
-                return mastery < 0.90;
-            });
+            let candidates = [];
 
-            candidates.sort((a, b) => {
-                const mA = studyState.knowledgeStates.get(a.id)?.masteryScore ?? 0.5;
-                const mB = studyState.knowledgeStates.get(b.id)?.masteryScore ?? 0.5;
-                return mA - mB;
-            });
+            if (deck.settings.examDate) {
+                const examDate = new Date(deck.settings.examDate);
+                const targetRetention = deck.settings.targetRetention || 0.8;
 
-            const sessionSize = 20;
+                candidates = allCards.filter(c => {
+                    const state = studyState.knowledgeStates.get(c.id);
+                    if (!state) return true;
+
+                    const retention = calculateRetentionAtDate(state, examDate);
+                    c.projectedRetention = retention;
+                    return retention < targetRetention;
+                });
+
+                candidates.sort((a, b) => {
+                    const rA = a.projectedRetention !== undefined ? a.projectedRetention : 0;
+                    const rB = b.projectedRetention !== undefined ? b.projectedRetention : 0;
+                    return rA - rB;
+                });
+
+            } else {
+                candidates = allCards.filter(c => {
+                    const mastery = studyState.knowledgeStates.get(c.id)?.masteryScore ?? 0.5;
+                    return mastery < 0.90;
+                });
+
+                candidates.sort((a, b) => {
+                    const mA = studyState.knowledgeStates.get(a.id)?.masteryScore ?? 0.5;
+                    const mB = studyState.knowledgeStates.get(b.id)?.masteryScore ?? 0.5;
+                    return mA - mB;
+                });
+            }
+
+            let sessionSize = 20;
+            if (deck.settings.examDate) {
+                if (deck.settings.learnModeMaxCards) {
+                    sessionSize = Math.min(candidates.length, deck.settings.learnModeMaxCards);
+                } else {
+                    sessionSize = candidates.length;
+                }
+                if (sessionSize < 5 && candidates.length >= 5) sessionSize = 5;
+            }
+
             studyState.roundCards = candidates.slice(0, sessionSize);
 
             studyState.sessionCardIds = studyState.roundCards.map(c => c.id);
@@ -7130,6 +7347,13 @@ These are the notes of planned features.
             showView('studyMode');
             document.getElementById('studyTitle').textContent = 'Learning Session';
             document.getElementById('studySubtitle').textContent = deck.name;
+
+            if (deck.settings.enablePomodoro) {
+                document.getElementById('pomodoroTimer').classList.remove('hidden');
+                resetPomodoro();
+            } else {
+                document.getElementById('pomodoroTimer').classList.add('hidden');
+            }
 
             setupSessionProgressBar();
             updateSessionProgress();
@@ -7337,12 +7561,25 @@ These are the notes of planned features.
             let masteredCount = 0;
             let totalMasteryScore = 0;
 
+            const examDate = deck.settings?.examDate ? new Date(deck.settings.examDate) : null;
+            const targetRetention = deck.settings?.targetRetention || 0.8;
+
             allCards.forEach(card => {
-                const mastery = knowledgeMap.get(card.id)?.masteryScore || 0.5;
-                if (mastery >= 0.95) {
-                    masteredCount++;
+                const state = knowledgeMap.get(card.id);
+                let isMastered = false;
+                let score = 0;
+
+                if (examDate) {
+                    const retention = calculateRetentionAtDate(state, examDate);
+                    score = retention;
+                    if (retention >= targetRetention) isMastered = true;
+                } else {
+                    score = state?.masteryScore || 0.5;
+                    if (score >= 0.95) isMastered = true;
                 }
-                totalMasteryScore += mastery;
+
+                if (isMastered) masteredCount++;
+                totalMasteryScore += score;
             });
 
             const deckMasteryPercent = (totalMasteryScore / totalCards) * 100;
@@ -8920,22 +9157,29 @@ These are the notes of planned features.
         }
 
         function openDeckSettingsModal(deckId) {
+            currentViewingDeckId = deckId;
             const deck = decks[deckId];
             if (!deck) return;
+
             const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
 
-            document.getElementById('caseSensitiveToggle').checked = settings.caseSensitive;
-            document.getElementById('punctuationToggle').checked = settings.punctuation;
-            document.getElementById('retypeIncorrectToggle').checked = settings.retypeIncorrect;
-            document.getElementById('reviewOrder').value = settings.reviewOrder;
-            document.querySelector(`input[name="deckSettingsStudyMode"][value="${settings.learnMode}"]`).checked = true;
-            document.getElementById('deckSettingsCardsPerRound').value = settings.cardsPerRound;
+            document.getElementById('deckSettingsCardsPerRound').value = settings.cardsPerRound || 10;
+            document.getElementById('adaptiveAutoToggle').checked = settings.adaptiveModes?.auto ?? true;
+            document.getElementById('adaptiveMcqToggle').checked = settings.adaptiveModes?.mcq ?? true;
+            document.getElementById('adaptiveClozeToggle').checked = settings.adaptiveModes?.cloze ?? true;
 
-            const adaptiveModes = settings.adaptiveModes || { auto: true, mcq: true, cloze: true };
-            document.getElementById('adaptiveAutoToggle').checked = adaptiveModes.auto;
-            document.getElementById('adaptiveMcqToggle').checked = adaptiveModes.mcq;
-            document.getElementById('adaptiveClozeToggle').checked = adaptiveModes.cloze;
-            setupAdaptiveSettings();
+            if (settings.learnMode === 'write') {
+                document.getElementById('deckSettingsStudyModeWrite').checked = true;
+            } else {
+                document.getElementById('deckSettingsStudyModeFlashcard').checked = true;
+            }
+
+            document.getElementById('retypeIncorrectToggle').checked = settings.retypeIncorrect || false;
+            document.getElementById('caseSensitiveToggle').checked = settings.caseSensitive || false;
+            document.getElementById('punctuationToggle').checked = settings.punctuation || false;
+            document.getElementById('reviewOrder').value = settings.reviewOrder || 'random';
+            document.getElementById('enablePomodoroToggle').checked = settings.enablePomodoro || false;
+
             document.getElementById('deckSettingsModal').classList.add('show');
             setupRadioCardSelection('deckSettingsStudyMode');
         }
@@ -8960,6 +9204,7 @@ These are the notes of planned features.
                 cloze: document.getElementById('adaptiveClozeToggle').checked
             };
             deck.settings.cardsPerRound = document.getElementById('deckSettingsCardsPerRound').value;
+            deck.settings.enablePomodoro = document.getElementById('enablePomodoroToggle').checked;
 
             await saveDataToDB('decks', deck);
             updateDashboard();
@@ -9849,6 +10094,17 @@ These are the notes of planned features.
             return Math.pow(2, -elapsedDays / stability);
         }
 
+        function calculateRetentionAtDate(state, targetDate) {
+            if (!state || !state.stability || !state.lastReviewed) return 0;
+            const lastReviewed = new Date(state.lastReviewed);
+            const target = new Date(targetDate);
+            const elapsedDays = (target.getTime() - lastReviewed.getTime()) / (1000 * 3600 * 24);
+
+            if (elapsedDays <= 0) return 1.0;
+
+            return Math.pow(2, -elapsedDays / state.stability);
+        }
+
         async function updateDueCardCounts() {
             const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
             const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
@@ -10226,13 +10482,54 @@ These are the notes of planned features.
 
             let completedJobs = 0;
             const totalJobs = cardsToGenerate.length;
+            const startTime = Date.now();
+            const MAX_PRELOAD_TIME = 10000; // 10 seconds max for initial preloading
+            const BATCH_SIZE = 1;
+            const DELAY_BETWEEN_BATCHES = 4000; // 4 seconds (15 RPM)
+
             if (progressCallback) progressCallback(completedJobs, totalJobs);
 
-            // Batch processing to avoid rate limits
-            const BATCH_SIZE = 3;
-            const DELAY_BETWEEN_BATCHES = 1000; // 1 second
+            // Update countdown display function
+            const updateCountdown = () => {
+                const elapsed = Date.now() - startTime;
+                const remaining = Math.max(0, Math.ceil((MAX_PRELOAD_TIME - elapsed) / 1000));
+                const countdownDisplay = document.getElementById('countdownDisplay');
+                const countdownText = document.getElementById('countdownText');
+                if (countdownDisplay) countdownDisplay.textContent = remaining;
+                if (countdownText) {
+                    if (remaining > 0) {
+                        countdownText.textContent = `Loading questions... ${remaining} second${remaining !== 1 ? 's' : ''} remaining`;
+                    } else {
+                        countdownText.textContent = 'Starting study session...';
+                    }
+                }
+            };
 
+            // Start countdown interval
+            const countdownInterval = setInterval(updateCountdown, 100);
+            updateCountdown(); // Initial update
+
+            // Phase 1: Initial preloading with time limit
             for (let i = 0; i < cardsToGenerate.length; i += BATCH_SIZE) {
+                // Check if we've exceeded time limit
+                if (Date.now() - startTime > MAX_PRELOAD_TIME) {
+                    console.log(`Preload time limit reached. Generated ${completedJobs}/${totalJobs} distractors. Remaining will generate in background.`);
+                    showToast(`Pre-loaded ${completedJobs} questions. Others loading in background...`, 'info');
+
+                    // Clear countdown interval
+                    clearInterval(countdownInterval);
+
+                    // Phase 2: Continue generation in background while user studies
+                    const remainingCards = cardsToGenerate.slice(i);
+                    if (remainingCards.length > 0) {
+                        // Start background generation (non-blocking)
+                        setTimeout(() => {
+                            continueBackgroundGeneration(remainingCards, completedJobs, totalJobs, progressCallback);
+                        }, 2000); // Start after 2 seconds to let study session begin
+                    }
+                    break;
+                }
+
                 const batch = cardsToGenerate.slice(i, i + BATCH_SIZE);
 
                 const batchPromises = batch.map(card => {
@@ -10275,6 +10572,75 @@ These are the notes of planned features.
                     await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
                 }
             }
+
+            // Clear countdown interval when preload completes
+            clearInterval(countdownInterval);
+        }
+
+        // New function: Continue generating distractors in background during study
+        async function continueBackgroundGeneration(remainingCards, startingCount, totalJobs, progressCallback) {
+            if (!isOnline || currentMode === null) {
+                return; // Stop if offline or user exited study mode
+            }
+
+            let completedJobs = startingCount;
+            const BATCH_SIZE = 1;
+            const DELAY_BETWEEN_BATCHES = 4000; // 4 seconds (15 RPM)
+
+            console.log(`Background generation: Processing ${remainingCards.length} remaining cards`);
+
+            for (let i = 0; i < remainingCards.length; i += BATCH_SIZE) {
+                // Stop if user exits study mode
+                if (currentMode === null) {
+                    console.log('Study session ended, stopping background generation');
+                    break;
+                }
+
+                const batch = remainingCards.slice(i, i + BATCH_SIZE);
+
+                const batchPromises = batch.map(card => {
+                    let apiPromise;
+                    const requestBody = {
+                        question: card.question,
+                        answer: card.answer
+                    };
+
+                    if (isElectron) {
+                        apiPromise = window.electronAPI.generateDistractors(requestBody);
+                    } else {
+                        apiPromise = fetch('/.netlify/functions/generateDistractors', {
+                            method: 'POST',
+                            body: JSON.stringify(requestBody)
+                        })
+                            .then(response => {
+                                if (!response.ok) throw new Error('Server function for distractors failed.');
+                                return response.json();
+                            })
+                            .then(result => result.distractors);
+                    }
+
+                    return apiPromise.then(distractors => {
+                        if (distractors && distractors.length >= 3) {
+                            studyState.preGeneratedDistractors.set(card.id, distractors);
+                            console.log(`Background generated distractors for card: ${card.question.substring(0, 30)}...`);
+                        }
+                    }).catch(error => {
+                        console.error(`Background generation failed for card: ${card.question}`, error);
+                    }).finally(() => {
+                        completedJobs++;
+                        if (progressCallback) progressCallback(completedJobs, totalJobs);
+                    });
+                });
+
+                await Promise.all(batchPromises);
+
+                // Add delay before next batch
+                if (i + BATCH_SIZE < remainingCards.length) {
+                    await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+                }
+            }
+
+            console.log(`Background generation complete: ${completedJobs}/${totalJobs} total distractors generated`);
         }
 
         function updateOnlineStatusUI() {
