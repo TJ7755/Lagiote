@@ -1,55 +1,110 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Auth0 Authentication - Lagiote</title>
-    <link rel="stylesheet" href="assets/css/auth0-auth.css" />
-  </head>
-  <body>
-    <div class="app-container">
-      <!-- Loading State -->
-      <div id="loading" class="loading-state">
-        <div class="loading-spinner"></div>
-        <div class="loading-text">Loading...</div>
-      </div>
 
-      <!-- Error State -->
-      <div id="error" class="error-state" style="display: none;">
-        <div class="error-title">Oops!</div>
-        <div class="error-message">Something went wrong</div>
-        <div id="error-details" class="error-sub-message"></div>
-        <button id="retry-btn" class="button retry">Try Again</button>
-      </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Authenticating - Lagiote</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-      <!-- Main Content -->
-      <div id="app" class="main-card-wrapper" style="display: none;">
-        <img 
-          src="https://cdn.auth0.com/quantum-assets/dist/latest/logos/auth0/auth0-lockup-en-ondark.png" 
-          alt="Auth0 Logo" 
-          class="auth0-logo"
-        />
-        <h1 class="main-title">Welcome to Lagiote</h1>
-        
-        <!-- Logged Out State -->
-        <div id="logged-out" class="action-card">
-          <p class="action-text">Get started by signing in to your account</p>
-          <button id="login-btn" class="button login">Log In</button>
-        </div>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+        'Helvetica Neue', Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      overflow: hidden;
+    }
 
-        <!-- Logged In State -->
-        <div id="logged-in" class="logged-in-section" style="display: none;">
-          <div class="logged-in-message">✅ Successfully authenticated!</div>
-          <h2 class="profile-section-title">Your Profile</h2>
-          <div id="profile" class="profile-card"></div>
-          <button id="logout-btn" class="button logout">Log Out</button>
-        </div>
-      </div>
-    </div>
+    .container {
+      text-align: center;
+      background: white;
+      padding: 3rem 4rem;
+      border-radius: 1.5rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 400px;
+    }
 
-    <!-- Load Auth0 SDK from CDN (works in Electron) -->
-    <script src="https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js"></script>
-    <script src="assets/js/auth0-auth.js"></script>
-  </body>
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 1.5rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: white;
+      font-weight: bold;
+    }
+
+    h1 {
+      color: #1f2937;
+      font-size: 1.75rem;
+      margin-bottom: 0.75rem;
+      font-weight: 600;
+    }
+
+    p {
+      color: #6b7280;
+      font-size: 1rem;
+      margin-bottom: 2rem;
+      line-height: 1.5;
+    }
+
+    .spinner {
+      width: 50px;
+      height: 50px;
+      margin: 0 auto;
+      border: 4px solid #e5e7eb;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    .note {
+      margin-top: 1.5rem;
+      font-size: 0.875rem;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="logo">L</div>
+    <h1>Redirecting to Auth0</h1>
+    <p>Please wait while we redirect you to the login page...</p>
+    <div class="spinner"></div>
+    <p class="note">
+      You will be redirected to Auth0's secure login page
+    </p>
+  </div>
+
+  <script>
+    // This page is only used as a placeholder
+    // The actual Auth0 login page will be loaded by Electron's main process
+    console.log('[Auth Window] Placeholder page loaded');
+    console.log('[Auth Window] Waiting for Auth0 redirect from main process...');
+  </script>
+</body>
+
 </html>
-

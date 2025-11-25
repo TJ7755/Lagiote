@@ -5310,10 +5310,9 @@ These are the notes of planned features.
                             console.log('Signup/Login successful:', authResult.user);
                             // Save session
                             localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                            // Update UI
+                            // Update UI - this will transition to dashboard
                             await updateUIAfterLogin(authResult.user);
-                            // Reload app to sync data
-                            location.reload();
+
                         }
                     } catch (error) {
                         console.error('Signup error:', error);
@@ -5358,10 +5357,9 @@ These are the notes of planned features.
                             console.log('Login successful:', authResult.user);
                             // Save session
                             localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                            // Update UI
+                            // Update UI - this will transition to dashboard
                             await updateUIAfterLogin(authResult.user);
-                            // Reload app to sync data
-                            location.reload();
+
                         }
                     } catch (error) {
                         console.error('Login error:', error);
@@ -5407,8 +5405,9 @@ These are the notes of planned features.
                         if (authResult && authResult.user) {
                             console.log('Signup/Login successful:', authResult.user);
                             localStorage.setItem('auth0Session', JSON.stringify(authResult));
+                            // Update UI - this will transition to dashboard
                             await updateUIAfterLogin(authResult.user);
-                            location.reload();
+
                         }
                     } catch (error) {
                         console.error('Signup error:', error);

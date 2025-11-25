@@ -102,11 +102,12 @@ function createWindow() {
 
 async function createLoginWindow() {
   const mainWindow = BrowserWindow.getAllWindows()[0];
+  const authService = require('./services/auth-service');
+  const http = require('http');
+
   let authWindow = null;
+  let server = null;
   let hasResolved = false;
-  let isInitialized = false;
-  let closeAttempts = 0;
-  const maxCloseAttempts = 3;
 
   const log = (type, ...args) => {
     const msg = args.map(arg =>
@@ -115,352 +116,267 @@ async function createLoginWindow() {
     console.log(`[Auth Main][${type}] ${msg}`);
   };
 
-  ipcMain.removeAllListeners('auth-log');
-  ipcMain.removeAllListeners('auth-window-ready');
-  ipcMain.removeAllListeners('auth-window-closing');
-  ipcMain.removeAllListeners('auth-success');
-  ipcMain.removeAllListeners('auth-error');
-
   return new Promise((resolve, reject) => {
-    let cleanupDone = false;
+    // Create a local HTTP server to handle the callback
+    server = http.createServer(async (req, res) => {
+      if (hasResolved) return;
 
-    const cleanup = () => {
-      if (cleanupDone) return;
-      cleanupDone = true;
+      log('info', 'Received request:', req.url);
 
-      log('info', 'Cleaning up IPC listeners');
-      ipcMain.removeAllListeners('auth-log');
-      ipcMain.removeAllListeners('auth-window-ready');
-      ipcMain.removeAllListeners('auth-window-closing');
-      ipcMain.removeAllListeners('auth-success');
-      ipcMain.removeAllListeners('auth-error');
-    };
+      if (req.url.startsWith('/callback')) {
+        try {
+          // Get the full callback URL
+          const callbackURL = `http://localhost${req.url}`;
+          log('info', 'Processing callback:', callbackURL);
 
-    // Create a small authentication window
-    authWindow = new BrowserWindow({
-      width: 1000,
-      height: 800,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        preload: path.join(__dirname, 'preload-auth.js'),
-        webSecurity: true,
-        devTools: true,
-        additionalArguments: ['--auth-window']
-      },
-      parent: mainWindow,
-      modal: true,
-      show: false,
-      autoHideMenuBar: false,
-      backgroundColor: '#f7fafc',
-      minimizable: false,
-      maximizable: false,
-      closable: true,
-      fullscreenable: false
-    });
+          // Send success response to browser
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Authentication Successful</title>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  height: 100vh;
+                  margin: 0;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                }
+                .container {
+                  text-align: center;
+                  background: white;
+                  padding: 3rem;
+                  border-radius: 1rem;
+                  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                }
+                .checkmark {
+                  font-size: 4rem;
+                  color: #10b981;
+                  margin-bottom: 1rem;
+                }
+                h1 { color: #1f2937; margin: 0 0 0.5rem 0; }
+                p { color: #6b7280; margin: 0; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="checkmark">✓</div>
+                <h1>Authentication Successful!</h1>
+                <p>You can close this window now.</p>
+              </div>
+            </body>
+            </html>
+          `);
 
-    // Optional: Uncomment to open DevTools for debugging
-    // authWindow.webContents.openDevTools();
+          // Exchange authorization code for tokens
+          const { accessToken, profile } = await authService.loadTokens(callbackURL);
 
-    authWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      console.error('Auth window failed to load:', errorCode, errorDescription);
-    });
+          log('info', 'Token exchange successful');
+          log('info', 'User profile:', profile.email || profile.sub);
 
-    authWindow.webContents.on('console-message', (event, level, message) => {
-      console.log('Auth Window Console:', message);
-    });
+          // Mark as resolved
+          hasResolved = true;
 
-    // Intercept navigation to custom protocol (Auth0 callback)
-    authWindow.webContents.on('will-navigate', (event, url) => {
-      log('info', 'Navigation attempt to:', url);
-
-      // Allow navigation to Auth0 domains (needed for consent screen to work)
-      if (url.includes('.auth0.com') || url.includes('auth0.com')) {
-        log('info', 'Allowing Auth0 domain navigation:', url);
-        return; // Let it proceed
-      }
-
-      if (url.startsWith('lagioterevise://')) {
-        event.preventDefault();
-        log('info', 'Intercepted callback URL:', url);
-
-        // Extract the callback URL and send to the auth window to process
-        authWindow.webContents.executeJavaScript(`
-          window.location.href = ${JSON.stringify(url)};
-        `).catch(err => log('error', 'Failed to set callback URL:', err.message));
-      }
-    });
-
-    // Also handle navigation in new windows (popups)
-    authWindow.webContents.setWindowOpenHandler(({ url }) => {
-      log('info', 'Window open attempt to:', url);
-
-      // Allow Auth0 popups/redirects
-      if (url.includes('.auth0.com') || url.includes('auth0.com')) {
-        log('info', 'Allowing Auth0 popup');
-        return { action: 'allow' };
-      }
-
-      if (url.startsWith('lagioterevise://')) {
-        log('info', 'Intercepted popup callback URL:', url);
-
-        authWindow.webContents.executeJavaScript(`
-          window.location.href = ${JSON.stringify(url)};
-        `).catch(err => log('error', 'Failed to set callback URL:', err.message));
-
-        return { action: 'deny' };
-      }
-
-      return { action: 'allow' };
-    });
-
-    // Load Auth0 authentication window
-    authWindow.loadFile(path.join(__dirname, 'auth.html'));
-
-    let windowReady = false;
-
-    ipcMain.on('auth-log', (event, data) => {
-      log(data.type, data.message);
-    });
-
-    ipcMain.on('auth-window-ready', () => {
-      isInitialized = true;
-      log('info', 'Auth window reported ready');
-    });
-
-    ipcMain.on('auth-window-closing', (event, data) => {
-      log('warn', 'Auth window closing:', data);
-    });
-
-    authWindow.webContents.on('did-finish-load', () => {
-      if (authWindow) {
-        log('info', 'Auth window content loaded');
-        windowReady = true;
-
-        // Get Auth0 configuration from environment
-        const auth0Domain = process.env.VITE_AUTH0_DOMAIN || process.env.AUTH0_DOMAIN;
-        const auth0ClientId = process.env.VITE_AUTH0_CLIENT_ID || process.env.AUTH0_CLIENT_ID;
-
-        log('info', 'Auth0 domain:', auth0Domain || 'NOT SET');
-        log('info', 'Auth0 clientId:', auth0ClientId ? 'SET' : 'NOT SET');
-
-        if (!auth0Domain || !auth0ClientId) {
-          log('warn', 'Auth0 config missing!');
-          log('warn', 'Available env keys:', Object.keys(process.env).filter(k => k.includes('AUTH')).join(', '));
-          log('warn', 'Please create .env.local file with VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID');
-        }
-
-        const initializeWindow = async () => {
-          try {
-            // Set up error handlers
-            try {
-              await authWindow.webContents.executeJavaScript(`
-                window.onerror = function(msg, url, line, col, error) {
-                  console.error('Global error:', msg, 'at', url, ':', line);
-                  if (window.electronAPI && window.electronAPI.log) {
-                    window.electronAPI.log('Global error: ' + msg, 'error');
-                  }
-                  return false;
-                };
-                window.onunhandledrejection = function(event) {
-                  console.error('Unhandled rejection:', event.reason);
-                  if (window.electronAPI && window.electronAPI.log) {
-                    window.electronAPI.log('Unhandled rejection: ' + (event.reason ? event.reason.toString() : 'Unknown'), 'error');
-                  }
-                  return false;
-                };
-                true;
-              `);
-            } catch (execError) {
-              log('warn', 'Failed to set up error handlers:', execError.message || 'Unknown error');
+          // Close the auth window after a short delay
+          setTimeout(() => {
+            if (authWindow && !authWindow.isDestroyed()) {
+              authWindow.close();
             }
+          }, 1500);
 
-            if (!authWindow || authWindow.isDestroyed()) {
-              throw new Error('Window was destroyed during initialization');
-            }
-
-            // Pass Auth0 configuration to the window
-            log('info', 'Injecting Auth0 config...');
-            const configScript = `
-              try {
-                console.log('[Auth Window] Receiving config injection...');
-                // Set Auth0 config on window for the auth script to access
-                window.auth0Config = {
-                  domain: ${JSON.stringify(auth0Domain || '')},
-                  clientId: ${JSON.stringify(auth0ClientId || '')}
-                };
-                console.log('[Auth Window] Config set:', window.auth0Config);
-                
-                // Also store in localStorage as fallback
-                if (${JSON.stringify(auth0Domain)}) {
-                  localStorage.setItem('AUTH0_DOMAIN', ${JSON.stringify(auth0Domain)});
-                }
-                if (${JSON.stringify(auth0ClientId)}) {
-                  localStorage.setItem('AUTH0_CLIENT_ID', ${JSON.stringify(auth0ClientId)});
-                }
-                
-                if (window.electronAPI && window.electronAPI.log) {
-                  window.electronAPI.log('Auth0 config injected successfully', 'info');
-                }
-                true; // Return a serializable value
-              } catch (err) {
-                console.error('Config injection error:', err);
-                if (window.electronAPI && window.electronAPI.log) {
-                  window.electronAPI.log('Config injection error: ' + err.toString(), 'error');
-                }
-                false; // Return a serializable value
-              }
-            `;
-
-            try {
-              await authWindow.webContents.executeJavaScript(configScript);
-            } catch (execError) {
-              log('error', 'Failed to execute config script:', execError.message || execError.toString());
-              throw new Error('Failed to inject Auth0 config: ' + (execError.message || 'Unknown error'));
-            }
-
-            authWindow.show();
-            log('info', 'Auth window shown');
-
-            log('info', 'Window initialization completed');
-          } catch (err) {
-            log('error', 'Failed to initialize window:', err.message || err.toString());
-            reject({
-              message: 'Failed to initialize auth window: ' + (err.message || err.toString()),
-              name: 'AuthWindowError'
-            });
-          }
-        };
-
-        setTimeout(initializeWindow, 500);
-      }
-    });
-
-    authWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      log('error', 'Failed to load auth window:', errorCode, errorDescription);
-      if (!hasResolved) {
-        reject({
-          message: `Failed to load auth window: ${errorDescription}`,
-          name: 'AuthWindowLoadError',
-          code: errorCode
-        });
-      }
-    });
-
-    authWindow.on('close', (e) => {
-      if (!hasResolved) {
-        closeAttempts++;
-        log('warn', `Close attempt ${closeAttempts} of ${maxCloseAttempts}`);
-
-        if (closeAttempts < maxCloseAttempts) {
-          e.preventDefault();
-          const choice = require('electron').dialog.showMessageBoxSync(authWindow, {
-            type: 'warning',
-            buttons: ['Continue Authentication', 'Force Close'],
-            defaultId: 0,
-            title: 'Authentication in Progress',
-            message: 'Authentication is still in progress. Are you sure you want to cancel?',
-            detail: `Window state: ${isInitialized ? 'Initialized' : 'Not initialized'}, Authentication: ${hasResolved ? 'Complete' : 'Incomplete'}`
+          // Resolve with user data
+          resolve({
+            type: 'authorization',
+            user: {
+              id: profile.sub,
+              email: profile.email,
+              name: profile.name,
+              picture: profile.picture,
+              nickname: profile.nickname
+            },
+            token: accessToken,
+            accessToken: accessToken
           });
-          if (choice === 0) {
-            closeAttempts = 0;
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-    });
 
-    let isClosing = false;
+          // Close the server
+          setTimeout(() => {
+            if (server) {
+              server.close(() => {
+                log('info', 'Server closed');
+              });
+            }
+          }, 2000);
 
-    authWindow.on('close', (e) => {
-      log('info', 'Auth window closing event', {
-        hasResolved,
-        isInitialized,
-        windowReady,
-        isClosing
-      });
+        } catch (error) {
+          log('error', 'Token exchange error:', error.message);
+          res.writeHead(500, { 'Content-Type': 'text/html' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Authentication Failed</title>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  height: 100vh;
+                  margin: 0;
+                  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                }
+                .container {
+                  text-align: center;
+                  background: white;
+                  padding: 3rem;
+                  border-radius: 1rem;
+                  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                }
+                .error-icon { font-size: 4rem; color: #ef4444; margin-bottom: 1rem; }
+                h1 { color: #1f2937; margin: 0 0 0.5rem 0; }
+                p { color: #6b7280; margin: 0; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="error-icon">✕</div>
+                <h1>Authentication Failed</h1>
+                <p>${error.message || 'Please try again'}</p>
+              </div>
+            </body>
+            </html>
+          `);
 
-      if (!hasResolved && !isClosing) {
-        e.preventDefault();
-        log('warn', 'Preventing unauthorized window close');
-        return;
-      }
-    });
-
-    authWindow.on('closed', () => {
-      log('info', 'Auth window closed', {
-        hasResolved,
-        isInitialized,
-        windowReady
-      });
-
-      if (!hasResolved) {
-        log('error', 'Window closed without resolving');
-        safeSend(mainWindow, 'auth-window-closed');
-        reject({
-          message: 'Authentication window was closed before completion',
-          name: 'AuthWindowClosedError'
-        });
-      }
-
-      cleanup();
-      authWindow = null;
-    });
-
-    ipcMain.once('auth-success', (event, data) => {
-      if (hasResolved) {
-        log('warn', 'Ignoring duplicate auth success');
-        return;
-      }
-
-      log('info', 'Authentication successful');
-      hasResolved = true;
-
-      setTimeout(() => {
-        if (authWindow && !authWindow.isDestroyed()) {
-          isClosing = true;
-          authWindow.setClosable(true);
-          resolve(data);
-          authWindow.close();
-        } else {
-          resolve(data);
-        }
-      }, 1000);
-    });
-
-    ipcMain.once('auth-error', (event, error) => {
-      if (hasResolved) {
-        log('warn', 'Ignoring duplicate auth error');
-        return;
-      }
-
-      log('error', 'Authentication error:', error);
-      hasResolved = true;
-
-      if (authWindow && !authWindow.isDestroyed()) {
-        require('electron').dialog.showMessageBox(authWindow, {
-          type: 'error',
-          title: 'Authentication Error',
-          message: 'Failed to authenticate',
-          detail: error.message || JSON.stringify(error),
-          buttons: ['OK']
-        }).then(() => {
-          isClosing = true;
-          authWindow.setClosable(true);
+          hasResolved = true;
           reject({
-            message: error.message || JSON.stringify(error),
+            message: error.message || 'Token exchange failed',
             name: 'AuthError'
           });
-          authWindow.close();
-        });
-      } else {
-        reject({
-          message: error.message || JSON.stringify(error),
-          name: 'AuthError'
-        });
+
+          if (server) {
+            server.close();
+          }
+        }
       }
     });
+
+    // Try to start server on port 80 first, then fall back to higher ports
+    const tryPort = (port) => {
+      return new Promise((resolvePort, rejectPort) => {
+        server.once('error', (err) => {
+          if (err.code === 'EACCES' || err.code === 'EADDRINUSE') {
+            log('warn', `Port ${port} not available: ${err.message}`);
+            rejectPort(err);
+          } else {
+            log('error', 'Server error:', err.message);
+            rejectPort(err);
+          }
+        });
+
+        server.listen(port, 'localhost', () => {
+          log('info', `Local callback server listening on http://localhost:${port}`);
+          resolvePort(port);
+        });
+      });
+    };
+
+    // Try ports in order: 80, 8080, 3000, random
+    (async () => {
+      let serverPort = null;
+      const portsToTry = [80, 8080, 3000, 0]; // 0 = random available port
+
+      for (const port of portsToTry) {
+        try {
+          serverPort = await tryPort(port);
+          if (serverPort === 0) {
+            // Get the actual port if we used random
+            serverPort = server.address().port;
+            log('info', `Server started on random port: ${serverPort}`);
+          }
+          break;
+        } catch (err) {
+          if (port === portsToTry[portsToTry.length - 1]) {
+            // Last port attempt failed
+            log('error', 'Failed to start server on any port');
+            reject({
+              message: 'Failed to start local callback server. Please ensure no other application is using ports 80, 8080, or 3000.',
+              name: 'ServerStartError'
+            });
+            return;
+          }
+          // Try next port
+          continue;
+        }
+      }
+
+      if (serverPort !== 80) {
+        log('warn', `Using non-standard port ${serverPort}. You may need to update Auth0 allowed callback URLs to http://localhost:${serverPort}/callback`);
+      }
+
+      // Create authentication window
+      authWindow = new BrowserWindow({
+        width: 1000,
+        height: 800,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          webSecurity: true,
+          devTools: true
+        },
+        parent: mainWindow,
+        modal: true,
+        show: false,
+        autoHideMenuBar: true,
+        backgroundColor: '#f7fafc',
+        minimizable: false,
+        maximizable: false,
+        closable: true,
+        fullscreenable: false
+      });
+
+      // Optional: Uncomment to open DevTools for debugging
+      // authWindow.webContents.openDevTools();
+
+      authWindow.on('close', () => {
+        log('info', 'Auth window closed');
+
+        if (!hasResolved) {
+          hasResolved = true;
+          if (server) {
+            server.close();
+          }
+          reject({
+            message: 'Authentication window was closed before completion',
+            name: 'AuthWindowClosedError'
+          });
+        }
+      });
+
+      // Get the authentication URL from the service
+      try {
+        const authURL = authService.getAuthenticationURL();
+        log('info', 'Loading Auth0 login page:', authURL);
+
+        // Load the Auth0 login page
+        authWindow.loadURL(authURL);
+        authWindow.once('ready-to-show', () => {
+          authWindow.show();
+        });
+      } catch (error) {
+        log('error', 'Failed to get authentication URL:', error.message);
+        if (server) {
+          server.close();
+        }
+        reject({
+          message: error.message || 'Failed to start authentication',
+          name: 'AuthConfigError'
+        });
+      }
+    })();
   });
 }
 
