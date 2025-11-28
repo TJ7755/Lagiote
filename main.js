@@ -6,7 +6,10 @@ const fs = require('fs');
 
 // Load environment variables from .env.local
 function loadEnvFile() {
-  const envPath = path.join(__dirname, '.env.local');
+  const envPath = app.isPackaged
+    ? path.join(process.resourcesPath, '.env.local')
+    : path.join(__dirname, '.env.local');
+
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
     envContent.split('\n').forEach(line => {
@@ -402,12 +405,17 @@ ipcMain.handle('open-login-window', async () => {
     return await createLoginWindow();
   } catch (error) {
     console.error('Login window error:', error);
-    // Convert error to a plain object that can be serialized over IPC
-    throw {
-      message: error.message || 'Login window failed',
-      name: error.name || 'Error',
-      stack: error.stack
-    };
+    // Extract meaningful message
+    let errorMessage = error.message || 'Login window failed';
+    if (typeof error === 'object' && error !== null) {
+      try {
+        errorMessage = JSON.stringify(error, Object.getOwnPropertyNames(error));
+      } catch (e) {
+        errorMessage = 'Unknown error object';
+      }
+    }
+    // Throw an Error instance so it serializes correctly to the renderer
+    throw new Error(errorMessage);
   }
 });
 

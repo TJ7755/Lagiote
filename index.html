@@ -1,5 +1,9 @@
 <!--
-These are the notes of planned features.
+These are the notes of issues:
+
+Accent button still doesn't do anything. Perhaps add logging to spot problem.
+
+Make initial cards in Learn mode randomly shuffled - if all the mastery and iqs scores are equal.
 -->
 
 <!DOCTYPE html>
@@ -258,7 +262,6 @@ These are the notes of planned features.
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link href="./assets/css/style.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
         .stats-table {
@@ -491,6 +494,11 @@ These are the notes of planned features.
         .header-btn:hover {
             background: var(--button-secondary-hover);
             transform: scale(1.05);
+        }
+
+        #accentToggleBtn:hover {
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            transform: scale(1.1);
         }
 
         .logo {
@@ -1356,6 +1364,7 @@ These are the notes of planned features.
 
         .study-header-content {
             flex-grow: 1;
+            text-align: center;
         }
 
         .study-header-actions {
@@ -3274,19 +3283,8 @@ These are the notes of planned features.
     <div id="studyMode" class="container view-container">
         <div class="study-container">
             <div class="study-header">
-                <div class="study-header-content">
-                    <div class="study-title" id="studyTitle">Learning Mode</div>
-                    <div class="study-subtitle" id="studySubtitle">Deck Name</div><br>
-                    <div id="focusMeter" style="display: inline-block; margin-left: 15px; vertical-align: middle;">
-                        <span style="font-size: 0.9rem; color: var(--secondary-text); margin-right: 5px;">Focus:</span>
-                        <div id="focusDot"
-                            style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #38a169; transition: background-color 0.3s;">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Centered Pomodoro Timer -->
-                <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
+                <!-- Left side: Pomodoro Timer -->
+                <div style="position: absolute; left: 0; top: 50%; transform: translateY(-50%);">
                     <div id="pomodoroTimer" class="hidden"
                         style="display: inline-flex; flex-direction: column; align-items: center; padding: 10px; border-radius: 8px; background: rgba(0,0,0,0.05); transition: background 0.3s; box-shadow: 0 2px 8px var(--shadow-color);">
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
@@ -3308,12 +3306,27 @@ These are the notes of planned features.
                     </div>
                 </div>
 
+                <!-- Center: Title and Focus Meter -->
+                <div class="study-header-content">
+                    <div class="study-title" id="studyTitle">Learning Mode</div>
+                    <div class="study-subtitle" id="studySubtitle">Deck Name</div>
+                    <div id="focusMeter" style="display: inline-block; margin-top: 8px;">
+                        <span style="font-size: 0.9rem; color: var(--secondary-text); margin-right: 5px;">Focus:</span>
+                        <div id="focusDot"
+                            style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #38a169; transition: background-color 0.3s;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right side: Action buttons -->
                 <div class="study-header-actions">
-                    <button id="accentToggleBtn" class="header-btn hidden" title="Toggle Accents">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                    <button id="accentToggleBtn" class="header-btn hidden" title="Toggle Accents"
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;"
+                        onclick="toggleAccentButtons()">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
                             stroke="currentColor" width="20" height="20">
                             <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c1.356 0 2.673-.174 3.946-.512M12 21c-1.273 0-2.59-.174-3.872-.512M21 12a9 9 0 0 0-9-9c-1.356 0-2.673.174-3.946.512M3 12a9 9 0 0 1 9-9c1.273 0 2.59.174 3.872.512M12 3v18" />
+                                d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
                         </svg>
                     </button>
                     <button id="editStudyCardBtn" class="header-btn hidden" title="Edit Card">
@@ -3455,6 +3468,8 @@ These are the notes of planned features.
                         Answer</button>
                     <button class="btn btn-secondary hidden" id="dontKnowBtn" onclick="dontKnowAnswer()">Don't
                         Know</button>
+                    <button class="btn btn-primary hidden" id="nextBtn" onclick="handleNextCard()">Next Arrow
+                        &rarr;</button>
                     <button class="btn btn-incorrect hidden" id="incorrectBtn"
                         onclick="markIncorrect()">Incorrect</button>
                     <button class="btn btn-correct hidden" id="correctBtn" onclick="markCorrect()">Correct</button>
@@ -3838,7 +3853,7 @@ These are the notes of planned features.
             <div class="form-group">
                 <label for="learnModeExamDate">Exam Date (Optional)</label>
                 <input type="date" id="learnModeExamDate">
-                <small style="color: var(--secondary-text);">Set this to prioritize cards you're likely to forget before
+                <small style="color: var(--secondary-text);">Set this to prioritise cards you're likely to forget before
                     the exam.</small>
             </div>
             <div class="form-group">
@@ -3865,69 +3880,99 @@ These are the notes of planned features.
             <span class="close" onclick="closeDeckSettingsModal()">&times;</span>
             <h2>Deck Settings</h2>
             <div id="deckSettingsForm">
+
                 <div class="settings-section">
-                    <h4>Learn Mode Options</h4>
-
-                    <div class="form-group">
-                        <label for="deckSettingsCardsPerRound">Cards Per Round (Learn Mode)</label>
-                        <input type="number" id="deckSettingsCardsPerRound" value="10" min="3" max="20">
+                    <div
+                        style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <h4 style="margin: 0;">Exam Mode</h4>
+                        <label class="switch">
+                            <input type="checkbox" id="deckSettingsExamModeToggle"
+                                onchange="toggleExamSettingsVisibility()">
+                            <span class="slider"></span>
+                        </label>
                     </div>
+                    <p style="font-size: 0.9rem; color: var(--secondary-text); margin-bottom: 15px;">
+                        Prioritize cards to ensure high retention by a specific date.
+                    </p>
 
-                    <div class="settings-section">
-                        <h4>Adaptive Learning</h4>
-                        <fieldset class="settings-option-group">
-                            <legend>Adaptive Question Formats</legend>
-                            <div class="checkbox-group">
-                                <input type="checkbox" id="adaptiveAutoToggle">
-                                <label for="adaptiveAutoToggle">Automatic Selection (Recommended)</label>
-                            </div>
-                            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 10px 0;">
-                            <div class="checkbox-group">
-                                <input type="checkbox" id="adaptiveMcqToggle">
-                                <label for="adaptiveMcqToggle">Allow Multiple Choice Questions</label>
-                            </div>
-                            <div class="checkbox-group">
-                                <input type="checkbox" id="adaptiveClozeToggle">
-                                <label for="adaptiveClozeToggle">Allow Fill-in-the-blank (Cloze)</label>
-                            </div>
-                        </fieldset>
-                    </div>
-                    <div class="settings-section">
-                        <h4>Tools</h4>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="enablePomodoroToggle">
-                            <label for="enablePomodoroToggle">Enable Pomodoro Timer</label>
+                    <div id="deckSettingsExamContainer" class="hidden"
+                        style="background: var(--input-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label for="deckSettingsExamDate">Exam Date</label>
+                            <input type="date" id="deckSettingsExamDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="deckSettingsRetention">Target Retention: <span id="deckSettingsRetentionValue"
+                                    style="color: var(--primary-color); font-weight: bold;">80%</span></label>
+                            <input type="range" id="deckSettingsRetention" min="70" max="99" value="80"
+                                style="width: 100%; margin-top: 5px;"
+                                oninput="document.getElementById('deckSettingsRetentionValue').textContent = this.value + '%'">
+                            <small style="color: var(--secondary-text);">Higher retention = more frequent
+                                reviews.</small>
                         </div>
                     </div>
+                </div>
+
+                <div class="settings-section">
+                    <h4>Learn Mode Options</h4>
                     <div class="form-group">
-                        <fieldset class="settings-option-group">
-                            <legend>Default Study Method</legend>
-
-                            <div class="radio-option-row"
-                                onclick="document.getElementById('deckSettingsStudyModeFlashcard').checked = true;">
-                                <input type="radio" id="deckSettingsStudyModeFlashcard" name="deckSettingsStudyMode"
-                                    value="flashcard" checked>
-                                <label for="deckSettingsStudyModeFlashcard">Flashcard Mode</label>
-                            </div>
-
-                            <div class="radio-option-row"
-                                onclick="document.getElementById('deckSettingsStudyModeWrite').checked = true;">
-                                <input type="radio" id="deckSettingsStudyModeWrite" name="deckSettingsStudyMode"
-                                    value="write">
-                                <label for="deckSettingsStudyModeWrite">Type Mode</label>
-                            </div>
-
-                        </fieldset>
+                        <label for="deckSettingsCardsPerRound">Cards Per Round</label>
+                        <input type="number" id="deckSettingsCardsPerRound" value="10" min="3" max="50">
                     </div>
                     <div class="checkbox-group">
                         <input type="checkbox" id="retypeIncorrectToggle">
                         <label for="retypeIncorrectToggle">Require retyping incorrect answers</label>
                     </div>
                 </div>
+
+                <div class="settings-section">
+                    <h4>Adaptive Learning</h4>
+                    <fieldset class="settings-option-group">
+                        <legend>Adaptive Question Formats</legend>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="adaptiveAutoToggle">
+                            <label for="adaptiveAutoToggle">Automatic Selection (Recommended)</label>
+                        </div>
+                        <hr style="border: none; border-top: 1px solid var(--border-color); margin: 10px 0;">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="adaptiveMcqToggle">
+                            <label for="adaptiveMcqToggle">Allow Multiple Choice Questions</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="adaptiveClozeToggle">
+                            <label for="adaptiveClozeToggle">Allow Fill-in-the-blank (Cloze)</label>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <div class="settings-section">
+                    <h4>Tools</h4>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enablePomodoroToggle">
+                        <label for="enablePomodoroToggle">Enable Pomodoro Timer</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <fieldset class="settings-option-group">
+                        <legend>Default Study Method</legend>
+                        <div class="radio-option-row"
+                            onclick="document.getElementById('deckSettingsStudyModeFlashcard').checked = true;">
+                            <input type="radio" id="deckSettingsStudyModeFlashcard" name="deckSettingsStudyMode"
+                                value="flashcard" checked>
+                            <label for="deckSettingsStudyModeFlashcard">Flashcard Mode</label>
+                        </div>
+                        <div class="radio-option-row"
+                            onclick="document.getElementById('deckSettingsStudyModeWrite').checked = true;">
+                            <input type="radio" id="deckSettingsStudyModeWrite" name="deckSettingsStudyMode"
+                                value="write">
+                            <label for="deckSettingsStudyModeWrite">Type Mode</label>
+                        </div>
+                    </fieldset>
+                </div>
+
                 <div class="settings-section">
                     <h4>Auto-marking (Type Mode)</h4>
-
-                    <h5>Auto-detection</h5><br>
                     <div class="checkbox-group">
                         <input type="checkbox" id="caseSensitiveToggle">
                         <label for="caseSensitiveToggle">Case-Sensitive Matching</label>
@@ -3937,6 +3982,7 @@ These are the notes of planned features.
                         <label for="punctuationToggle">Consider Punctuation</label>
                     </div>
                 </div>
+
                 <div class="settings-section">
                     <h4>Review Mode</h4>
                     <div class="form-group">
@@ -3955,6 +4001,7 @@ These are the notes of planned features.
             </div>
         </div>
     </div>
+
 
     <div id="instructionsModal" class="modal">
         <div class="modal-content">
@@ -4067,7 +4114,7 @@ These are the notes of planned features.
             correctDragDropOrder: [],
             preGeneratedDistractors: new Map()
         };
-        const DEFAULT_DECK_SETTINGS = { learnMode: 'flashcard', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
+        const DEFAULT_DECK_SETTINGS = { learnMode: 'write', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
         const CURRENT_ANALYSIS_VERSION = 2;
         const smartCoachMessages = {
             greetings: [
@@ -5316,7 +5363,8 @@ These are the notes of planned features.
                         }
                     } catch (error) {
                         console.error('Signup error:', error);
-                        showToast('Signup failed. Please try again.', 'error');
+                        const errorMessage = error.message || JSON.stringify(error);
+                        showToast(`Signup failed: ${errorMessage}`, 'error');
                     }
                 } else {
                     // Web environment
@@ -5363,7 +5411,8 @@ These are the notes of planned features.
                         }
                     } catch (error) {
                         console.error('Login error:', error);
-                        showToast('Login failed. Please try again.', 'error');
+                        const errorMessage = error.message || JSON.stringify(error);
+                        showToast(`Login failed: ${errorMessage}`, 'error');
                     }
                 } else {
                     // Web environment
@@ -5411,7 +5460,8 @@ These are the notes of planned features.
                         }
                     } catch (error) {
                         console.error('Signup error:', error);
-                        showToast('Signup failed. Please try again.', 'error');
+                        const errorMessage = error.message || JSON.stringify(error);
+                        showToast(`Signup failed: ${errorMessage}`, 'error');
                     }
                 } else {
                     // Web environment - use Auth0 web SDK
@@ -5528,11 +5578,28 @@ These are the notes of planned features.
                 }
             });
             document.addEventListener('keydown', function (event) {
-                if (event.key === 'Escape') {
+                const practiceTestView = document.getElementById('practiceTestView');
+                if (practiceTestView.classList.contains('hidden')) {
+                    return;
+                }
 
-                    const visibleModal = document.querySelector('.modal.show');
-                    if (visibleModal) {
-                        visibleModal.classList.remove('show');
+                if (event.key === 'Enter' || event.key === 'ArrowUp') {
+                    const nextBtn = document.getElementById('testNextBtn');
+                    const checkBtn = document.getElementById('testCheckAnswerBtn');
+                    const showAnswerBtn = document.getElementById('testShowAnswerBtn');
+                    if (!nextBtn.classList.contains('hidden')) {
+                        event.preventDefault();
+                        nextBtn.click();
+                    }
+                    else if (!checkBtn.classList.contains('hidden')) {
+                        if (event.target === document.getElementById('testAnswerInput')) {
+                            event.preventDefault();
+                        }
+                        checkBtn.click();
+                    }
+                    else if (!showAnswerBtn.classList.contains('hidden')) {
+                        event.preventDefault();
+                        showAnswerBtn.click();
                     }
                 }
             });
@@ -5715,6 +5782,15 @@ These are the notes of planned features.
             if (!isToastVisible) {
                 processToastQueue();
             }
+        }
+
+        function handleNextCard() {
+            const card = studyState.roundCards[studyState.currentCardIndex];
+            document.getElementById('nextBtn').classList.add('hidden');
+            document.getElementById('feedbackMessage').innerHTML = '';
+
+            const questionTypeForLog = document.getElementById('mcqView').classList.contains('hidden') ? 'Type' : 'MultipleChoice';
+            moveCard(card, false, questionTypeForLog);
         }
 
         function processToastQueue() {
@@ -6033,6 +6109,9 @@ These are the notes of planned features.
         async function loadSavedData() {
             const settings = await getDataFromDB('appData', 'userSettings');
             globalSettings = settings || {};
+            if (globalSettings.showAccents === undefined) {
+                globalSettings.showAccents = true;
+            }
             globalSettings.newCardsPerDay = globalSettings.newCardsPerDay || 20;
 
             if (globalSettings.username) {
@@ -6212,13 +6291,19 @@ These are the notes of planned features.
 
                     let totalCardsInPlan = 0;
                     let totalMasterySum = 0;
+                    const planExamDate = new Date(plan.examDate);
+                    const targetRetention = plan.targetRetention || 0.8;
+
                     plan.deckIds.forEach(deckId => {
                         const deck = decks[deckId];
                         if (deck) {
                             totalCardsInPlan += deck.cards.length;
                             deck.cards.forEach(card => {
                                 const state = knowledgeMap.get(card.id);
-                                totalMasterySum += state ? state.masteryScore : 0.5;
+                                // For exam plans, always use retention
+                                const retention = calculateRetentionAtDate(state, planExamDate);
+                                const score = retention / targetRetention;
+                                totalMasterySum += Math.min(1, score);
                             });
                         }
                     });
@@ -6285,12 +6370,25 @@ These are the notes of planned features.
                     const totalCards = deck.cards.length;
                     let progressPercent = 0;
                     if (totalCards > 0) {
-                        let totalMasteryScore = 0;
+                        const hasExamDate = deck.settings && deck.settings.examDate;
+                        const targetRetention = (deck.settings && deck.settings.targetRetention) || 0.8;
+                        const examDate = hasExamDate ? new Date(deck.settings.examDate) : null;
+
+                        let totalScore = 0;
                         deck.cards.forEach(card => {
-                            const mastery = knowledgeMap.get(card.id)?.masteryScore || 0.5;
-                            totalMasteryScore += mastery;
+                            const state = knowledgeMap.get(card.id);
+                            if (hasExamDate) {
+                                // Use retention for exam mode
+                                const retention = calculateRetentionAtDate(state, examDate);
+                                const score = retention / targetRetention;
+                                totalScore += Math.min(1, score);
+                            } else {
+                                // Use standard mastery score
+                                const mastery = state?.masteryScore || 0.5;
+                                totalScore += mastery;
+                            }
                         });
-                        progressPercent = (totalMasteryScore / totalCards) * 100;
+                        progressPercent = (totalScore / totalCards) * 100;
                     }
 
                     let actionButtonsHTML;
@@ -6521,7 +6619,7 @@ These are the notes of planned features.
 
             const settings = {
                 ...DEFAULT_DECK_SETTINGS,
-                learnMode: 'flashcard',
+                learnMode: 'write',
                 reviewMode: 'flashcard',
                 adaptiveModes: { auto: true, mcq: true, cloze: true }
             };
@@ -7294,13 +7392,25 @@ These are the notes of planned features.
 
             deck.settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
 
+            const editBtn = document.getElementById('editStudyCardBtn');
+            if (globalSettings.enableInStudyEditing) {
+                editBtn.classList.remove('hidden');
+            } else {
+                editBtn.classList.add('hidden');
+            }
+
             const allKnowledge = await getAllDataFromDB('userKnowledgeState');
             studyState.knowledgeStates = new Map(allKnowledge.map(k => [k.cardID, k]));
 
             const allCards = deck.cards;
             let candidates = [];
 
-            if (deck.settings.examDate) {
+            const examDateObj = deck.settings.examDate ? new Date(deck.settings.examDate) : null;
+            if (examDateObj) examDateObj.setHours(23, 59, 59, 999);
+
+            const isExamInFuture = examDateObj && (examDateObj > new Date());
+
+            if (deck.settings.examDate && isExamInFuture) {
                 const examDate = new Date(deck.settings.examDate);
                 const targetRetention = deck.settings.targetRetention || 0.8;
 
@@ -7308,10 +7418,13 @@ These are the notes of planned features.
                     const state = studyState.knowledgeStates.get(c.id);
                     if (!state) return true;
 
+                    if (state.masteryScore < 0.5) return true;
+
                     const retention = calculateRetentionAtDate(state, examDate);
                     c.projectedRetention = retention;
                     return retention < targetRetention;
                 });
+                candidates = shuffleArray(candidates);
 
                 candidates.sort((a, b) => {
                     const rA = a.projectedRetention !== undefined ? a.projectedRetention : 0;
@@ -7324,6 +7437,12 @@ These are the notes of planned features.
                     const mastery = studyState.knowledgeStates.get(c.id)?.masteryScore ?? 0.5;
                     return mastery < 0.90;
                 });
+                if (candidates.length === 0 && allCards.length > 0) {
+                    showToast("Deck Mastered! Entering over-learning mode.", "success");
+                    candidates = [...allCards];
+                }
+
+                candidates = shuffleArray(candidates);
 
                 candidates.sort((a, b) => {
                     const mA = studyState.knowledgeStates.get(a.id)?.masteryScore ?? 0.5;
@@ -7333,7 +7452,10 @@ These are the notes of planned features.
             }
 
             let sessionSize = 20;
-            if (deck.settings.examDate) {
+            if (deck.settings.learnModeMaxCards) {
+                sessionSize = parseInt(deck.settings.learnModeMaxCards);
+            }
+            if (deck.settings.examDate && isExamInFuture) {
                 if (deck.settings.learnModeMaxCards) {
                     sessionSize = Math.min(candidates.length, deck.settings.learnModeMaxCards);
                 } else {
@@ -7343,11 +7465,10 @@ These are the notes of planned features.
             }
 
             studyState.roundCards = candidates.slice(0, sessionSize);
-
             studyState.sessionCardIds = studyState.roundCards.map(c => c.id);
 
             if (studyState.roundCards.length === 0) {
-                showToast("You've mastered this entire deck!", "success");
+                showToast("No cards available to study.", "info");
                 return;
             }
 
@@ -7405,21 +7526,47 @@ These are the notes of planned features.
 
             const allStates = await getAllDataFromDB('userKnowledgeState');
             const stateMap = new Map(allStates.map(s => [s.cardID, s]));
+            const deck = decks[currentDeckId];
+            const hasExamDate = deck.settings && deck.settings.examDate;
+            const targetRetention = (deck.settings && deck.settings.targetRetention) || 0.8;
+            const examDate = hasExamDate ? new Date(deck.settings.examDate) : null;
 
-            let totalMastery = 0;
+            let totalScore = 0;
 
             studyState.sessionCardIds.forEach(id => {
                 const state = stateMap.get(id);
-                const score = state ? state.masteryScore : 0.5;
-                totalMastery += score;
+                if (hasExamDate) {
+                    // If exam date is set, "mastery" for this session means meeting the retention target
+                    const retention = calculateRetentionAtDate(state, examDate);
+                    // We want the progress bar to fill up as cards meet the target
+                    // If retention >= target, score is 1.0. 
+                    // If retention < target, we can scale it, but simpler is just binary for "done" vs "not done" in this context?
+                    // Actually, let's use the projected retention itself, scaled to the target.
+                    // If retention is 0.8 (target), score should be 1.0 (mastered).
+                    // If retention is 0.4, score is 0.5.
+                    let score = retention / targetRetention;
+                    if (score > 1) score = 1;
+                    totalScore += score;
+                } else {
+                    // Standard mastery score
+                    const score = state ? state.masteryScore : 0.5;
+                    totalScore += score;
+                }
             });
 
-            const avgMastery = totalMastery / studyState.sessionCardIds.length;
+            const avgScore = totalScore / studyState.sessionCardIds.length;
 
-            const floor = 0.5;
-            const ceiling = 0.9;
+            let visualPercent;
+            if (hasExamDate) {
+                // For exam mode, avgScore is already 0-1 relative to target
+                visualPercent = avgScore * 100;
+            } else {
+                // For standard mode, scale 0.5-0.9 to 0-100%
+                const floor = 0.5;
+                const ceiling = 0.9;
+                visualPercent = ((avgScore - floor) / (ceiling - floor)) * 100;
+            }
 
-            let visualPercent = ((avgMastery - floor) / (ceiling - floor)) * 100;
             visualPercent = Math.max(0, Math.min(100, visualPercent));
 
             const bar = document.getElementById('sessionProgressBar');
@@ -7428,8 +7575,8 @@ These are the notes of planned features.
             if (bar) bar.style.width = `${visualPercent}%`;
 
             if (text) {
-                const current = (avgMastery * 100).toFixed(0);
-                text.innerHTML = `Progress: <span style="color: var(--primary-color);">${Math.min(100, Math.round(current / 9 * 10))}%</span>`;
+                const current = Math.round(visualPercent);
+                text.innerHTML = `Progress: <span style="color: var(--primary-color);">${current}%</span>`;
             }
         }
 
@@ -7472,11 +7619,18 @@ These are the notes of planned features.
         }
 
         async function startReviewMode(deckId) {
-
             currentMode = 'review';
             currentDeckId = deckId;
             const deck = decks[deckId];
+
             deck.settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
+
+            const editBtn = document.getElementById('editStudyCardBtn');
+            if (globalSettings.enableInStudyEditing) {
+                editBtn.classList.remove('hidden');
+            } else {
+                editBtn.classList.add('hidden');
+            }
 
             studyState.settings = deck.settings;
             studyState.currentCardIndex = 0;
@@ -7489,12 +7643,17 @@ These are the notes of planned features.
                 return;
             }
 
+            studyState.stillLearning = [...allCards];
+            studyState.correct = [];
+            studyState.lastRoundIncorrect = [];
+
             if (studyState.settings.reviewOrder === 'alphabetical') {
-                allCards.sort((a, b) => a.question.localeCompare(b.question));
+                studyState.stillLearning.sort((a, b) => a.question.localeCompare(b.question));
             } else {
-                allCards = shuffleArray(allCards);
+                studyState.stillLearning = shuffleArray(studyState.stillLearning);
             }
-            studyState.roundCards = allCards;
+
+            studyState.roundCards = [...studyState.stillLearning];
 
             showView('studyMode');
             document.getElementById('studyTitle').textContent = 'Review Mode';
@@ -7503,6 +7662,7 @@ These are the notes of planned features.
             transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
             showNextCard();
         }
+
 
         async function saveStudyProgress() {
             if (!currentDeckId) return;
@@ -7823,6 +7983,10 @@ These are the notes of planned features.
         }
 
         async function showNextCard() {
+            if (currentMode === 'learn' && (!studyState.roundCards || studyState.roundCards.length === 0)) {
+                showComplete();
+                return;
+            }
             const cardStatsInfo = document.getElementById('cardStatsInfo');
             if (cardStatsInfo) cardStatsInfo.innerHTML = '';
             document.getElementById('flashcardViewContainer').classList.add('hidden');
@@ -8219,52 +8383,6 @@ These are the notes of planned features.
             if (currentMode === 'sequence') {
                 return;
             }
-            async function logout() {
-                try {
-                    // Get Auth0 configuration
-                    const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-sxs00xsv43d5qfx7.us.auth0.com';
-                    const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-                    // Load Auth0 SDK if needed
-                    if (!window.auth0) {
-                        const script = document.createElement('script');
-                        script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
-                        document.head.appendChild(script);
-                        await new Promise(resolve => script.onload = resolve);
-                    }
-
-                    // Create Auth0 client
-                    const auth0Client = await auth0.createAuth0Client({
-                        domain: auth0Domain,
-                        clientId: auth0ClientId,
-                        authorizationParams: {
-                            redirect_uri: window.location.origin
-                        }
-                    });
-
-                    // Clear local storage first
-                    localStorage.removeItem('auth0Session');
-
-                    // Update UI
-                    document.getElementById('userProfileMenu').classList.add('hidden');
-                    document.getElementById('guestSignupBtn').classList.remove('hidden');
-                    document.getElementById('loggedInView').classList.add('hidden');
-                    document.getElementById('loggedOutView').classList.remove('hidden');
-                    document.getElementById('appHeader').classList.add('hidden');
-
-                    // Call Auth0 logout
-                    await auth0Client.logout({
-                        logoutParams: {
-                            returnTo: window.location.origin
-                        }
-                    });
-                } catch (error) {
-                    console.error('Logout error:', error);
-                    // Fallback: just clear session and reload
-                    localStorage.removeItem('auth0Session');
-                    location.reload();
-                }
-            }
 
             document.getElementById('showAnswerBtn').classList.add('hidden');
             document.getElementById('checkAnswerBtn').classList.add('hidden');
@@ -8273,6 +8391,54 @@ These are the notes of planned features.
             document.getElementById('incorrectBtn').classList.remove('hidden');
             document.getElementById('showQuestionBtn').classList.remove('hidden');
         }
+        async function logout() {
+            try {
+                // Get Auth0 configuration
+                const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-sxs00xsv43d5qfx7.us.auth0.com';
+                const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+                // Load Auth0 SDK if needed
+                if (!window.auth0) {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
+                    document.head.appendChild(script);
+                    await new Promise(resolve => script.onload = resolve);
+                }
+
+                // Create Auth0 client
+                const auth0Client = await auth0.createAuth0Client({
+                    domain: auth0Domain,
+                    clientId: auth0ClientId,
+                    authorizationParams: {
+                        redirect_uri: window.location.origin
+                    }
+                });
+
+                // Clear local storage first
+                localStorage.removeItem('auth0Session');
+
+                // Update UI
+                document.getElementById('userProfileMenu').classList.add('hidden');
+                document.getElementById('guestSignupBtn').classList.remove('hidden');
+                document.getElementById('loggedInView').classList.add('hidden');
+                document.getElementById('loggedOutView').classList.remove('hidden');
+                document.getElementById('appHeader').classList.add('hidden');
+
+                // Call Auth0 logout
+                await auth0Client.logout({
+                    logoutParams: {
+                        returnTo: window.location.origin
+                    }
+                });
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Fallback: just clear session and reload
+                localStorage.removeItem('auth0Session');
+                location.reload();
+            }
+        }
+
+
 
         function showQuestion() {
             document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
@@ -8330,7 +8496,10 @@ These are the notes of planned features.
                 return;
             }
 
-            const checkResult = checkAnswerForgivingly(userAnswer, correctAnswer, studyState.settings);
+            // Ensure settings has defaults merged in
+            const deck = decks[currentDeckId];
+            const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck?.settings || {}), ...(studyState.settings || {}) };
+            const checkResult = checkAnswerForgivingly(userAnswer, correctAnswer, settings);
 
             userInput.disabled = true;
             document.querySelector('#cardView .flashcard').classList.add('is-flipped');
@@ -8368,7 +8537,7 @@ These are the notes of planned features.
                     feedbackMessage.innerHTML = `<strong>Your answer:</strong> ${diffHtml}`;
                     feedbackMessage.style.color = 'var(--text-color)';
 
-                    if (studyState.settings.retypeIncorrect) {
+                    if (settings.retypeIncorrect) {
                         studyState.isRetypingIncorrect = true;
                         userInput.disabled = false;
                         setTimeout(() => {
@@ -8379,16 +8548,17 @@ These are the notes of planned features.
                         showToast("Not quite. Type the correct answer to continue.", "error", 3000);
                     } else {
                         showToast("Not quite.", "error");
-                        setTimeout(() => {
+                        document.getElementById('nextBtn').classList.remove('hidden');
+                        document.getElementById('nextBtn').onclick = function () {
+                            this.classList.add('hidden');
                             feedbackMessage.innerHTML = '';
                             moveCard(card, false, questionTypeForLog);
-                        }, 2500);
+                        };
+                        document.getElementById('nextBtn').focus();
                     }
                     break;
             }
-        }
-
-        async function updateUserBaseline() {
+        } async function updateUserBaseline() {
             const allLogs = await getAllDataFromDB('interactionLogs');
             const relevantLogs = allLogs.filter(log => log.wasCorrect && log.latency !== null && log.fluency > 0);
 
@@ -8433,11 +8603,16 @@ These are the notes of planned features.
                 attemptCount: lastLog.attemptCount || 1
             }, userBaseline);
 
-            await updateKnowledgeState(card, correct, iqs, questionType);
-
             const sm2 = new SM2Algorithm();
             const quality = correct ? 4 : 1;
-            if (cardInDeck) cardInDeck.sm2Data = sm2.calculateNextReview(cardInDeck)(quality);
+
+            const newSm2Data = sm2.calculateNextReview(cardInDeck || card)(quality);
+
+            if (cardInDeck) cardInDeck.sm2Data = newSm2Data;
+
+            const newStability = newSm2Data.interval;
+
+            await updateKnowledgeState(card, correct, iqs, questionType, newStability);
 
             if (currentMode === 'sequence') {
                 const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
@@ -8487,7 +8662,7 @@ These are the notes of planned features.
 
                 const streak = updatedState ? (updatedState.consecutiveCorrect || 0) : 0;
                 const score = updatedState ? updatedState.masteryScore : 0;
-                const isMastered = score >= 0.90 && streak >= 3;
+                const isMastered = score >= 0.95 || (score >= 0.90 && streak >= 3);
 
                 if (isMastered) {
                     studyState.roundCards.splice(studyState.currentCardIndex, 1);
@@ -8575,25 +8750,42 @@ These are the notes of planned features.
                 userAnswer: "[Don't Know]"
             });
 
-            showAnswer();
+            const deck = decks[currentDeckId];
+            const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck?.settings || {}), ...(studyState.settings || {}) };
 
-            if ((currentMode === 'learn' || currentMode === 'review') && studyState.settings.retypeIncorrect) {
+            document.querySelector('#cardView .flashcard').classList.add('is-flipped');
+            document.getElementById('cardAnswerContent').classList.remove('hidden');
+
+            const writeInput = document.getElementById('writeAnswerInput');
+            const feedbackMessage = document.getElementById('feedbackMessage');
+
+            document.getElementById('checkAnswerBtn').classList.add('hidden');
+            document.getElementById('dontKnowBtn').classList.add('hidden');
+            document.getElementById('correctBtn').classList.add('hidden');
+            document.getElementById('incorrectBtn').classList.add('hidden');
+            if (settings.retypeIncorrect) {
                 studyState.isRetypingIncorrect = true;
-                const writeInput = document.getElementById('writeAnswerInput');
+
+                feedbackMessage.innerHTML = `<strong>The correct answer is:</strong> <span style="color:var(--primary-color)">${card.answer}</span>`;
+
                 writeInput.value = '';
                 writeInput.disabled = false;
                 writeInput.focus();
 
-                document.getElementById('correctBtn').classList.add('hidden');
-                document.getElementById('incorrectBtn').classList.add('hidden');
-                document.getElementById('dontKnowBtn').classList.add('hidden');
                 document.getElementById('checkAnswerBtn').classList.remove('hidden');
 
-                showToast("Type the correct answer to continue.", "error");
+                showToast("Please type the correct answer to continue.", "info");
             } else {
-                markIncorrect(true);
+                writeInput.value = '';
+                writeInput.disabled = true;
+
+                const nextBtn = document.getElementById('nextBtn');
+                nextBtn.classList.remove('hidden');
+                nextBtn.focus();
             }
         }
+
+
 
 
         async function markSpaced(quality) {
@@ -8659,43 +8851,91 @@ These are the notes of planned features.
         function populateAccentButtons() {
             const accents = ['à', 'â', 'é', 'è', 'ê', 'ë', 'î', 'ï', 'ô', 'ù', 'û', 'ü', 'ç', 'ñ', 'ß', 'ä', 'ö'];
             const container = document.getElementById('accentButtonsContainer');
-            container.innerHTML = accents.map(char => `<button onclick="insertAccent('${char}', 'writeAnswerInput')">${char}</button>`).join('');
+            if (!container) return;
+
+            container.innerHTML = accents.map(char =>
+                `<button type="button" class="accent-btn" onmousedown="event.preventDefault(); insertAccent('${char}', 'writeAnswerInput')">${char}</button>`
+            ).join('');
         }
+
 
         function insertAccent(char, targetId) {
             const textarea = document.getElementById(targetId);
-            if (!textarea) return;
+            if (!textarea) {
+                console.error(`[Accents] Target textarea #${targetId} not found`);
+                return;
+            }
+
+            // Check if hidden
+            if (textarea.classList.contains('hidden') || textarea.style.display === 'none') {
+                console.warn(`[Accents] Target textarea #${targetId} is hidden. Cannot insert.`);
+                return;
+            }
+
+            console.log(`[Accents] Inserting ${char} into ${targetId}`);
+
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
+
             textarea.value = textarea.value.substring(0, start) + char + textarea.value.substring(end);
+
+            // Move cursor after the inserted character
             textarea.selectionStart = textarea.selectionEnd = start + 1;
             textarea.focus();
         }
 
+
         async function toggleAccentButtons() {
+            console.log('[Accents] Toggle button clicked. Current state:', globalSettings.showAccents);
+
             globalSettings.showAccents = !globalSettings.showAccents;
+
             await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
+
+            console.log('[Accents] New state saved:', globalSettings.showAccents);
             updateAccentButtonsVisibility();
         }
 
+
         function updateAccentButtonsVisibility() {
             const container = document.getElementById('accentButtonsContainer');
+            if (!container) {
+                console.error('[Accents] Container #accentButtonsContainer not found in DOM');
+                return;
+            }
 
             if (globalSettings.showAccents) {
+                console.log('[Accents] Showing buttons...');
                 if (container.innerHTML.trim() === '') {
                     populateAccentButtons();
                 }
                 container.classList.remove('hidden');
+
+                container.style.display = 'flex';
             } else {
+                console.log('[Accents] Hiding buttons...');
                 container.classList.add('hidden');
+                container.style.display = 'none';
             }
         }
 
 
-        function populateTestAccentButtons() {
+
+        function populateAccentButtons() {
             const accents = ['à', 'â', 'é', 'è', 'ê', 'ë', 'î', 'ï', 'ô', 'ù', 'û', 'ü', 'ç', 'ñ', 'ß', 'ä', 'ö'];
-            const container = document.getElementById('testAccentButtonsContainer');
-            container.innerHTML = accents.map(char => `<button onclick="insertAccent('${char}', 'testAnswerInput')">${char}</button>`).join('');
+            const container = document.getElementById('accentButtonsContainer');
+            if (!container) return;
+
+            console.log('[Accents] Populating button HTML');
+
+            container.innerHTML = accents.map(char =>
+                `<button type="button" 
+                        class="accent-btn" 
+                        style="background: var(--button-secondary-bg); border: 1px solid var(--border-color); color: var(--button-secondary-text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 1.1rem; min-width: 32px;"
+                        onmousedown="event.preventDefault(); insertAccent('${char}', 'writeAnswerInput')">
+                    ${char}
+                </button>`
+            ).join('');
         }
 
         async function toggleTestAccentButtons() {
@@ -8950,11 +9190,16 @@ These are the notes of planned features.
                 ? `${minutes}m ${seconds}s`
                 : `${seconds}s`;
 
-            const totalCards = studyState.originalSessionSize || decks[currentDeckId].cards.length;
+            const deck = decks[currentDeckId];
+            const totalCards = deck ? deck.cards.length : 0;
 
-            const currentSubView = document.querySelector('#studyMode .sub-view:not(.hidden)');
+            document.getElementById('progressView').classList.add('hidden');
+            document.getElementById('cardView').classList.add('hidden');
+            document.getElementById('preGenerationView').classList.add('hidden');
+
             const completeView = document.getElementById('completeView');
-            transitionSubView(currentSubView, completeView);
+            completeView.classList.remove('hidden');
+            completeView.classList.add('sub-view-fade-in');
 
             document.getElementById('finalStats').innerHTML = `
                 <div class="stat">
@@ -8963,10 +9208,13 @@ These are the notes of planned features.
                 </div>
                 <div class="stat">
                     <div class="stat-value">${totalCards}</div>
-                    <div class="stat-label">Cards Mastered</div>
+                    <div class="stat-label">Total Cards</div>
                 </div>
             `;
+
+            document.querySelector('#completeView button.btn-secondary').onclick = endSession;
         }
+
 
         async function endSession() {
             if (currentDeckId && studyState.startTime) {
@@ -9172,7 +9420,26 @@ These are the notes of planned features.
 
             const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
 
+            const hasExamDate = !!settings.examDate;
+            document.getElementById('deckSettingsExamModeToggle').checked = hasExamDate;
+
+            if (settings.examDate) {
+                document.getElementById('deckSettingsExamDate').value = settings.examDate;
+            } else {
+                const defaultDate = new Date();
+                defaultDate.setDate(defaultDate.getDate() + 7);
+                document.getElementById('deckSettingsExamDate').valueAsDate = defaultDate;
+            }
+
+            const retention = settings.targetRetention || 0.8;
+            const retentionPercent = Math.round(retention * 100);
+            document.getElementById('deckSettingsRetention').value = retentionPercent;
+            document.getElementById('deckSettingsRetentionValue').textContent = retentionPercent + '%';
+
+            toggleExamSettingsVisibility();
+
             document.getElementById('deckSettingsCardsPerRound').value = settings.cardsPerRound || 10;
+
             document.getElementById('adaptiveAutoToggle').checked = settings.adaptiveModes?.auto ?? true;
             document.getElementById('adaptiveMcqToggle').checked = settings.adaptiveModes?.mcq ?? true;
             document.getElementById('adaptiveClozeToggle').checked = settings.adaptiveModes?.cloze ?? true;
@@ -9190,8 +9457,13 @@ These are the notes of planned features.
             document.getElementById('enablePomodoroToggle').checked = settings.enablePomodoro || false;
 
             document.getElementById('deckSettingsModal').classList.add('show');
+
             setupRadioCardSelection('deckSettingsStudyMode');
+            const autoToggle = document.getElementById('adaptiveAutoToggle');
+            if (autoToggle) autoToggle.dispatchEvent(new Event('change'));
         }
+
+
 
         function closeDeckSettingsModal() { document.getElementById('deckSettingsModal').classList.remove('show'); }
 
@@ -9202,17 +9474,38 @@ These are the notes of planned features.
         }
 
         async function completeSaveDeckSettings(deck) {
+            const isExamEnabled = document.getElementById('deckSettingsExamModeToggle').checked;
+
+            if (isExamEnabled) {
+                const examDateInput = document.getElementById('deckSettingsExamDate').value;
+                // For now, if empty, we save it as null effectively disabling it logic-wise, or save what's there.
+                deck.settings.examDate = examDateInput || null;
+            } else {
+                deck.settings.examDate = null;
+            }
+
+            const retentionInput = document.getElementById('deckSettingsRetention').value;
+            deck.settings.targetRetention = parseInt(retentionInput) / 100;
+
+            deck.settings.cardsPerRound = parseInt(document.getElementById('deckSettingsCardsPerRound').value);
+            deck.settings.retypeIncorrect = document.getElementById('retypeIncorrectToggle').checked;
+
             deck.settings.caseSensitive = document.getElementById('caseSensitiveToggle').checked;
             deck.settings.punctuation = document.getElementById('punctuationToggle').checked;
-            deck.settings.retypeIncorrect = document.getElementById('retypeIncorrectToggle').checked;
+
             deck.settings.reviewOrder = document.getElementById('reviewOrder').value;
-            deck.settings.learnMode = document.querySelector('input[name="deckSettingsStudyMode"]:checked').value;
+
+            const selectedMode = document.querySelector('input[name="deckSettingsStudyMode"]:checked');
+            if (selectedMode) {
+                deck.settings.learnMode = selectedMode.value;
+            }
+
             deck.settings.adaptiveModes = {
                 auto: document.getElementById('adaptiveAutoToggle').checked,
                 mcq: document.getElementById('adaptiveMcqToggle').checked,
                 cloze: document.getElementById('adaptiveClozeToggle').checked
             };
-            deck.settings.cardsPerRound = document.getElementById('deckSettingsCardsPerRound').value;
+
             deck.settings.enablePomodoro = document.getElementById('enablePomodoroToggle').checked;
 
             await saveDataToDB('decks', deck);
@@ -9220,6 +9513,8 @@ These are the notes of planned features.
             closeDeckSettingsModal();
             showToast('Settings saved!');
         }
+
+
 
         function showImportModal() {
             const dropdown = document.getElementById('importDeckCategory');
@@ -10030,7 +10325,7 @@ These are the notes of planned features.
             };
         }
 
-        async function updateKnowledgeState(card, wasCorrect, iqs = 0.5, questionType = 'Flashcard') {
+        async function updateKnowledgeState(card, wasCorrect, iqs = 0.5, questionType = 'Flashcard', newStability = null) {
             if (!db) return;
 
             return new Promise((resolve, reject) => {
@@ -10045,45 +10340,38 @@ These are the notes of planned features.
                 request.onsuccess = () => {
                     let state = request.result || {
                         userID: 'default_user', cardID: card.id,
-                        masteryScore: 0.5, // 0.0 to 1.0
-                        consecutiveCorrect: 0, // NEW: Track streak for short-term pushing
+                        masteryScore: 0.5,
+                        consecutiveCorrect: 0,
+                        stability: 1.0, // Default
                         lastReviewed: new Date().toISOString(),
                         recallHistory: []
                     };
 
-                    // --- THE CRAMMING ALGORITHM ---
-
-                    // 1. Determine "Hidden Grade" based on IQS (Performance)
-                    // IQS is 0.0 (terrible) to 1.0 (perfect)
-                    // If correct but low IQS (slow), mastery grows slower.
-
-                    const learningRate = 0.2; // How fast mastery climbs
-                    const penaltyRate = 0.3;  // How fast mastery drops on error
+                    const learningRate = 0.2;
+                    const penaltyRate = 0.3;
 
                     if (wasCorrect) {
-                        // Bonus for high IQS (Fast/Fluent answers)
                         const performanceBonus = (iqs > 0.8) ? 1.5 : (iqs < 0.4 ? 0.5 : 1.0);
-
-                        // Standard Mastery Growth
                         state.masteryScore += (1 - state.masteryScore) * learningRate * performanceBonus;
                         state.consecutiveCorrect = (state.consecutiveCorrect || 0) + 1;
 
-                        // CRAMMING LOGIC:
-                        // If simple mastery > 0.9, we trust it.
-                        // BUT, if they haven't hit a streak of 3, cap mastery at 0.85
-                        // This forces at least 3 successful recalls regardless of how "easy" it feels.
                         if (state.consecutiveCorrect < 3 && state.masteryScore > 0.85) {
                             state.masteryScore = 0.85;
                         }
-
                     } else {
-                        // Incorrect
                         state.masteryScore -= state.masteryScore * penaltyRate;
                         state.consecutiveCorrect = 0;
                     }
 
-                    // Clamp scores
                     state.masteryScore = Math.max(0.01, Math.min(0.99, state.masteryScore));
+
+                    if (newStability !== null) {
+                        state.stability = newStability;
+                    } else if (wasCorrect && state.stability < 100) {
+                        state.stability *= 1.1;
+                    } else if (!wasCorrect) {
+                        state.stability = 1.0; // Reset on failure
+                    }
 
                     state.lastReviewed = new Date().toISOString();
                     state.lastModified = new Date().toISOString();
@@ -11932,6 +12220,10 @@ These are the notes of planned features.
                     updatedKnowledgeStates: syncResult.updatedKnowledgeStates?.length || 0
                 });
 
+                // Log decks before sync for debugging
+                console.log('Before sync - Local decks:', Object.keys(decks));
+                console.log('Server returned deck IDs:', syncResult.updatedDecks?.map(d => d.id) || []);
+
                 // Improved conflict resolution: merge decks intelligently
                 const deckTransaction = db.transaction(['decks'], 'readwrite');
                 const deckStore = deckTransaction.objectStore('decks');
@@ -11964,8 +12256,18 @@ These are the notes of planned features.
 
                     // Update with server version
                     deckStore.put(serverDeck);
-                    decks[serverDeck.id] = serverDeck;
                 }
+
+                // CRITICAL FIX: Reload all decks from IndexedDB after sync
+                // This ensures local-only decks (not returned by server) are preserved
+                await new Promise(resolve => deckTransaction.oncomplete = resolve);
+                const allDecksAfterSync = await getAllDataFromDB('decks');
+                decks = {};
+                allDecksAfterSync.forEach(deck => {
+                    decks[deck.id] = deck;
+                });
+
+                console.log('After reload - All decks:', Object.keys(decks));
 
                 if (conflictsResolved > 0) {
                     showToast(`Sync complete. ${conflictsResolved} local change(s) preserved.`, 'info');
@@ -12086,7 +12388,7 @@ These are the notes of planned features.
 
         function generateDiffHTML(s1, s2) {
             const escape = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `< span style = "background-color: #ffcdd2; text-decoration: line-through;" > ${escape(s1)}</span > <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
+            return `<span style="background-color: #ffcdd2; text-decoration: line-through;">${escape(s1)}</span> <span style="background-color: #c8e6c9;">${escape(s2)}</span>`;
         }
 
 
@@ -12138,6 +12440,17 @@ These are the notes of planned features.
                 if (sortableInstance) sortableInstance.destroy();
             }
             editorRenumberCards();
+        }
+
+        function toggleExamSettingsVisibility() {
+            const isEnabled = document.getElementById('deckSettingsExamModeToggle').checked;
+            const container = document.getElementById('deckSettingsExamContainer');
+
+            if (isEnabled) {
+                container.classList.remove('hidden');
+            } else {
+                container.classList.add('hidden');
+            }
         }
 
         async function generateFullDataExport() {
