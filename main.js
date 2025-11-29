@@ -1,6 +1,16 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { updateElectronApp } = require('update-electron-app');
-updateElectronApp();
+
+// Initialize auto-updater with logging
+updateElectronApp({
+  repo: 'TJ7755/Lagiote-revise',
+  updateInterval: '1 hour',
+  logger: {
+    log: (...args) => console.log('[Auto-Update]', ...args),
+    error: (...args) => console.error('[Auto-Update Error]', ...args)
+  }
+});
+
 const path = require('path');
 const fs = require('fs');
 
