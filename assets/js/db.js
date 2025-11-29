@@ -7,6 +7,7 @@ export function getDB() {
 export function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open('LagioteDB', 7);
+
         request.onerror = event => reject("Error opening DB: " + (event.target.error ? event.target.error.message : event.target.errorCode));
 
         request.onsuccess = event => {
