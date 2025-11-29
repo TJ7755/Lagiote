@@ -1,6 +1,134 @@
 import { state, DEFAULT_DECK_SETTINGS, resetStudyState, resetPracticeTestState, setCurrentDeck, setCurrentMode, updateGlobalSettings, getDeck, getAllDecks, updateDeck, deleteDeck, updateAnalytics } from './state.js';
 import { showToast, showView, transitionView, transitionSubView } from './ui.js';
-import { initDB, saveDataToDB, getDataFromDB, getAllDataFromDB, deleteDataFromDB, clearStoreInDB } from './db.js';(function () {
+import { initDB, saveDataToDB, getDataFromDB, getAllDataFromDB, deleteDataFromDB, clearStoreInDB } from './db.js';
+
+// ============================================
+// FSRS Algorithm Integration
+// ============================================
+
+const fsrs = window.electronAPI.fsrsAPI.fsrs;
+const Rating = window.electronAPI.fsrsAPI.Rating;
+const State = window.electronAPI.fsrsAPI.State;
+const f = fsrs(); // Use default parameters
+let userBaseline = { latency: 2000, corrections: 1 }; // Default baseline
+
+async function calculateUserBaseline() {
+    try {
+        const logs = await getAllDataFromDB('interactionLogs');
+        if (logs.length < 10) {
+            return; // Not enough data, use default baseline
+        }
+        const correctLogs = logs.filter(log => log.wasCorrect);
+        if (correctLogs.length < 5) {
+            return;
+        }
+
+        const totalLatency = correctLogs.reduce((sum, log) => sum + (log.latency || 0), 0);
+        const totalCorrections = correctLogs.reduce((sum, log) => sum + (log.corrections || 0), 0);
+
+        const avgLatency = totalLatency / correctLogs.length;
+        const avgCorrections = totalCorrections / correctLogs.length;
+
+        userBaseline = {
+            latency: avgLatency,
+            corrections: avgCorrections,
+        };
+        console.log('Calculated user baseline:', userBaseline);
+    } catch (error) {
+        console.error('Failed to calculate user baseline:', error);
+    }
+}
+
+function getImplicitFSRSGrade(interactionData) {
+    if (!interactionData.wasCorrect) {
+        return Rating.Again; // Grade 1
+    }
+
+    // Grade 4 (Easy): Correct, 1st attempt, latency < 50% of baseline, 0 corrections
+    if (interactionData.attemptCount === 1 && interactionData.recallLatency < userBaseline.latency * 0.5 && interactionData.totalCorrections === 0) {
+        return Rating.Easy; // Grade 4
+    }
+
+    // Grade 2 (Hard): Correct, but latency > 150% of baseline OR corrections are high
+    if (interactionData.recallLatency > userBaseline.latency * 1.5 || interactionData.totalCorrections > userBaseline.corrections + 2) {
+        return Rating.Hard; // Grade 2
+    }
+
+    // Grade 3 (Good): The default for a correct answer that isn't exceptionally fast or slow.
+    return Rating.Good; // Grade 3
+}
+
+async function updateCardKnowledgeWithFSRS(card, interactionData) {
+    const grade = getImplicitFSRSGrade(interactionData);
+    const now = new Date();
+    
+    // Get current FSRS state or initialize a new one (lazy migration)
+    let cardState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
+
+    let fsrsCard;
+    if (cardState && cardState.fsrs) {
+        // Card already has FSRS data
+        fsrsCard = {
+            ...card,
+            due: new Date(cardState.fsrs.due),
+            stability: cardState.fsrs.stability,
+            difficulty: cardState.fsrs.difficulty,
+            elapsed_days: cardState.fsrs.elapsed_days,
+            scheduled_days: cardState.fsrs.scheduled_days,
+            reps: cardState.fsrs.reps,
+            lapses: cardState.fsrs.lapses,
+            state: cardState.fsrs.state,
+            last_review: new Date(cardState.fsrs.last_review)
+        };
+    } else {
+        // New card or card with old SM-2 data, initialize it
+        fsrsCard = {
+            ...card,
+            due: now,
+            stability: 0,
+            difficulty: 0,
+            elapsed_days: 0,
+            scheduled_days: 0,
+            reps: 0,
+            lapses: 0,
+            state: State.New,
+            last_review: now
+        };
+    }
+    
+    const scheduling_cards = f.repeat(fsrsCard, now);
+    const newFSRSState = scheduling_cards[grade];
+
+    // Create or update the knowledge state entry
+    const newKnowledgeState = {
+        userID: 'default_user',
+        cardID: card.id,
+        masteryScore: newFSRSState.stability, // Use stability as a proxy for mastery
+        stability: newFSRSState.stability,
+        difficulty: newFSRSState.difficulty,
+        lastReviewed: now.toISOString(),
+        fsrs: {
+            due: newFSRSState.due.toISOString(),
+            stability: newFSRSState.stability,
+            difficulty: newFSRSState.difficulty,
+            elapsed_days: newFSRSState.elapsed_days,
+            scheduled_days: newFSRSState.scheduled_days,
+            reps: newFSRSState.reps,
+            lapses: newFSRSState.lapses,
+            state: newFSRSState.state,
+            last_review: newFSRSState.last_review.toISOString()
+        },
+        recallHistory: cardState?.recallHistory ? [...cardState.recallHistory, { date: now.toISOString(), grade }] : [{ date: now.toISOString(), grade }]
+    };
+
+    await saveDataToDB('userKnowledgeState', newKnowledgeState);
+    
+    // Also update the in-memory state for the current session
+    state.studyState.knowledgeStates.set(card.id, newKnowledgeState);
+}
+
+
+(function () {
     const applyTheme = (isDark) => {
         const target = document.documentElement;
         if (isDark) {
@@ -401,52 +529,7 @@ function loadCDNScript(src, onload) {
         // Initialize analytics manager globally
         let analyticsManager = null;
 
-        class SM2Algorithm {
-            constructor() {
-                this.defaultInterval = 1;
-                this.defaultFactor = 2.5;
-            }
-
-            calculateNextReview(card) {
-                const now = new Date();
-
-                if (!card.sm2Data) {
-                    card.sm2Data = {
-                        interval: 0,
-                        factor: this.defaultFactor,
-                        repetition: 0,
-                        dueDate: now.toISOString()
-                    };
-                }
-
-                const data = card.sm2Data;
-
-                return function (quality) {
-                    if (quality >= 3) {
-                        if (data.repetition === 0) {
-                            data.interval = 1;
-                        } else if (data.repetition === 1) {
-                            data.interval = 6;
-                        } else {
-                            data.interval = Math.round(data.interval * data.factor);
-                        }
-                        data.repetition++;
-                    } else {
-                        data.repetition = 0;
-                        data.interval = 1;
-                    }
-
-                    data.factor = data.factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-                    if (data.factor < 1.3) data.factor = 1.3;
-
-                    const dueDate = new Date();
-                    dueDate.setDate(dueDate.getDate() + data.interval);
-                    data.dueDate = dueDate.toISOString();
-
-                    return data;
-                };
-            }
-        }
+                // The SM2Algorithm class has been removed to be replaced by FSRS.
 
         let practiceTestState = {
             deckId: null,
@@ -1341,7 +1424,12 @@ function loadCDNScript(src, onload) {
 
             setupSearch();
             setupKeyboardControls();
-            
+
+            function safeAddListener(id, event, handler) {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener(event, handler);
+            }
+
             // Deck detail buttons
             const deleteBtn = document.getElementById('deckDetailDeleteBtn');
             console.log('[DEBUG] deckDetailDeleteBtn element found:', !!deleteBtn);
@@ -1352,24 +1440,25 @@ function loadCDNScript(src, onload) {
                 });
                 console.log('[DEBUG] Delete button listener attached');
             }
-            
-            document.getElementById('deckDetailTestBtn').addEventListener('click', () => openPracticeTestModal(currentViewingDeckId));
-            document.getElementById('deckDetailEditBtn').addEventListener('click', () => editDeck(currentViewingDeckId));
-            document.getElementById('deckDetailSettingsBtn').addEventListener('click', () => openDeckSettingsModal(currentViewingDeckId));
-            document.getElementById('headerBackBtn').addEventListener('click', goBack);
+
+            safeAddListener('deckDetailTestBtn', 'click', () => openPracticeTestModal(currentViewingDeckId));
+            safeAddListener('deckDetailEditBtn', 'click', () => editDeck(currentViewingDeckId));
+            safeAddListener('deckDetailSettingsBtn', 'click', () => openDeckSettingsModal(currentViewingDeckId));
+            safeAddListener('headerBackBtn', 'click', goBack);
             const nameForm = document.getElementById('nameForm');
             if (nameForm) {
                 nameForm.addEventListener('submit', saveName);
             }
-            document.getElementById('darkModeToggle').addEventListener('change', toggleDarkMode);
-            document.getElementById('deckDetailResetBtn').addEventListener('click', () => resetSpecificDeck(currentViewingDeckId));
-            document.getElementById('continueBtn').addEventListener('click', continueStudy);
-            document.getElementById('instructionsBtn').addEventListener('click', () => document.getElementById('instructionsModal').classList.add('show'));
-            document.getElementById('accentToggleBtn').addEventListener('click', toggleAccentButtons);
-            document.getElementById('testAccentToggleBtn').addEventListener('click', toggleTestAccentButtons);
-            document.getElementById('switchStudyModeBtn').addEventListener('click', toggleStudyMode);
-            document.getElementById('editStudyCardBtn').addEventListener('click', editCurrentStudyCard);
-            document.getElementById('writeAnswerInput').addEventListener('keydown', (e) => {
+            safeAddListener('darkModeToggle', 'change', toggleDarkMode);
+            safeAddListener('deckDetailResetBtn', 'click', () => resetSpecificDeck(currentViewingDeckId));
+            safeAddListener('continueBtn', 'click', continueStudy);
+            safeAddListener('instructionsBtn', 'click', () => { const m = document.getElementById('instructionsModal'); if (m) m.classList.add('show'); });
+            safeAddListener('accentToggleBtn', 'click', toggleAccentButtons);
+            safeAddListener('testAccentToggleBtn', 'click', toggleTestAccentButtons);
+            safeAddListener('switchStudyModeBtn', 'click', toggleStudyMode);
+            safeAddListener('editStudyCardBtn', 'click', editCurrentStudyCard);
+            const writeInputEl = document.getElementById('writeAnswerInput');
+            if (writeInputEl) writeInputEl.addEventListener('keydown', (e) => {
                 if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'ArrowUp') {
                     e.preventDefault();
                     e.stopPropagation();
@@ -4418,23 +4507,18 @@ function loadCDNScript(src, onload) {
             const lastLog = currentInteractionLog;
             const userBaseline = globalSettings.userBaseline || { latency: 3000, fluency: 3.0 };
 
-            const iqs = calculateIQS({
+            // --- FSRS Integration ---
+            // Gather interaction data for the implicit grading
+            const interactionData = {
+                wasCorrect: correct,
                 recallLatency: lastLog.recallLatency || 2000,
-                answerFluency: lastLog.answerFluency || 5,
-                totalCorrections: lastLog.backspaceCount + lastLog.deleteCount,
+                totalCorrections: (lastLog.backspaceCount || 0) + (lastLog.deleteCount || 0),
                 attemptCount: lastLog.attemptCount || 1
-            }, userBaseline);
-
-            const sm2 = new SM2Algorithm();
-            const quality = correct ? 4 : 1;
-
-            const newSm2Data = sm2.calculateNextReview(cardInDeck || card)(quality);
-
-            if (cardInDeck) cardInDeck.sm2Data = newSm2Data;
-
-            const newStability = newSm2Data.interval;
-
-            await updateKnowledgeState(card, correct, iqs, questionType, newStability);
+            };
+            
+            // Update the card's knowledge state using the FSRS algorithm
+            await updateCardKnowledgeWithFSRS(cardInDeck || card, interactionData);
+            // --- End FSRS Integration ---
 
             if (currentMode === 'sequence') {
                 const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];

@@ -41,6 +41,7 @@
     "express": "^5.1.0",
     "jwt-decode": "^4.0.0",
     "pg": "^8.16.3",
+    "ts-fsrs": "^5.2.3",
     "update-electron-app": "^3.0.0"
   },
   "bugs": {

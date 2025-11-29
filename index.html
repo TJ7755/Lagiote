@@ -2872,12 +2872,12 @@ The help button and the edit card button during the learn modes don't work - not
                             <button class="btn learn-btn" onclick="configureStudy('learn')">Learn</button>
 
                             <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
-                            <button class="btn review-btn" id="deckDetailTestBtn">Practice Test</button>
+                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
                             <button class="btn btn-secondary" id="deckDetailResetBtn"
-                                style="border: 2px solid var(--border-color);">Reset Progress</button>
-                            <button class="btn btn-secondary" id="deckDetailSettingsBtn">Settings</button>
-                            <button class="btn btn-secondary" id="deckDetailEditBtn">Edit</button>
-                            <button class="btn btn-danger" id="deckDetailDeleteBtn">Delete</button>
+                                style="border: 2px solid var(--border-color);" onclick="resetSpecificDeck(currentViewingDeckId)">Reset Progress</button>
+                            <button class="btn btn-secondary" id="deckDetailSettingsBtn" onclick="openDeckSettingsModal(currentViewingDeckId)">Settings</button>
+                            <button class="btn btn-secondary" id="deckDetailEditBtn" onclick="editDeck(currentViewingDeckId)">Edit</button>
+                            <button class="btn btn-danger" id="deckDetailDeleteBtn" onclick="deleteDeck(currentViewingDeckId)">Delete</button>
                         </div>
                     </div>
                     <h3 class="section-title">Cards in this deck</h3>
@@ -3329,21 +3329,21 @@ The help button and the edit card button during the learn modes don't work - not
                                 d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
                         </svg>
                     </button>
-                    <button id="editStudyCardBtn" class="header-btn hidden" title="Edit Card">
+                    <button id="editStudyCardBtn" class="header-btn hidden" title="Edit Card" onclick="editCurrentStudyCard()">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" width="20" height="20">
                             <path stroke-linecap="round" stroke-linejoin="round"
                                 d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                         </svg>
                     </button>
-                    <button id="switchStudyModeBtn" class="header-btn hidden" title="Switch Study Mode">
+                    <button id="switchStudyModeBtn" class="header-btn hidden" title="Switch Study Mode" onclick="toggleStudyMode()">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" width="20" height="20">
                             <path stroke-linecap="round" stroke-linejoin="round"
                                 d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
                         </svg>
                     </button>
-                    <button id="instructionsBtn" class="header-btn" title="Instructions">
+                    <button id="instructionsBtn" class="header-btn" title="Instructions" onclick="document.getElementById('instructionsModal')?.classList.add('show')">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" width="20" height="20">
                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -5547,24 +5547,32 @@ The help button and the edit card button during the learn modes don't work - not
 
             setupSearch();
             setupKeyboardControls();
-            document.getElementById('deckDetailTestBtn').addEventListener('click', () => openPracticeTestModal(currentViewingDeckId));
-            document.getElementById('deckDetailEditBtn').addEventListener('click', () => editDeck(currentViewingDeckId));
-            document.getElementById('deckDetailDeleteBtn').addEventListener('click', () => deleteDeck(currentViewingDeckId));
-            document.getElementById('deckDetailSettingsBtn').addEventListener('click', () => openDeckSettingsModal(currentViewingDeckId));
-            document.getElementById('headerBackBtn').addEventListener('click', goBack);
+            function safeAddListener(id, event, handler) {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener(event, handler);
+            }
+
+            safeAddListener('deckDetailTestBtn', 'click', () => openPracticeTestModal(currentViewingDeckId));
+            safeAddListener('deckDetailEditBtn', 'click', () => editDeck(currentViewingDeckId));
+            safeAddListener('deckDetailDeleteBtn', 'click', () => deleteDeck(currentViewingDeckId));
+            safeAddListener('deckDetailSettingsBtn', 'click', () => openDeckSettingsModal(currentViewingDeckId));
+            safeAddListener('headerBackBtn', 'click', goBack);
             const nameForm = document.getElementById('nameForm');
             if (nameForm) {
                 nameForm.addEventListener('submit', saveName);
             }
-            document.getElementById('darkModeToggle').addEventListener('change', toggleDarkMode);
-            document.getElementById('deckDetailResetBtn').addEventListener('click', () => resetSpecificDeck(currentViewingDeckId));
-            document.getElementById('continueBtn').addEventListener('click', continueStudy);
-            document.getElementById('instructionsBtn').addEventListener('click', () => document.getElementById('instructionsModal').classList.add('show'));
-            document.getElementById('accentToggleBtn').addEventListener('click', toggleAccentButtons);
-            document.getElementById('testAccentToggleBtn').addEventListener('click', toggleTestAccentButtons);
-            document.getElementById('switchStudyModeBtn').addEventListener('click', toggleStudyMode);
-            document.getElementById('editStudyCardBtn').addEventListener('click', editCurrentStudyCard);
-            document.getElementById('writeAnswerInput').addEventListener('keydown', (e) => {
+            safeAddListener('darkModeToggle', 'change', toggleDarkMode);
+            safeAddListener('deckDetailResetBtn', 'click', () => resetSpecificDeck(currentViewingDeckId));
+            safeAddListener('continueBtn', 'click', continueStudy);
+            safeAddListener('instructionsBtn', 'click', () => {
+                const m = document.getElementById('instructionsModal'); if (m) m.classList.add('show');
+            });
+            safeAddListener('accentToggleBtn', 'click', toggleAccentButtons);
+            safeAddListener('testAccentToggleBtn', 'click', toggleTestAccentButtons);
+            safeAddListener('switchStudyModeBtn', 'click', toggleStudyMode);
+            safeAddListener('editStudyCardBtn', 'click', editCurrentStudyCard);
+            const writeInputEl = document.getElementById('writeAnswerInput');
+            if (writeInputEl) writeInputEl.addEventListener('keydown', (e) => {
                 if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'ArrowUp') {
                     e.preventDefault();
                     e.stopPropagation();
