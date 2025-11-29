@@ -6,10 +6,7 @@ module.exports = {
     asar: true,
     icon: './assets/logo/icon', // generic icon path, forge adds extension
     extraResource: [
-      {
-        from: '.env.local',
-        to: '.env.local'
-      }
+      '.env.local'
     ]
   },
   rebuildConfig: {},
