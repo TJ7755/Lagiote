@@ -12,7 +12,7 @@ You can access Lagiote Revise in two ways:
 
 - **Offline Capability**: Study anywhere, anytime, without an internet connection.
 - **AI-Powered Deck Generation**: Create comprehensive flashcard decks from a simple topic or text using advanced AI.
-- **Smart Study Modes**: Tailored algorithms to maximize your learning efficiency.
+- **Smart Study Modes**: Tailored algorithms to maximise your learning efficiency.
 - **Cross-Platform**: Available as a web app and a desktop application.
 
 ## Algorithms
@@ -21,12 +21,12 @@ Lagiote Revise employs distinct algorithms to cater to different learning stages
 
 ### Learn Mode
 Learn Mode uses a **queue-based progression system** designed to efficiently move cards from "New" to "Mastered".
-- **Prioritization**: Cards are prioritized based on their current mastery score. If an exam date is set, the algorithm also calculates projected retention to prioritize cards you are most likely to forget before the exam.
+- **Prioritisation**: Cards are prioritsed based on their current mastery score. If an exam date is set, the algorithm also calculates projected retention to prioritize cards you are most likely to forget before the exam.
 - **Dynamic Session Sizing**: The system automatically adjusts the number of cards in a session based on your settings and the number of due cards.
 - **Mastery Tracking**: Cards are considered mastered when their mastery score exceeds a specific threshold (typically 90%), ensuring you focus on what you don't know.
 
 ### Review Mode
-Review Mode is optimized for quick, active recall sessions.
+Review Mode is optimised for quick, active recall sessions.
 - **Binary Sorting**: Cards are sorted into two piles: "Still Learning" and "Correct".
 - **Immediate Feedback**: You get immediate feedback on your answers, allowing you to quickly identify weak spots.
 - **Round-Based**: You continue reviewing the "Still Learning" pile in subsequent rounds until all cards are answered correctly.
