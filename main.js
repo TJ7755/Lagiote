@@ -1,16 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { updateElectronApp } = require('update-electron-app');
-
-// Initialize auto-updater with logging
-updateElectronApp({
-  repo: 'TJ7755/Lagiote-revise',
-  updateInterval: '1 hour',
-  logger: {
-    log: (...args) => console.log('[Auto-Update]', ...args),
-    error: (...args) => console.error('[Auto-Update Error]', ...args)
-  }
-});
-
 const path = require('path');
 const fs = require('fs');
 
@@ -20,8 +9,13 @@ function loadEnvFile() {
     ? path.join(process.resourcesPath, '.env.local')
     : path.join(__dirname, '.env.local');
 
+
+
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
+
+
+    let loadedCount = 0;
     envContent.split('\n').forEach(line => {
       const match = line.match(/^([^#=]+)=(.*)$/);
       if (match) {
@@ -29,15 +23,28 @@ function loadEnvFile() {
         const value = match[2].trim().replace(/^["']|["']$/g, '');
         if (!process.env[key]) {
           process.env[key] = value;
+          loadedCount++;
+          // Only log key names for Auth0 variables (values are safe to log since they're public)
+
         }
       }
     });
-    console.log('Environment variables loaded from .env.local');
+
+  } else {
+    console.error('[Env] .env.local file not found!');
+    console.error('[Env] Current directory:', __dirname);
+    if (app.isPackaged) {
+      console.error('[Env] Resources path:', process.resourcesPath);
+      // List files in resources directory for debugging
+      try {
+        const files = fs.readdirSync(process.resourcesPath);
+        console.error('[Env] Files in resources directory:', files.slice(0, 10));
+      } catch (e) {
+        console.error('[Env] Could not read resources directory:', e.message);
+      }
+    }
   }
 }
-
-// Load env on startup
-loadEnvFile();
 
 function safeSend(window, channel, ...args) {
   try {
@@ -100,9 +107,7 @@ function createWindow() {
   });
 
   win.webContents.on('did-finish-load', () => {
-    console.log('Main window loaded successfully');
-    // Inject the PROXY_URL into the renderer console for debugging verification
-    win.webContents.executeJavaScript(`console.log('[Main Process] Using Proxy URL: ${PROXY_URL}')`).catch(() => { });
+
   });
 
   win.webContents.on('crashed', () => {
@@ -394,6 +399,31 @@ async function createLoginWindow() {
 }
 
 app.whenReady().then(() => {
+  // Load environment variables
+  loadEnvFile();
+
+  // Fallback: If packaged app doesn't have .env.local, use hardcoded values
+  // OAuth2 client IDs are public and safe to hardcode
+  if (app.isPackaged && (!process.env.ELECTRON_AUTH0_DOMAIN || !process.env.ELECTRON_AUTH0_CLIENT_ID)) {
+    console.warn('[Env] Auth0 credentials not found in .env.local for packaged app, using fallback');
+    process.env.ELECTRON_AUTH0_DOMAIN = process.env.ELECTRON_AUTH0_DOMAIN || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+    process.env.ELECTRON_AUTH0_CLIENT_ID = process.env.ELECTRON_AUTH0_CLIENT_ID || 'olTWu5ifjiTKIoqfMGpF2FScFvuQI5ZW';
+
+  }
+
+  // Ensure Audience is always set (required for API access)
+  // This fixes the 401 Sync error in dev mode if .env.local is missing this var
+  if (!process.env.ELECTRON_AUTH0_AUDIENCE) {
+    console.warn('[Env] ELECTRON_AUTH0_AUDIENCE not found, using default fallback');
+    process.env.ELECTRON_AUTH0_AUDIENCE = 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/';
+  }
+
+  // Initialize auto-updater after app is ready
+  updateElectronApp({
+    repo: 'TJ7755/Lagiote-revise',
+    updateInterval: '1 hour'
+  });
+
   app.setAsDefaultProtocolClient("lagioterevise");
   createWindow();
 
@@ -515,18 +545,29 @@ ipcMain.handle('gemini-autocomplete', async (event, { deckContent, currentCard, 
   }
 });
 
-ipcMain.handle('sync-data', async (event, { decks, token }) => {
+ipcMain.handle('sync-data', async (event, arg) => {
   try {
+    const { token, guestId, ...syncPayload } = arg;
+
+
+
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    } else if (guestId) {
+      headers['X-Guest-ID'] = guestId;
+    }
+
     const response = await Promise.race([
       fetch(`${PROXY_URL}/api/sync`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(decks)
+        headers: headers,
+        body: JSON.stringify(syncPayload)
       }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 10000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 30000))
     ]);
 
     if (!response.ok) {
@@ -536,6 +577,17 @@ ipcMain.handle('sync-data', async (event, { decks, token }) => {
     return await response.json();
   } catch (error) {
     console.error('Sync error:', error);
+
+    // Propagate 401 specifically so renderer can handle logout
+    if (error.message.includes('401')) {
+      return {
+        error: 'auth_error',
+        message: 'Session expired or invalid (401)',
+        statusCode: 401,
+        originalError: error.message
+      };
+    }
+
     return {
       error: 'offline',
       message: 'Cannot sync offline. Your changes will be saved locally and synced when online.',

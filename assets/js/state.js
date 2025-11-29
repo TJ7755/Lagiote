@@ -1,7 +1,3 @@
-
-import { queueForSync } from './syncManager.js';
-
-
 export const state = {
     db: null,
     decks: {},
@@ -26,6 +22,7 @@ export const state = {
         lastRoundIncorrect: [],
         isRetypingIncorrect: false,
         startTime: null,
+        cardStartTime: null,
         activeLearningPool: [],
         knowledgeStates: new Map(),
         
@@ -44,9 +41,13 @@ export const state = {
         startTime: null,
         testType: 'flashcard',
         numQuestions: 10
-    }
+    },
+    isOnline: navigator.onLine,
+    currentViewingDeckId: null,
+    activeView: 'dashboard',
+    viewHistory: [],
+    editorCardCounter: 0,
 };
-
 
 export const DEFAULT_DECK_SETTINGS = {
     learnMode: 'flashcard',
@@ -71,6 +72,7 @@ export function resetStudyState() {
         lastRoundIncorrect: [],
         isRetypingIncorrect: false,
         startTime: null,
+        cardStartTime: null,
         activeLearningPool: [],
         knowledgeStates: new Map(),
         masterSequence: [],
@@ -121,12 +123,11 @@ export function updateDeck(deckId, deckData) {
 export function deleteDeck(deckId) {
     const deletedDeck = {...state.decks[deckId], deleted: true};
     delete state.decks[deckId];
-    queueForSync(deletedDeck); 
+ 
 }
 
 export function updateAnalytics(analyticsData) {
     state.analyticsData = { ...state.analyticsData, ...analyticsData };
 }
-
 
 export default state;

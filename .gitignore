@@ -130,3 +130,4 @@ dist
 .yarn/install-state.gz
 .pnp.*
 *.example
+AGENTS.md

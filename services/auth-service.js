@@ -64,6 +64,8 @@ function getAuthenticationURL() {
         authParams.append('audience', audience);
     }
 
+    console.log('[Auth] Configured audience:', audience || 'None');
+
     return `https://${auth0Domain}/authorize?${authParams.toString()}`;
 }
 

@@ -1,19 +1,17 @@
-
 let db;
 
+export function getDB() {
+    return db;
+}
 
-export async function initDB() {
+export function initDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('StudyStackDB', 4);
+        const request = indexedDB.open('LagioteDB', 7);
+        request.onerror = event => reject("Error opening DB: " + (event.target.error ? event.target.error.message : event.target.errorCode));
 
-        request.onerror = event => {
-            const errorMsg = (event.target.error && event.target.error.message) || event.target.errorCode || 'Unknown error';
-            reject("Error opening DB: " + errorMsg);
-        };
-        
         request.onsuccess = event => {
             db = event.target.result;
-            resolve(db);
+            resolve();
         };
 
         request.onupgradeneeded = event => {
@@ -22,6 +20,9 @@ export async function initDB() {
 
             if (!db.objectStoreNames.contains('decks')) {
                 db.createObjectStore('decks', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('analyticsQueue')) {
+                db.createObjectStore('analyticsQueue', { keyPath: 'id' });
             }
             if (!db.objectStoreNames.contains('appData')) {
                 db.createObjectStore('appData', { keyPath: 'key' });
@@ -36,11 +37,50 @@ export async function initDB() {
                 const logStore = db.createObjectStore('interactionLogs', { keyPath: 'id', autoIncrement: true });
                 logStore.createIndex('by_cardID', 'cardID', { unique: false });
                 logStore.createIndex('by_timestamp', 'timestamp', { unique: false });
+                console.log("Created 'interactionLogs' object store.");
+            }
+            if (!db.objectStoreNames.contains('examPlans')) {
+                db.createObjectStore('examPlans', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('analyticsQueue')) {
+                db.createObjectStore('analyticsQueue', { keyPath: 'id' });
+                console.log("Created 'analyticsQueue' object store.");
+            }
+
+            if (event.oldVersion > 0 && event.oldVersion < 5) {
+                console.log("Starting database migration for cognitive engine...");
+                const deckStore = transaction.objectStore('decks');
+                const stateStore = transaction.objectStore('userKnowledgeState');
+
+                deckStore.getAll().onsuccess = (e) => {
+                    const allDecks = e.target.result;
+                    if (!allDecks) return;
+
+                    allDecks.forEach(deck => {
+                        let deckNeedsUpdate = false;
+                        deck.cards.forEach(card => {
+                            if (typeof card.masteryScore === 'undefined') {
+                                deckNeedsUpdate = true;
+                                stateStore.put({
+                                    userID: 'default_user',
+                                    cardID: card.id,
+                                    masteryScore: 0.5,
+                                    stability: 1.0,
+                                    lastReviewed: new Date().toISOString(),
+                                    recallHistory: []
+                                });
+                            }
+                        });
+                        if (deckNeedsUpdate) {
+                            deckStore.put(deck);
+                        }
+                    });
+                    console.log("Cognitive engine migration complete.");
+                };
             }
         };
     });
 }
-
 
 export async function saveDataToDB(storeName, data) {
     if (!db) {
@@ -121,41 +161,12 @@ export async function deleteDataFromDB(storeName, key) {
     });
 }
 
-
-export async function logInteraction(logData) {
-    if (!db) {
-        console.error("Database not available for logging interaction.");
-        return;
-    }
-
-    try {
-        const transaction = db.transaction(['interactionLogs'], 'readwrite');
-        const store = transaction.objectStore('interactionLogs');
-        
-        const logEntry = {
-            userID: 'default_user', 
-            cardID: logData.cardID,
-            timestamp: new Date().toISOString(),
-            wasCorrect: logData.wasCorrect,
-            latency: logData.recallLatency,
-            fluency: logData.answerFluency,
-            corrections: logData.totalCorrections,
-            attempts: logData.attemptCount,
-            userAnswer: logData.userAnswer,
-            synced: false 
-        };
-        
-        await new Promise((resolve, reject) => {
-            const request = store.add(logEntry);
-            request.onsuccess = () => resolve();
-            request.onerror = event => reject(event.target.error);
-        });
-    } catch (error) {
-        console.error("Failed to initiate IndexedDB transaction for logging:", error);
-    }
-}
-
-
-export function getDB() {
-    return db;
+export async function clearStoreInDB(storeName) {
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.clear();
+        request.onsuccess = () => resolve();
+        request.onerror = event => reject("Error clearing store: " + event.target.error);
+    });
 }

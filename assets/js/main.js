@@ -1,4143 +1,38 @@
-<!--
-These are the notes of issues:
-
-The help button and the edit card button during the learn modes don't work - nothing happens when pressed.
--->
-
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' 'unsafe-inline' https: data: blob: lagioterevise:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:;">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lagiote Revise</title>
-
-    <script>
-        window.onload = async function () {
-            console.log('Script is starting! Online:', navigator.onLine);
-
-            try {
-                await initDB();
-                console.log('Database initialized.');
-            } catch (error) {
-                console.error('Failed to initialize database:', error);
-
-            }
-
-            const handleOfflineOrGuest = async () => {
-                console.log('Entering offline/guest mode.');
-                try {
-                    await loadSavedData();
-                } catch (error) {
-                    console.warn('Error loading saved data:', error);
-                }
-                // setupEventListeners is called later in the script flow
-                const appHeader = document.getElementById('appHeader');
-                const loggedInView = document.getElementById('loggedInView');
-                if (appHeader) appHeader.classList.remove('hidden');
-                if (loggedInView) loggedInView.classList.remove('hidden');
-
-                // Show guest signup button
-                const guestBtn = document.getElementById('guestSignupBtn');
-                console.log('Guest button element:', guestBtn);
-                if (guestBtn) {
-                    guestBtn.classList.remove('hidden');
-                    console.log('Guest signup button shown, classes:', guestBtn.className);
-                } else {
-                    console.warn('Guest signup button not found in DOM');
-                }
-
-                showView('dashboard', true);
-                updateOnlineStatusUI();
-                try {
-                    runSmartCoachChecks('dashboardLoad');
-                } catch (error) {
-                    console.warn('Error running smart coach checks:', error);
-                }
-            };
-
-            const isRememberedGuest = localStorage.getItem('guestMode') === 'true';
-
-            if (isRememberedGuest) {
-                console.log('Continuing as remembered guest.');
-                await handleOfflineOrGuest();
-                return;
-            }
-
-            if (!navigator.onLine) {
-                console.warn('App is offline. Showing auth view for guest selection.');
-                await handleOfflineOrGuest();
-                return;
-            }
-
-            // Handle Auth0 callback on web (if code/state in URL)
-            if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
-                console.log('Detected Auth0 callback in web environment');
-                try {
-                    console.log('Starting Auth0 callback processing...');
-
-                    // Load Auth0 SDK if not already loaded
-                    if (!window.auth0) {
-                        console.log('Loading Auth0 SDK...');
-                        await new Promise((resolve, reject) => {
-                            const script = document.createElement('script');
-                            script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
-                            script.onload = () => {
-                                console.log('Auth0 SDK loaded successfully');
-                                resolve();
-                            };
-                            script.onerror = (err) => {
-                                console.error('Failed to load Auth0 SDK:', err);
-                                reject(err);
-                            };
-                            document.head.appendChild(script);
-                        });
-                    }
-
-                    const auth0Domain = 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-                    const auth0ClientId = 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-                    console.log('Creating Auth0 client...');
-                    const auth0Client = await auth0.createAuth0Client({
-                        domain: auth0Domain,
-                        clientId: auth0ClientId,
-                        authorizationParams: {
-                            redirect_uri: window.location.origin + '/'
-                        }
-                    });
-
-                    console.log('Handling redirect callback...');
-                    await auth0Client.handleRedirectCallback();
-
-                    console.log('Getting user info...');
-                    const user = await auth0Client.getUser();
-                    console.log('User:', user);
-
-                    console.log('Getting token...');
-                    const token = await auth0Client.getTokenSilently();
-                    console.log('Token obtained');
-
-                    // Store auth session
-                    const authResult = {
-                        user: user,
-                        access_token: token,
-                        id_token: token
-                    };
-                    localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                    console.log('Auth session saved to localStorage');
-
-                    // Clean up URL
-                    window.history.replaceState({}, document.title, '/');
-                    console.log('URL cleaned');
-
-                    console.log('Web Auth0 login successful:', user.email);
-
-                    // Update UI - hide guest button, show profile button
-                    const guestBtn = document.getElementById('guestSignupBtn');
-                    const profileMenu = document.getElementById('userProfileMenu');
-                    const userEmail = document.getElementById('userEmail');
-
-                    if (guestBtn) {
-                        guestBtn.classList.add('hidden');
-                        console.log('Guest button hidden');
-                    }
-                    if (profileMenu) {
-                        profileMenu.classList.remove('hidden');
-                        console.log('Profile menu shown');
-                    }
-                    if (userEmail) {
-                        userEmail.textContent = user.email;
-                        console.log('User email set');
-                    }
-
-                    console.log('UI updated successfully');
-
-                    // Continue with app initialization
-                    await handleOfflineOrGuest();
-
-                    // Show success message after everything is loaded
-                    setTimeout(() => {
-                        if (typeof showToast === 'function') {
-                            showToast('Successfully signed in as ' + user.email, 'success');
-                        }
-                    }, 1000);
-
-                    return;
-                } catch (error) {
-                    console.error('Auth callback error:', error);
-                    console.error('Error stack:', error.stack);
-                    alert('Sign in failed: ' + error.message + '. Please check the console for details.');
-                }
-            }
-
-            // Authentication will be handled by Auth0 (to be implemented)
-            await handleOfflineOrGuest();
-        };
-    </script>
-
-    <script>
-
-        if (navigator.onLine) {
-            /*
-            const gtagScript1 = document.createElement('script');
-            gtagScript1.async = true;
-            gtagScript1.src = 'https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD';
-            gtagScript1.onerror = () => console.warn('Failed to load Google Analytics 1');
-            document.head.appendChild(gtagScript1);
-            */
-
-            const gtagScript2 = document.createElement('script');
-            gtagScript2.async = true;
-            gtagScript2.src = 'https://www.googletagmanager.com/gtag/js?id=G-86DQ5HTDV9';
-            gtagScript2.onerror = () => console.warn('Failed to load Google Analytics 2');
-            document.head.appendChild(gtagScript2);
-        }
-    </script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag() { dataLayer.push(arguments); }
-        gtag('js', new Date());
-        gtag('config', 'G-86DQ5HTDV9');
-    </script>
-    <script>
-        (function () {
-            const applyTheme = (isDark) => {
-                const target = document.documentElement;
-                if (isDark) {
-                    target.classList.add('dark-mode');
-                    if (document.body) document.body.classList.add('dark-mode');
-                } else {
-                    target.classList.remove('dark-mode');
-                    if (document.body) document.body.classList.remove('dark-mode');
-                }
-            };
-
-            const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-            applyTheme(systemDark);
-        })();
-    </script>
-    <script src="./assets/js/pdf.min.js"></script>
-    <script src="./assets/js/mammoth.browser.min.js"></script>
-    <script src="./assets/js/chart.js"></script>
-
-    <script>
-        function loadCDNScript(src, onload) {
-            if (!navigator.onLine) {
-                console.warn('Offline: Skipping CDN script', src);
-                if (onload) onload();
-                return;
-            }
-            const script = document.createElement('script');
-            script.src = src;
-            script.onerror = () => {
-                console.warn('Failed to load CDN script:', src);
-                if (onload) onload();
-            };
-            if (onload && !src.includes('module')) {
-                script.onload = onload;
-            }
-            document.head.appendChild(script);
-        }
-
-
-        loadCDNScript('https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js', () => {
-            console.log('Sortable.js loaded or skipped');
-        });
-
-
-        if (navigator.onLine) {
-            const transformersScript = document.createElement('script');
-            transformersScript.type = 'module';
-            transformersScript.src = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-            transformersScript.onerror = () => console.warn('Failed to load Transformers library');
-            document.head.appendChild(transformersScript);
-        }
-    </script>
-    <script src="./assets/js/sequence-test.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
-    <style>
-        .stats-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-        }
-
-        .stats-table th,
-        .stats-table td {
-            text-align: left;
-            padding: 10px 8px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .stats-table th {
-            font-weight: 600;
-            color: var(--secondary-text);
-        }
-
-        .stats-table tbody tr:hover {
-            background-color: var(--input-bg);
-        }
-
-        .stats-table td:first-child {
-            max-width: 300px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        :root {
-            --bg-color: #f7fafc;
-            --text-color: #333;
-            --header-bg: white;
-            --card-bg: white;
-            --border-color: #e2e8f0;
-            --border-dashed: #e2e8f0;
-            --primary-color: #667eea;
-            --primary-hover: #5a67d8;
-            --secondary-text: #718096;
-            --shadow-color: rgba(0, 0, 0, 0.05);
-            --input-bg: #f7fafc;
-            --input-focus-bg: white;
-            --button-secondary-bg: #e2e8f0;
-            --button-secondary-text: #4a5568;
-            --button-secondary-hover: #cbd5e0;
-            --success-color: #38a169;
-            --danger-color: #e53e3e;
-        }
-
-        .dark-mode {
-            --bg-color: #1a202c;
-            --text-color: #e2e8f0;
-            --header-bg: #2d3748;
-            --card-bg: #2d3748;
-            --border-color: #4a5568;
-            --border-dashed: #4a5568;
-            --primary-color: #7f9cf5;
-            --primary-hover: #667eea;
-            --secondary-text: #a0aec0;
-            --shadow-color: rgba(0, 0, 0, 0.2);
-            --input-bg: #2d3748;
-            --input-focus-bg: #4a5568;
-            --button-secondary-bg: #4a5568;
-            --button-secondary-text: #e2e8f0;
-            --button-secondary-hover: #718096;
-            --success-color: #68d391;
-            --danger-color: #fc8181;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--bg-color);
-            min-height: 100vh;
-            color: var(--text-color);
-            transition: background-color 0.3s, color 0.3s;
-        }
-
-        .view-container {
-            display: none;
-            opacity: 0;
-            transition: opacity 0.4s ease-in-out, transform 0.4s ease-in-out;
-            transform: translateY(10px);
-        }
-
-        .view-container.is-visible {
-            display: block;
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        #authView.is-visible {
-            display: flex;
-        }
-
-        .view-container.is-hiding {
-            opacity: 0;
-            transform: translateY(-10px);
-        }
-
-        .view-container.animating {
-            animation-duration: 0.4s;
-            animation-timing-function: ease-in-out;
-            animation-fill-mode: forwards;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes fadeOut {
-            from {
-                opacity: 1;
-                transform: translateY(0);
-            }
-
-            to {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-        }
-
-        .fade-in {
-            display: block !important;
-            animation-name: fadeIn;
-        }
-
-        .fade-out {
-            animation-name: fadeOut;
-        }
-
-        .sub-view.animating {
-            animation-duration: 0.4s;
-            animation-timing-function: ease-in-out;
-            animation-fill-mode: forwards;
-        }
-
-        .sub-view-fade-in {
-            display: flex !important;
-            flex-direction: column;
-            animation-name: fadeIn;
-        }
-
-        .sub-view-fade-out {
-            animation-name: fadeOut;
-        }
-
-        @keyframes deckClick {
-            0% {
-                transform: scale(1);
-            }
-
-            50% {
-                transform: scale(0.97);
-            }
-
-            100% {
-                transform: scale(1);
-            }
-        }
-
-        .deck-clicked {
-            animation: deckClick 0.3s ease-in-out;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .section-title {
-            font-size: 1.4rem;
-            font-weight: 600;
-            color: var(--text-color);
-            margin-bottom: 25px;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .app-header {
-            background: var(--header-bg);
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .logo-section {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .header-btn {
-            background: var(--button-secondary-bg);
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--button-secondary-text);
-            transition: all 0.2s;
-        }
-
-        .header-btn:hover {
-            background: var(--button-secondary-hover);
-            transform: scale(1.05);
-        }
-
-        #accentToggleBtn:hover {
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-            transform: scale(1.1);
-        }
-
-        .logo {
-            width: 48px;
-            height: 48px;
-            border-radius: 10px;
-            overflow: hidden;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-
-        .logo img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain
-        }
-
-        .welcome-text {
-            display: flex;
-            align-items: baseline;
-            gap: 10px;
-        }
-
-        .welcome-text h1 {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: var(--text-color);
-        }
-
-        .welcome-text p {
-            color: var(--secondary-text);
-            font-size: 1rem;
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .search-bar {
-            position: relative;
-            width: 350px;
-            max-width: 100%;
-        }
-
-        .search-input {
-            width: 100%;
-            padding: 12px 20px 12px 45px;
-            border: 2px solid var(--border-color);
-            border-radius: 25px;
-            font-size: 16px;
-            background: var(--input-bg);
-            color: var(--text-color);
-            transition: all 0.3s;
-        }
-
-        .search-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background: var(--input-focus-bg);
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .search-icon {
-            position: absolute;
-            left: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--secondary-text);
-            width: 20px;
-            height: 20px;
-        }
-
-        .main-content {
-            margin-bottom: 40px;
-            padding-top: 30px;
-        }
-
-        .decks-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 25px;
-        }
-
-        .category-folder {
-            margin-bottom: 40px;
-        }
-
-        .category-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid var(--border-color);
-        }
-
-        .deck-card {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 25px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            border-top: 6px solid;
-        }
-
-        .deck-card-main-clickable {
-            cursor: pointer;
-            flex-grow: 1;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .deck-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 35px var(--shadow-color);
-        }
-
-        .deck-card[data-category="Science"] {
-            border-color: #4ecdc4;
-        }
-
-        .deck-card[data-category="Math"] {
-            border-color: #667eea;
-        }
-
-        .deck-card[data-category="Language"] {
-            border-color: #fab1a0;
-        }
-
-        .deck-card[data-category="History"] {
-            border-color: #fd79a8;
-        }
-
-        .deck-card[data-category="Other"] {
-            border-color: #a29bfe;
-        }
-
-        .deck-category {
-            font-size: 0.8rem;
-            font-weight: 600;
-            padding: 4px 10px;
-            border-radius: 20px;
-            display: inline-block;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .deck-card[data-category="Science"] .deck-category,
-        .deck-detail-category.Science {
-            color: #317b75;
-            background-color: #e6fffa;
-        }
-
-        .deck-card[data-category="Math"] .deck-category,
-        .deck-detail-category.Math {
-            color: #5a67d8;
-            background-color: #ebf4ff;
-        }
-
-        .deck-card[data-category="Language"] .deck-category,
-        .deck-detail-category.Language {
-            color: #c53030;
-            background-color: #fff5f5;
-        }
-
-        .deck-card[data-category="History"] .deck-category,
-        .deck-detail-category.History {
-            color: #b83280;
-            background-color: #fff5f7;
-        }
-
-        .deck-card[data-category="Other"] .deck-category,
-        .deck-detail-category.Other {
-            color: #6c5ce7;
-            background-color: #f3f2ff;
-        }
-
-        .dark-mode .deck-card[data-category="Science"] .deck-category,
-        .dark-mode .deck-detail-category.Science {
-            color: #81e6d9;
-            background-color: #2c7a7b;
-        }
-
-        .dark-mode .deck-card[data-category="Math"] .deck-category,
-        .dark-mode .deck-detail-category.Math {
-            color: #9f7aea;
-            background-color: #5a67d830;
-        }
-
-        .dark-mode .deck-card[data-category="Language"] .deck-category,
-        .dark-mode .deck-detail-category.Language {
-            color: #f6ad55;
-            background-color: #c5303030;
-        }
-
-        .dark-mode .deck-card[data-category="History"] .deck-category,
-        .dark-mode .deck-detail-category.History {
-            color: #f687b3;
-            background-color: #b8328030;
-        }
-
-        .dark-mode .deck-card[data-category="Other"] .deck-category,
-        .dark-mode .deck-detail-category.Other {
-            color: #a3bffa;
-            background-color: #6c5ce730;
-        }
-
-        .deck-header {
-            margin-bottom: 15px;
-            flex-grow: 1;
-        }
-
-        .deck-name {
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: var(--text-color);
-            margin-bottom: 5px;
-            line-height: 1.3;
-        }
-
-        .deck-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            color: var(--secondary-text);
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .deck-date {
-            font-size: 0.8rem;
-            color: var(--secondary-text);
-            margin-top: auto;
-            padding-bottom: 15px;
-        }
-
-        .deck-progress-container {
-            margin-top: 10px;
-        }
-
-        .deck-progress-label {
-            font-size: 0.8rem;
-            color: var(--secondary-text);
-            margin-bottom: 5px;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .deck-progress-bar-outer {
-            width: 100%;
-            height: 8px;
-            background: var(--border-color);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .deck-progress-bar-inner {
-            height: 100%;
-            border-radius: 4px;
-            transition: width 0.5s ease-in-out;
-        }
-
-        .deck-card[data-category="Science"] .deck-progress-bar-inner {
-            background-color: #4ecdc4;
-        }
-
-        .deck-card[data-category="Math"] .deck-progress-bar-inner {
-            background-color: #667eea;
-        }
-
-        .deck-card[data-category="Language"] .deck-progress-bar-inner {
-            background-color: #fab1a0;
-        }
-
-        .deck-card[data-category="History"] .deck-progress-bar-inner {
-            background-color: #fd79a8;
-        }
-
-        .deck-card[data-category="Other"] .deck-progress-bar-inner {
-            background-color: #a29bfe;
-        }
-
-        .deck-actions {
-            display: grid;
-            grid-template-columns: 1fr 1fr auto;
-            gap: 12px;
-            margin-top: 15px;
-            align-items: center;
-        }
-
-        .action-btn {
-            flex: 1;
-            padding: 12px 10px;
-            border: none;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-family: 'Inter', sans-serif;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            height: 44px;
-            grid-row: 1 / 2;
-        }
-
-        .export-btn {
-            grid-row: 1 / 2;
-            background: var(--button-secondary-bg);
-            color: var(--button-secondary-text);
-            border: 2px solid var(--border-color);
-            padding: 0;
-            flex: 0 0 auto;
-            width: 44px;
-            height: 44px;
-            display: flex;
-            align-items: center;
-            grid-column: 3 / 4;
-            justify-content: center;
-        }
-
-        .export-btn:hover {
-            background: var(--button-secondary-hover);
-            border-color: #cbd5e0;
-        }
-
-        .learn-btn {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .learn-btn:hover {
-            background: var(--primary-hover);
-            transform: translateY(-1px);
-        }
-
-        .review-btn {
-            background: var(--button-secondary-bg);
-            color: var(--button-secondary-text);
-            border: 2px solid var(--border-color);
-        }
-
-        .review-btn:hover {
-            background: var(--button-secondary-hover);
-            border-color: #cbd5e0;
-        }
-
-        .spaced-btn {
-            background: #38b2ac;
-            color: white;
-            grid-column: 1 / 3;
-        }
-
-        .spaced-btn:hover {
-            background: #319795;
-            transform: translateY(-1px);
-        }
-
-        .deck-detail-view {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-            margin-bottom: 30px;
-        }
-
-        .deck-detail-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 25px;
-        }
-
-        .deck-detail-title {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: var(--text-color);
-            margin-bottom: 5px;
-        }
-
-        .deck-detail-category {
-            display: inline-block;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .deck-detail-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .deck-cards-list {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 2px solid var(--border-color);
-            border-radius: 15px;
-            padding: 20px;
-        }
-
-        .deck-card-item {
-            padding: 15px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 15px;
-        }
-
-        .deck-card-item:last-child {
-            border-bottom: none;
-        }
-
-        .deck-card-content {
-            flex: 1;
-        }
-
-        .deck-card-question {
-            font-weight: 500;
-            color: var(--text-color);
-            margin-bottom: 5px;
-        }
-
-        .deck-card-answer {
-            color: var(--secondary-text);
-            font-size: 0.95rem;
-        }
-
-        .card-image {
-            max-width: 200px;
-            max-height: 150px;
-            border-radius: 8px;
-            margin-top: 8px;
-        }
-
-        .deck-card-meta {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .new-badge {
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--primary-color);
-            background-color: #ebf4ff;
-            padding: 2px 8px;
-            border-radius: 10px;
-            margin-left: 8px;
-        }
-
-        .dark-mode .new-badge {
-            color: #9f7aea;
-            background-color: #5a67d830;
-        }
-
-        .deck-card-actions {
-            display: flex;
-            gap: 10px;
-        }
-
-        .deck-card-action-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 5px;
-            border-radius: 6px;
-            color: var(--secondary-text);
-            transition: all 0.3s;
-        }
-
-        .deck-card-action-btn:hover {
-            background: var(--input-bg);
-            color: var(--text-color);
-        }
-
-        .deck-card-action-btn.edit:hover {
-            color: var(--primary-color);
-        }
-
-        .deck-card-action-btn.delete:hover {
-            color: var(--danger-color);
-        }
-
-        .create-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-        }
-
-        .create-card {
-            background: var(--card-bg);
-            border: 3px dashed var(--border-dashed);
-            border-radius: 20px;
-            padding: 40px 30px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .create-card:hover {
-            border-color: var(--primary-color);
-            background: var(--input-focus-bg);
-        }
-
-        .create-icon {
-            font-size: 2.5rem;
-            margin: 0 auto 15px auto;
-            display: block;
-            width: 40px;
-            height: 40px;
-            color: var(--primary-color);
-        }
-
-        .create-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--text-color);
-            margin-bottom: 8px;
-        }
-
-        .create-desc {
-            color: var(--secondary-text);
-            font-size: 0.95rem;
-            line-height: 1.4;
-        }
-
-        .no-decks {
-            text-align: center;
-            color: var(--secondary-text);
-            font-size: 1.1rem;
-            padding: 60px 20px;
-            background: var(--card-bg);
-            border-radius: 20px;
-            border: 2px dashed var(--border-dashed);
-        }
-
-        .no-decks-icon {
-            font-size: 4rem;
-            margin: 0 auto 20px auto;
-            display: block;
-            width: 64px;
-            height: 64px;
-            opacity: 0.5;
-            color: var(--secondary-text);
-        }
-
-        .btn {
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-family: 'Inter', sans-serif;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-
-        .btn svg {
-            width: 20px;
-            height: 20px;
-        }
-
-        .btn:hover {
-            background: var(--primary-hover);
-            transform: translateY(-1px);
-        }
-
-        .btn:disabled {
-            background: #cbd5e0;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .btn-secondary {
-            background: var(--button-secondary-bg);
-            color: var(--button-secondary-text);
-        }
-
-        .btn-secondary:hover {
-            background: var(--button-secondary-hover);
-        }
-
-        .btn-danger {
-            background: var(--danger-color);
-        }
-
-        .btn-danger:hover {
-            background: #c53030;
-        }
-
-        .btn-success {
-            background: var(--success-color);
-        }
-
-        .btn-success:hover {
-            background: #2f855a;
-        }
-
-        .btn-prominent {
-            padding: 16px 32px;
-            font-size: 18px;
-            font-weight: 600;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-
-        .form-group {
-            margin-bottom: 25px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: var(--secondary-text);
-            font-weight: 500;
-        }
-
-        .form-group input,
-        .form-group textarea,
-        .form-group select {
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid var(--border-color);
-            background-color: var(--input-bg);
-            color: var(--text-color);
-            border-radius: 10px;
-            font-size: 16px;
-            font-family: 'Inter', sans-serif;
-            transition: border-color 0.3s, background-color 0.3s;
-        }
-
-        .form-group input:focus,
-        .form-group textarea:focus,
-        .form-group select:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background-color: var(--input-focus-bg);
-        }
-
-        .form-group textarea {
-            min-height: 120px;
-            resize: vertical;
-        }
-
-        .back-btn {
-            background: none;
-            border: none;
-            color: var(--primary-color);
-            font-size: 16px;
-            cursor: pointer;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 500;
-        }
-
-        .back-btn:hover {
-            color: var(--primary-hover);
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(5px);
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal.show {
-            display: flex;
-        }
-
-        .modal-content {
-            background-color: var(--card-bg);
-            padding: 40px;
-            border-radius: 20px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 90vh;
-            overflow-y: auto;
-            position: relative;
-            animation: modalSlideIn 0.3s ease-out;
-            text-align: left;
-        }
-
-        .modal-content.text-center {
-            text-align: center;
-        }
-
-        @keyframes modalSlideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-30px) scale(0.95);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        .close {
-            position: absolute;
-            right: 20px;
-            top: 20px;
-            font-size: 24px;
-            font-weight: bold;
-            cursor: pointer;
-            color: var(--secondary-text);
-            transition: color 0.3s;
-        }
-
-        .close:hover {
-            color: var(--text-color);
-        }
-
-        .modal h2 {
-            color: var(--text-color);
-            margin-bottom: 15px;
-            font-size: 1.8rem;
-            font-weight: 700;
-            text-align: center;
-        }
-
-        .modal p {
-            color: var(--secondary-text);
-            margin-bottom: 30px;
-            line-height: 1.5;
-            text-align: center;
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-        }
-
-        .settings-container {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-        }
-
-        .settings-section {
-            padding-bottom: 20px;
-            margin-bottom: 20px;
-            border-bottom: 2px solid var(--border-color);
-        }
-
-        .settings-section:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-            padding-bottom: 0;
-        }
-
-        .settings-section h2,
-        .settings-section h4 {
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: var(--text-color);
-            margin-bottom: 20px;
-        }
-
-        .dark-mode-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 28px;
-        }
-
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 20px;
-            width: 20px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-
-        input:checked+.slider {
-            background-color: var(--primary-color);
-        }
-
-        input:checked+.slider:before {
-            transform: translateX(22px);
-        }
-
-        .study-container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            min-height: calc(100vh - 100px);
-            background-color: var(--bg-color);
-        }
-
-        .study-header {
-            text-align: center;
-            margin-bottom: 30px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-        }
-
-        .study-header-content {
-            flex-grow: 1;
-            text-align: center;
-        }
-
-        .study-header-actions {
-            position: absolute;
-            right: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            display: flex;
-            gap: 10px;
-        }
-
-        .study-title {
-            font-size: 2rem;
-            font-weight: 700;
-            color: var(--text-color);
-            margin-bottom: 10px;
-        }
-
-        .study-subtitle {
-            color: var(--secondary-text);
-            font-size: 1.1rem;
-        }
-
-        .flashcard-inner {
-            display: grid;
-            width: 100%;
-            height: 100%;
-            transition: transform 0.6s;
-            transform-style: preserve-3d;
-        }
-
-        .flashcard.is-flipped .flashcard-inner {
-            transform: rotateY(180deg);
-        }
-
-        .flashcard {
-            width: 100%;
-            max-width: 1500px;
-            background: transparent;
-            perspective: 1000px;
-            margin-bottom: 0px;
-            flex-grow: 0;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .flashcard-front,
-        .flashcard-back {
-            grid-area: 1 / 1 / 1 / 1;
-            padding: 40px;
-            min-height: 250px;
-            -webkit-backface-visibility: hidden;
-            backface-visibility: hidden;
-            background: var(--card-bg);
-            border-radius: 20px;
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            box-shadow: 0 10px 30px var(--shadow-color);
-            overflow-y: auto;
-        }
-
-        .flashcard-back {
-            transform: rotateY(180deg);
-        }
-
-        #cardBucketInfo {
-            position: absolute;
-            top: 15px;
-            left: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: var(--secondary-text);
-            background-color: var(--input-bg);
-            padding: 4px 10px;
-            border-radius: 12px;
-            z-index: 5;
-        }
-
-        .question {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--text-color);
-            margin-bottom: 25px;
-            line-height: 1.4;
-        }
-
-        .answer {
-            font-size: 1.2rem;
-            color: var(--text-color);
-            background: var(--input-bg);
-            padding: 20px;
-            border-radius: 12px;
-            margin-top: 20px;
-            line-height: 1.5;
-        }
-
-        #writeAnswerInput {
-            width: 100%;
-            min-height: 100px;
-            margin-top: 20px;
-            font-family: 'Inter', sans-serif;
-            font-size: 1.1rem;
-            padding: 20px;
-            border-radius: 12px;
-            border: 2px solid var(--border-color);
-            transition: all 0.3s;
-
-            background-color: var(--input-bg);
-            color: var(--text-color);
-
-            color-scheme: light dark;
-        }
-
-        .dark-mode #writeAnswerInput {
-            background-color: #2d3748;
-            color: #e2e8f0;
-            border-color: #4a5568;
-        }
-
-        #writeAnswerInput:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background-color: var(--input-focus-bg);
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
-        }
-
-        #writeAnswerInput:focus {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
-        }
-
-        #writeAnswerInput.correct {
-            border-color: var(--success-color);
-            background-color: #f0fff4;
-        }
-
-        .dark-mode #writeAnswerInput.correct {
-            background-color: #2c7a7b;
-        }
-
-        #writeAnswerInput.incorrect {
-            border-color: var(--danger-color);
-            background-color: #fff5f5;
-        }
-
-        .dark-mode #writeAnswerInput.incorrect {
-            background-color: #c5303030;
-        }
-
-        .accent-buttons {
-            margin-top: 15px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
-        }
-
-        .accent-buttons button {
-            background: var(--button-secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--button-secondary-text);
-            padding: 5px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-        }
-
-        .accent-buttons button:hover {
-            background: var(--button-secondary-hover);
-        }
-
-        .answer-buttons {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
-
-        .btn-show {
-            background: #38b2ac;
-            padding: 15px 30px;
-            font-size: 16px;
-        }
-
-        .btn-show:hover {
-            background: #319795;
-        }
-
-        .btn-correct {
-            background: var(--success-color);
-            order: 2;
-        }
-
-        .btn-incorrect {
-            background: var(--danger-color);
-            order: 1;
-        }
-
-        .btn-correct:hover {
-            background: #2f855a;
-        }
-
-        .btn-incorrect:hover {
-            background: #c53030;
-        }
-
-        .advanced-answer-btn {
-            flex: 1;
-            min-width: 100px;
-            padding: 12px 15px;
-            font-size: 14px;
-        }
-
-        .btn-again {
-            background: #e53e3e;
-        }
-
-        .btn-again:hover {
-            background: #c53030;
-        }
-
-        .btn-hard {
-            background: #dd6b20;
-        }
-
-        .btn-hard:hover {
-            background: #c05621;
-        }
-
-        .btn-good {
-            background: #3182ce;
-        }
-
-        .btn-good:hover {
-            background: #2b6cb0;
-        }
-
-        .btn-easy {
-            background: #38a169;
-        }
-
-        .btn-easy:hover {
-            background: #2f855a;
-        }
-
-        .progress-dashboard {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-            position: relative;
-        }
-
-        #deckNotesDisplay {
-            background: var(--input-bg);
-            border: 2px solid var(--border-color);
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 25px;
-        }
-
-        #deckNotesDisplay h3 {
-            margin-bottom: 10px;
-        }
-
-        #deckNotesDisplay img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            margin-top: 10px;
-        }
-
-        .progress-title {
-            font-size: 1.8rem;
-            font-weight: 700;
-            text-align: center;
-            margin-bottom: 25px;
-            color: var(--text-color);
-        }
-
-        .round-info {
-            text-align: center;
-            margin-bottom: 25px;
-            padding: 15px;
-            background: var(--input-bg);
-            border-radius: 12px;
-            color: var(--primary-color);
-            font-weight: 500;
-        }
-
-        .buckets-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-
-        .bucket {
-            background: var(--input-bg);
-            border-radius: 12px;
-            padding: 20px;
-            text-align: center;
-            border: 2px solid var(--border-color);
-        }
-
-        .bucket-number {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--primary-color);
-            margin-bottom: 5px;
-        }
-
-        .bucket-count {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: var(--text-color);
-        }
-
-        .progress-bar-container {
-            width: 100%;
-            height: 10px;
-            background: var(--border-color);
-            border-radius: 5px;
-            overflow: hidden;
-            margin: 20px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #38a169, #48bb78);
-            transition: width 0.5s ease;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            margin: 25px 0;
-        }
-
-        .stat {
-            text-align: center;
-            padding: 15px;
-            background: var(--input-bg);
-            border-radius: 12px;
-            border: 2px solid var(--border-color);
-        }
-
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--primary-color);
-        }
-
-        .stat-label {
-            font-size: 0.9rem;
-            color: var(--secondary-text);
-            margin-top: 5px;
-        }
-
-        #cardView {
-            display: flex;
-            flex-direction: column;
-            flex-grow: 1;
-        }
-
-        .ai-generator-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 25px;
-        }
-
-        .ai-panel {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .ai-panel h2 {
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: var(--text-color);
-            margin-bottom: 20px;
-        }
-
-        .import-tabs {
-            display: flex;
-            border-bottom: 2px solid var(--border-color);
-            margin-bottom: 20px;
-        }
-
-        .import-tab {
-            padding: 10px 15px;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--secondary-text);
-            border-bottom: 3px solid transparent;
-            margin-bottom: -2px;
-            transition: all 0.3s;
-        }
-
-        .import-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-
-        .file-drop-zone {
-            border: 3px dashed var(--border-dashed);
-            border-radius: 15px;
-            padding: 25px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .file-drop-zone:hover,
-        .file-drop-zone.dragover {
-            border-color: var(--primary-color);
-            background: var(--input-focus-bg);
-        }
-
-        .file-drop-zone p {
-            color: var(--secondary-text);
-            margin-bottom: 10px;
-        }
-
-        .processing-controls {
-            margin-top: auto;
-            background: var(--input-bg);
-            border-radius: 15px;
-            padding: 25px;
-            border: 2px solid var(--border-color);
-        }
-
-        .processing-controls h3 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--text-color);
-            margin-bottom: 15px;
-        }
-
-        .document-list,
-        .flashcard-list {
-            flex-grow: 1;
-            overflow-y: auto;
-            max-height: 500px;
-            padding-right: 10px;
-        }
-
-        .document-item {
-            background: var(--input-bg);
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 10px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .document-item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 5px;
-        }
-
-        .document-name {
-            font-weight: 500;
-            color: var(--text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            padding-right: 10px;
-            display: flex;
-            align-items: center;
-        }
-
-        .document-status-icon {
-            width: 20px;
-            height: 20px;
-            margin-right: 8px;
-            flex-shrink: 0;
-        }
-
-        .remove-doc-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--secondary-text);
-            padding: 0;
-            width: 20px;
-            height: 20px;
-        }
-
-        .remove-doc-btn:hover {
-            color: #e53e3e;
-        }
-
-        .document-info {
-            font-size: 0.9rem;
-            color: var(--secondary-text);
-        }
-
-        .generated-card {
-            background: var(--input-bg);
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 10px;
-            position: relative;
-        }
-
-        .generated-card .question {
-            font-size: 1rem;
-            margin-bottom: 8px;
-            font-weight: 500;
-            padding-right: 60px;
-        }
-
-        .generated-card .answer {
-            font-size: 0.95rem;
-            background: none;
-            padding: 0;
-            margin: 0;
-            padding-right: 60px;
-        }
-
-        .generated-card-actions {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            display: flex;
-            gap: 8px;
-        }
-
-        .generated-card-action-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 5px;
-            border-radius: 6px;
-            color: var(--secondary-text);
-            transition: all 0.3s;
-            width: 28px;
-            height: 28px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .generated-card-action-btn:hover {
-            background: var(--border-color);
-        }
-
-        .generated-card-action-btn.edit:hover {
-            color: var(--primary-color);
-        }
-
-        .generated-card-action-btn.delete:hover {
-            color: #e53e3e;
-        }
-
-        .list-empty-state {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100%;
-            text-align: center;
-            color: var(--secondary-text);
-        }
-
-        .list-empty-state-icon {
-            width: 48px;
-            height: 48px;
-            margin-bottom: 10px;
-            opacity: 0.6;
-        }
-
-        .spinner {
-            width: 20px;
-            height: 20px;
-            border: 3px solid var(--primary-color);
-            border-bottom-color: transparent;
-            border-radius: 50%;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .editor-container {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-        }
-
-        .editor-container .question-input,
-        .editor-container .solution-input {
-            font-family: 'Inter', sans-serif;
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 15px;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            background-color: var(--input-bg);
-            color: var(--text-color);
-            width: 100%;
-        }
-
-        #testAnswerInput {
-            width: 100%;
-            min-height: 120px;
-            margin-top: 20px;
-            font-family: 'Inter', sans-serif;
-            font-size: 1.1rem;
-            padding: 20px;
-            border-radius: 12px;
-            border: 2px solid var(--border-color);
-            background-color: var(--input-bg);
-            color: var(--text-color);
-            transition: all 0.3s ease;
-        }
-
-        #testAnswerInput:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
-        }
-
-
-        #testAnswerInput.correct {
-            border-color: var(--success-color);
-            background-color: #f0fff4;
-        }
-
-        .dark-mode #testAnswerInput.correct {
-            background-color: #2c7a7b;
-        }
-
-        #testAnswerInput.incorrect {
-            border-color: var(--danger-color);
-            background-color: #fff5f5;
-        }
-
-        .dark-mode #testAnswerInput.incorrect {
-            background-color: #c5303030;
-        }
-
-        .editor-container .question-input:focus,
-        .editor-container .solution-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            background-color: var(--input-focus-bg);
-
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
-        }
-
-        .sequence-desc-input {
-            font-family: 'Inter', sans-serif;
-            font-size: 0.95rem;
-            line-height: 1.45;
-        }
-
-        .form-section {
-            margin-bottom: 40px;
-        }
-
-        .form-row {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 25px;
-        }
-
-        .form-group {
-            flex: 1;
-        }
-
-        .form-group.full-width {
-            flex: 1 1 100%;
-        }
-
-        .form-group label {
-            font-size: 16px;
-        }
-
-        .form-group input,
-        .form-group textarea {
-            padding: 15px 15px !important;
-            border-radius: 10px !important;
-            font-size: 16px !important;
-            margin-bottom: 10px;
-            resize: vertical;
-            font-family: 'Inter', sans-serif;
-        }
-
-        .flashcard-editor-row {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-
-        .flashcard-item {
-            flex-grow: 1;
-            padding: 25px;
-            border: 2px solid var(--border-color);
-            border-radius: 15px;
-            background-color: var(--input-bg);
-            position: relative;
-        }
-
-        .image-preview {
-            min-height: 20px;
-            margin-bottom: 10px;
-        }
-
-        .image-preview img {
-            max-width: 150px;
-            max-height: 150px;
-            border-radius: 8px;
-            margin-top: 10px;
-            display: block;
-        }
-
-        .image-controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-
-        .image-controls span {
-            font-size: 0.9rem;
-            color: var(--secondary-text);
-        }
-
-        .question-input {
-            border-color: var(--border-color) !important;
-        }
-
-        .solution-input {
-            border-color: var(--border-color) !important;
-            margin-bottom: 0;
-        }
-
-        .remove-card-btn {
-            position: static;
-            background: #fee2e2;
-            border: 2px solid #fca5a5;
-            color: #dc2626;
-            cursor: pointer;
-            padding: 8px;
-            border-radius: 10px;
-            transition: all 0.3s;
-            width: 44px;
-            height: 44px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .remove-card-btn:hover {
-            background: #fecaca;
-            border-color: #f87171;
-            color: #b91c1c;
-            transform: scale(1.05);
-        }
-
-        .add-question-btn {
-            width: 100%;
-            padding: 20px;
-            border: 3px dashed var(--border-dashed);
-            border-radius: 15px;
-            background: var(--card-bg);
-            color: var(--secondary-text);
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 30px;
-        }
-
-        .add-question-btn:hover {
-            border-color: var(--primary-color);
-            background: var(--input-focus-bg);
-            color: var(--primary-color);
-        }
-
-        .actions-section {
-            display: flex;
-            justify-content: flex-end;
-            padding-top: 20px;
-            border-top: 2px solid var(--border-color);
-        }
-
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-
-        .checkbox-group input[type="radio"],
-        .checkbox-group input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            accent-color: var(--primary-color);
-        }
-
-        .checkbox-group label {
-            margin: 0;
-            font-weight: 500;
-            color: var(--text-color);
-        }
-
-        .form-group-inline {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        /* Message Bar - Unobtrusive top notification */
-        .message-bar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 1999;
-            padding: 12px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            backdrop-filter: blur(10px);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            transform: translateY(-100%);
-            opacity: 0;
-        }
-
-        .message-bar.show {
-            transform: translateY(0);
-            opacity: 1;
-        }
-
-        .message-bar.success {
-            background-color: rgba(72, 187, 120, 0.95);
-            color: white;
-        }
-
-        .message-bar.error {
-            background-color: rgba(245, 101, 101, 0.95);
-            color: white;
-        }
-
-        .message-bar.info {
-            background-color: rgba(102, 126, 234, 0.95);
-            color: white;
-        }
-
-        .message-bar.warning {
-            background-color: rgba(237, 137, 54, 0.95);
-            color: white;
-        }
-
-        @keyframes button-feedback-correct {
-            0% {
-                background-color: var(--success-color);
-            }
-
-            50% {
-                background-color: #2f855a;
-                transform: scale(1.05);
-            }
-
-            100% {
-                background-color: var(--success-color);
-            }
-        }
-
-        @keyframes button-feedback-incorrect {
-            0% {
-                background-color: var(--danger-color);
-            }
-
-            50% {
-                background-color: #c53030;
-                transform: scale(1.05);
-            }
-
-            100% {
-                background-color: var(--danger-color);
-            }
-        }
-
-        .feedback-correct {
-            animation: button-feedback-correct 0.4s ease-in-out;
-        }
-
-        .feedback-incorrect {
-            animation: button-feedback-incorrect 0.4s ease-in-out;
-        }
-
-        .custom-file-upload {
-            border: 2px solid var(--border-color);
-            border-radius: 10px;
-            display: inline-block;
-            padding: 12px 20px;
-            cursor: pointer;
-            background-color: var(--button-secondary-bg);
-            color: var(--button-secondary-text);
-            font-weight: 500;
-            transition: all 0.3s;
-        }
-
-        .custom-file-upload:hover {
-            background-color: var(--button-secondary-hover);
-        }
-
-        #importFileInput {
-            display: none;
-        }
-
-        #fileNameDisplay {
-            margin-top: 10px;
-            color: var(--secondary-text);
-            font-style: italic;
-        }
-
-        #testCardView {
-            display: flex;
-            flex-direction: column;
-            flex-grow: 1;
-        }
-
-        #testOptions {
-            width: 100%;
-            margin-top: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        #testOptions .btn {
-            width: 100%;
-            margin: 0;
-            padding: 15px;
-            font-size: 1rem;
-        }
-
-        .dashboard-footer {
-            text-align: center;
-            margin-top: 40px;
-        }
-
-        @media (max-width: 1024px) {
-            .ai-generator-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .app-header {
-                flex-direction: column;
-                gap: 15px;
-                padding: 15px;
-            }
-
-            .header-actions {
-                width: 100%;
-                justify-content: space-between;
-            }
-
-            .search-bar {
-                order: 2;
-                width: 100%;
-            }
-
-            .header-settings-btn {
-                order: 3;
-            }
-
-            .welcome-text h1 {
-                font-size: 1.5rem;
-                text-align: center;
-            }
-
-            .welcome-text p {
-                display: none;
-            }
-
-            .decks-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .create-options {
-                grid-template-columns: 1fr;
-            }
-
-            .answer-buttons {
-                flex-direction: column;
-                align-items: center;
-            }
-
-            .action-btn {
-                padding: 10px 16px;
-                font-size: 13px;
-            }
-
-            .form-row {
-                flex-direction: column;
-                gap: 15px;
-            }
-
-            .editor-container,
-            .settings-container {
-                padding: 25px;
-            }
-
-            .deck-detail-header {
-                flex-direction: column;
-                gap: 15px;
-            }
-
-            .deck-detail-actions {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .generated-card .question,
-            .generated-card .answer {
-                padding-right: 0;
-            }
-
-            .generated-card-actions {
-                position: static;
-                margin-top: 10px;
-                justify-content: flex-end;
-            }
-
-            .flashcard-front,
-            .flashcard-back {
-                padding: 20px;
-            }
-        }
-
-        .settings-option-group {
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 10px 15px 15px 15px;
-            margin-top: 10px;
-        }
-
-        .settings-option-group legend {
-            font-weight: 600;
-            color: var(--text-color);
-            padding: 0 8px;
-            margin-left: 10px;
-            font-size: 0.95rem;
-        }
-
-        .radio-option-row {
-            display: flex;
-            align-items: center;
-            padding: 5px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-            margin-top: 5px;
-        }
-
-        .radio-option-row:hover {
-            background-color: var(--input-bg);
-        }
-
-        .radio-option-row input[type="radio"] {
-            width: 18px;
-            height: 18px;
-            accent-color: var(--primary-color);
-            cursor: pointer;
-        }
-
-        .radio-option-row label {
-            margin: 0 0 0 12px;
-            font-weight: 500;
-            color: var(--text-color);
-            cursor: pointer;
-        }
-
-        .drag-item {
-            cursor: grab;
-            background-color: var(--input-bg);
-            margin-bottom: 10px;
-        }
-
-        .drag-item:active {
-            cursor: grabbing;
-        }
-
-        .drag-ghost {
-            opacity: 0.5;
-            background: var(--primary-color);
-        }
-
-        .drag-chosen {
-            background: #ebf4ff;
-        }
-
-        .dark-mode .drag-chosen {
-            background: #5a67d830;
-        }
-
-        /* Old toast styles removed - using message bar instead */
-
-
-        .exam-plans-container {
-            margin-bottom: 40px;
-        }
-
-        .exam-plan-card {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 25px;
-            box-shadow: 0 8px 30px var(--shadow-color);
-            border-left: 6px solid var(--success-color);
-            margin-bottom: 25px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-
-        .plan-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-        }
-
-        .plan-card-title {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: var(--text-color);
-        }
-
-        .plan-card-countdown {
-            font-size: 1rem;
-            font-weight: 500;
-            color: var(--success-color);
-            background-color: #f0fff4;
-            padding: 5px 12px;
-            border-radius: 20px;
-        }
-
-        .dark-mode .plan-card-countdown {
-            background-color: #2c7a7b;
-        }
-
-        .plan-card-footer {
-            margin-top: 10px;
-        }
-
-        .exam-plan-cta-container {
-            position: relative;
-            text-align: center;
-            margin-bottom: 35px;
-            padding: 25px;
-            background: var(--card-bg);
-            border-radius: 20px;
-            border: 2px dashed var(--border-dashed);
-            transition: all 0.3s ease;
-        }
-
-        .exam-plan-cta-container:hover {
-            border-color: var(--primary-color);
-            background: var(--input-focus-bg);
-        }
-
-        #examPlanDeckSelector .checkbox-group {
-            padding: 10px;
-            border-radius: 8px;
-            transition: background-color 0.2s ease;
-        }
-
-        #examPlanDeckSelector .checkbox-group:hover {
-            background-color: var(--input-bg);
-        }
-
-        .close-btn {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            background: none;
-            border: none;
-            font-size: 2rem;
-            font-weight: 300;
-            color: var(--secondary-text);
-            cursor: pointer;
-            padding: 0 10px;
-            line-height: 1;
-            transition: color 0.2s ease;
-        }
-
-        .close-btn:hover {
-            color: var(--text-color);
-        }
-
-        #authView.is-visible {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-
-        .view-container.hidden {
-            display: none !important;
-        }
-
-        #userProfileDropdown a:hover {
-            background-color: var(--input-bg);
-        }
-
-        .analytics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 30px;
-            margin-bottom: 30px;
-        }
-
-        #userProfileDropdown a:hover {
-            background-color: var(--input-bg);
-        }
-
-        .analytics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 30px;
-            margin-bottom: 30px;
-        }
-
-        .flashcard-editor-row.drag-item {
-            background: var(--card-bg);
-            border: 2px solid var(--border-color);
-            border-radius: 15px;
-            margin-bottom: 20px;
-            transition: all 0.3s ease;
-        }
-
-        .flashcard-editor-row.drag-item:hover {
-            border-color: var(--primary-color);
-            box-shadow: 0 4px 12px var(--shadow-color);
-        }
-
-        .flashcard-editor-row.drag-item.drag-ghost {
-            opacity: 0.4;
-            background: var(--primary-color);
-        }
-
-        .flashcard-editor-row.drag-item.drag-chosen {
-            background: var(--input-focus-bg);
-            border-color: var(--primary-color);
-            transform: scale(1.02);
-        }
-
-        .drag-handle:hover {
-            color: var(--primary-color) !important;
-            background: var(--input-bg);
-            border-radius: 8px;
-        }
-
-        .drag-handle:active {
-            cursor: grabbing;
-        }
-
-        #passiveReviewList li:hover {
-            background: var(--input-focus-bg);
-            transform: translateX(5px);
-        }
-
-        #dragDropList .drag-item:hover {
-            border-color: var(--primary-color) !important;
-            box-shadow: 0 4px 12px var(--shadow-color);
-        }
-
-        #dragDropList .drag-ghost {
-            opacity: 0.4;
-            background: var(--primary-color) !important;
-        }
-
-        #dragDropList .drag-chosen {
-            background: var(--input-focus-bg) !important;
-            border-color: var(--primary-color) !important;
-            transform: scale(1.05);
-            box-shadow: 0 8px 20px var(--shadow-color);
-        }
-
-        .session-progress-wrapper {
-            width: 100%;
-            max-width: 600px;
-            margin: 0 auto 20px auto;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .session-progress-track {
-            flex-grow: 1;
-            height: 8px;
-            background-color: var(--border-color);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .session-progress-fill {
-            height: 100%;
-            background-color: var(--primary-color);
-            width: 0%;
-            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .session-stats {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--secondary-text);
-            white-space: nowrap;
-        }
-    </style>
-</head>
-
-<body>
-    <div id="loadingView" class="hidden"
-        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--bg-color); z-index: 9999; display: flex; justify-content: center; align-items: center;">
-        <div style="text-align: center;">
-            <img src="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png" alt="Lagiote Revise Logo"
-                style="width: 80px; height: 80px; margin-bottom: 20px;">
-            <div class="spinner" style="width: 30px; height: 30px; border-width: 4px; margin: 0 auto 20px auto;"></div>
-            <p id="loadingMessage" style="font-size: 1.1rem; color: var(--secondary-text); font-weight: 500;">Loading...
-            </p>
-        </div>
-    </div>
-
-    <!-- Message Bar - Unobtrusive notification system -->
-    <div id="messageBar" class="message-bar hidden"></div>
-    <div id="authView" class="container view-container">
-        <div style="text-align: center; max-width: 600px;">
-            <div class="logo" style="margin: 0 auto 20px auto; width: 80px; height: 80px;">
-                <img src='https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png' alt="Lagiote Revise Logo">
-            </div>
-            <h2 style="font-size: 2.5rem; font-weight: 700;">Welcome to Lagiote Revise</h2>
-            <p style="font-size: 1.2rem; color: var(--secondary-text); margin-top: 15px;">
-                The smart flashcard app that helps you learn faster.
-            </p>
-            <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px;">
-                <button id="authSignupBtn" class="btn btn-prominent" style="width: 100%; max-width: 300px;">Sign Up for
-                    Free</button>
-                <button id="authLoginBtn" class="btn btn-secondary" style="width: 100%; max-width: 300px;">Log
-                    In</button>
-                <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; margin-top: 10px;">
-                    <button id="continueAsGuestBtn" class="btn"
-                        style="background: none; color: var(--primary-color); box-shadow: none;">Continue as a
-                        Guest</button>
-                    <div class="checkbox-group" style="font-size: 0.9rem;">
-                        <input type="checkbox" id="rememberGuestCheckbox" checked>
-                        <label for="rememberGuestCheckbox">Remember on this device</label>
-                    </div>
-                </div>
-            </div>
-
-            <p style="font-size: 0.9rem; color: var(--secondary-text); margin-top: 30px;">
-                By signing up, you can sync your progress across devices and access our full library of features.
-            </p><br>
-            <p style="font-size: 0.8rem; color: var(--secondary-text);">
-                Sign up and log in with your Auth0 account to sync your progress across devices.
-            </p>
-        </div>
-    </div>
-    <header id="appHeader" class="app-header hidden">
-        <div class="logo-section">
-            <button id="headerBackBtn" class="header-btn hidden" title="Go Back">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
-                    stroke="currentColor" width="20" height="20">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-                </svg>
-            </button>
-            <div class="logo" onclick="backToDashboard(true)">
-                <img src='https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png'>
-            </div>
-            <div class="welcome-text">
-                <h1 id="welcomeMessage">Lagiote Revise</h1>
-                <span
-                    style="font-size: 0.8rem; color: var(--secondary-text); align-self: flex-end; padding-bottom: 5px;">v1.30</span>
-                <div id="onlineStatusIndicator"
-                    style="display: flex; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 5px; margin-left: 15px;">
-                    <div id="onlineStatusDot" style="width: 10px; height: 10px; border-radius: 50%;"></div>
-                    <span id="onlineStatusText" style="font-size: 0.8rem; font-weight: 500;"></span>
-                </div>
-            </div>
-        </div>
-        <div class="header-actions">
-            <div class="search-bar">
-                <span class="search-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                        stroke-width="1.5" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                    </svg></span>
-                <input type="text" class="search-input" placeholder="Search decks..." id="searchInput">
-            </div>
-            <button id="headerHomeBtn" class="header-btn hidden" title="Go to Dashboard"
-                onclick="backToDashboard(true)">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                    stroke="currentColor" width="20" height="20">
-                    <path stroke-linecap="round" stroke-linejoin="round"
-                        d="M2.25 12l8.954-8.955a1.5 1.5 0 012.122 0l8.954 8.955M3 10.5v9A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75v-9" />
-                </svg>
-            </button>
-            <button id="headerSettingsBtn" class="header-btn header-settings-btn" title="Settings"
-                onclick="showSettings()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                    stroke="currentColor" width="20" height="20">
-                    <path stroke-linecap="round" stroke-linejoin="round"
-                        d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.39.44 1.02.12 1.45l-.527.737c-.25.35-.272.806-.108 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.11v1.093c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.108 1.204l.527.738c.32.43.27.96-.12 1.45l-.773.773a1.125 1.125 0 0 1-1.45.12l-.737-.527c-.35-.25-.806-.272-1.204-.108-.397.165-.71.505-.78.93l-.15.893c-.09.543-.56.94-1.11.94h-1.093c-.55 0-1.02-.398-1.11-.94l-.149-.894c-.07-.424-.384-.764-.78-.93-.398-.164-.855-.142-1.205.108l-.737.527a1.125 1.125 0 0 1-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.11v-1.093c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.527-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.806.272 1.204.108.397-.165.71.505.78-.93l.15-.893Z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                </svg>
-            </button>
-            <button id="guestSignupBtn" class="btn btn-primary"
-                style="padding: 6px 12px; font-size: 0.85rem; margin-right: 10px;">Sign Up</button>
-            <div id="userProfileMenu" class="hidden" style="position: relative;">
-                <button id="userProfileBtn" class="header-btn" title="Profile">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                        stroke="currentColor" width="20" height="20">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-                    </svg>
-                </button>
-                <div id="userProfileDropdown" class="hidden"
-                    style="position: absolute; right: 0; top: 50px; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 4px 12px var(--shadow-color); min-width: 220px; z-index: 101; padding: 10px; text-align: left;">
-                    <div id="userEmail"
-                        style="padding: 8px 12px; color: var(--secondary-text); border-bottom: 1px solid var(--border-color); margin-bottom: 8px; font-size: 0.9rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    </div>
-                    <a id="syncBtn" href="#"
-                        style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px;">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor"
-                            style="width: 16px; height: 16px; display: inline-block; margin-right: 8px; vertical-align: middle;">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                        </svg>
-                        Sync Data
-                    </a>
-                    <a id="logoutBtn" href="#"
-                        style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px;">Log
-                        Out</a>
-                </div>
-            </div>
-        </div>
-    </header>
-
-    <div id="dashboard" class="container view-container">
-        <div id="loggedOutView" class="hidden" style="text-align: center; padding: 80px 20px;">
-            <h2 style="font-size: 2.5rem; font-weight: 700;">Unlock Your Full Learning Potential</h2>
-            <p
-                style="font-size: 1.2rem; color: var(--secondary-text); margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
-                Create an account to save your progress, sync across devices, and access the curricula library.
-            </p>
-            <div style="margin-top: 40px;">
-                <button class="btn btn-prominent" onclick="console.log('Signup will be implemented with Auth0');">Create
-                    Free Account</button>
-            </div>
-        </div>
-        <div id="loggedInView" class="hidden">
-            <div class="main-content">
-                <div id="decksSection">
-                    <p id="subtitle" style="color: var(--secondary-text); font-size: 1.1rem; margin-bottom: 25px;"></p>
-                    <div id="examPlanCtaContainer" class="exam-plan-cta-container">
-                        <button class="close-btn" onclick="hideExamPlanBanner(event)"
-                            title="Hide this banner">&times;</button>
-                        <button class="btn btn-prominent" onclick="showExamPlanModal()">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                                stroke="currentColor" width="20" height="20">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0h18M12 12.75h.008v.008H12v-.008Z" />
-                            </svg>
-                            Create New Exam Plan
-                        </button>
-                    </div>
-
-                    <div id="decksContainer"></div><br><br>
-                </div>
-                <div id="deckDetailView" class="deck-detail-view hidden">
-                    <div class="deck-detail-header">
-                        <div>
-                            <span class="deck-detail-category" id="deckDetailCategory"></span>
-                            <h2 class="deck-detail-title" id="deckDetailTitle"></h2>
-                        </div>
-                        <div id="deckDetailActions" class="deck-detail-actions">
-                            <button class="btn learn-btn" onclick="configureStudy('learn')">Learn</button>
-
-                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
-                            <button class="btn review-btn" id="deckDetailTestBtn">Practice Test</button>
-                            <button class="btn btn-secondary" id="deckDetailResetBtn"
-                                style="border: 2px solid var(--border-color);">Reset Progress</button>
-                            <button class="btn btn-secondary" id="deckDetailSettingsBtn">Settings</button>
-                            <button class="btn btn-secondary" id="deckDetailEditBtn">Edit</button>
-                            <button class="btn btn-danger" id="deckDetailDeleteBtn">Delete</button>
-                        </div>
-                    </div>
-                    <h3 class="section-title">Cards in this deck</h3>
-                    <div class="deck-cards-list" id="deckCardsList"></div>
-                </div>
-                <div class="create-section">
-                    <div class="section-title">Start a new deck</div>
-                    <div class="create-options">
-                        <div class="create-card" onclick="showEditor()">
-                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
-                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-                                </svg></span>
-                            <div class="create-title">Create Manually</div>
-                            <div class="create-desc">Build your own deck card-by-card</div>
-                        </div>
-                        <div class="create-card" onclick="showImportModal()">
-                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
-                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
-                                </svg></span>
-                            <div class="create-title">Import Deck</div>
-                            <div class="create-desc">Import from JSON, CSV, or pasted text</div>
-                        </div>
-                        <div class="create-card" onclick="showAiGenerator()">
-                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
-                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-                                </svg></span>
-                            <div class="create-title">Create with AI</div>
-                            <div class="create-desc">Generate a deck from a topic or text</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="dashboard-footer">
-                    <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
-                    <button class="btn btn-secondary" onclick="showAnalyticsView()">Show Analytics</button>
-                    <button id="createExamPlanFooterBtn" class="btn btn-secondary hidden"
-                        onclick="showExamPlanModal()">Create Exam Plan</button>
-                    <button id="internalDashboardBtn" class="btn btn-secondary" onclick="showInternalAnalytics()"
-                        style="margin-left: 10px;">Internal Dashboard</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="planDetailView" class="container view-container">
-        <div class="deck-detail-view" style="margin-top: 20px;">
-            <div class="deck-detail-header">
-                <div>
-                    <span class="deck-detail-category"
-                        style="background-color: var(--success-color); color: white;">Exam Plan</span>
-                    <h2 class="deck-detail-title" id="planDetailTitle"></h2>
-                    <p id="planDetailCountdown" style="color: var(--secondary-text); margin-top: 5px;"></p>
-                </div>
-                <div id="planDetailActions" class="deck-detail-actions">
-                    <button class="btn btn-prominent" id="planDetailStartBtn">Start Today's Session</button>
-                    <button class="btn btn-secondary" id="planDetailEditBtn">Edit Plan</button>
-                    <button class="btn btn-danger" id="planDetailDeleteBtn">Delete Plan</button>
-                </div>
-            </div>
-        </div>
-
-        <div class="settings-container" style="margin-top: 30px;">
-            <h3 class="section-title">Plan Analytics</h3>
-            <div id="planAnalyticsContent">
-                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px; align-items: center;">
-                    <div>
-                        <h4>Mastery Breakdown</h4>
-                        <canvas id="planMasteryChart"></canvas>
-                        <div id="planMasteryLegend" style="margin-top: 15px; font-size: 0.9rem;"></div>
-                    </div>
-                    <div>
-                        <h4>Progress by Deck</h4>
-                        <canvas id="planDeckProgressChart"></canvas>
-                    </div>
-                </div>
-                <h4 style="margin-top: 40px;">Hardest Cards in this Plan</h4>
-                <div class="deck-cards-list" id="planHardestCardsList" style="margin-top: 15px;"></div>
-            </div>
-        </div>
-    </div>
-    <div id="insightsView" class="container view-container">
-        <div class="section-title" style="padding-top: 20px;">Memory Insights</div>
-        <div class="settings-container">
-            <div class="form-group">
-                <label for="insightsDeckSelect">Select a deck to analyze</label>
-                <select id="insightsDeckSelect"></select>
-            </div>
-            <div id="insightsContent" class="hidden" style="margin-top: 30px;">
-                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px;">
-                    <div>
-                        <h4>Mastery Breakdown</h4>
-                        <canvas id="masteryBreakdownChart" style="margin-top: 15px;"></canvas>
-                        <div id="masteryLegend" style="margin-top: 15px; font-size: 0.9rem;"></div>
-                    </div>
-                    <div>
-                        <h4>Predicted Forgetting Curve</h4>
-                        <canvas id="forgettingCurveChart" style="margin-top: 15px;"></canvas>
-                        <p id="cardDetailForCurve"
-                            style="text-align: center; margin-top: 10px; color: var(--secondary-text);">Select a card
-                            from the list to see its curve.</p>
-                    </div>
-                </div>
-                <h4 style="margin-top: 40px;">Card-Specific Data</h4>
-                <div class="deck-cards-list" id="insightsCardList" style="margin-top: 15px;"></div>
-            </div>
-            <div id="insightsPlaceholder">
-                <p style="text-align: center; color: var(--secondary-text); padding: 40px 0;">Please select a deck to
-                    view its memory insights.</p>
-            </div>
-        </div>
-    </div>
-    <div id="internalAnalyticsView" class="container view-container">
-        <div class="section-title" style="padding-top: 20px;">Internal Analytics Dashboard</div>
-        <div class="settings-container">
-            <div class="settings-section">
-                <h2>Common Error Analysis</h2>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="errorDeckSelect">Select Deck</label>
-                        <select id="errorDeckSelect"></select>
-                    </div>
-                    <div class="form-group">
-                        <label for="errorCardSelect">Select Card</label>
-                        <select id="errorCardSelect"></select>
-                    </div>
-                </div>
-                <div id="errorAnalysisResult" style="margin-top: 20px;">
-                    <p>Please select a card to see a breakdown of common incorrect answers.</p>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h2>Interaction Metrics Distributions</h2>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px;">
-                    <div>
-                        <h4>Recall Latency (ms)</h4>
-                        <canvas id="latencyHistogram"></canvas>
-                    </div>
-                    <div>
-                        <h4>Answer Fluency (chars/sec)</h4>
-                        <canvas id="fluencyHistogram"></canvas>
-                    </div>
-                    <div>
-                        <h4>Corrections per Answer</h4>
-                        <canvas id="correctionsHistogram"></canvas>
-                    </div>
-                </div>
-                <div class="settings-section">
-                    <h2>Deck Flashcard Statistics</h2>
-                    <div id="deckStatisticsResult" style="margin-top: 20px; max-height: 500px; overflow-y: auto;">
-                        <p>Please select a deck to see a breakdown of its flashcard statistics.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h2>Latency vs. Correctness</h2>
-                <canvas id="latencyScatterPlot" style="max-height: 400px;"></canvas>
-            </div>
-
-            <div class="settings-section">
-                <h2>Interactions Per Day</h2>
-                <canvas id="interactionsTimeSeries" style="max-height: 400px;"></canvas>
-            </div>
-
-        </div>
-    </div>
-    <div id="aiGenerator" class="container view-container">
-        <div class="section-title" style="padding-top: 20px;">AI Flashcard Generator</div>
-        <div class="ai-generator-grid">
-            <div class="ai-panel">
-
-                <div id="aiContentInput">
-                    <div class="form-group">
-                        <label>Upload Files or Enter Text</label>
-                        <div class="file-drop-zone" id="file-drop-zone">
-                            <input id="file-input" type="file" multiple class="hidden" />
-                            <p>Drag & drop or click to select files (Text, Image, PDF, DocX)</p>
-                            <button type="button" class="btn btn-secondary" id="select-file-btn">Select Files</button>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <textarea id="ai-text-input" placeholder="Or paste your text here..."
-                            style="min-height: 150px;"></textarea>
-                        <button id="add-text-btn" class="btn" style="width:100%; margin-top:10px;"
-                            onclick="addTextAsDocument()">Add Text as
-                            Document</button>
-                    </div>
-
-                    <!-- New Customization Section -->
-                    <div class="form-group"
-                        style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                        <label style="margin-bottom: 10px; display: block; font-weight: 600;">Customize
-                            Generation</label>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                            <div>
-                                <label style="font-size: 0.85rem; color: var(--secondary-text);">Type</label>
-                                <select id="aiCardType" class="form-control" style="width: 100%;">
-                                    <option value="auto">Auto</option>
-                                    <option value="flashcard">Flashcard</option>
-                                    <option value="vocab">Vocabulary</option>
-                                    <option value="sequence">Sequence</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label style="font-size: 0.85rem; color: var(--secondary-text);">Length</label>
-                                <select id="aiCardCount" class="form-control" style="width: 100%;">
-                                    <option value="auto">Auto</option>
-                                    <option value="short">Short (5-10)</option>
-                                    <option value="medium">Medium (10-20)</option>
-                                    <option value="long">Long (20+)</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label style="font-size: 0.85rem; color: var(--secondary-text);">Language</label>
-                                <select id="aiLanguage" class="form-control" style="width: 100%;">
-                                    <option value="auto">Auto</option>
-                                    <option value="English">English</option>
-                                    <option value="Spanish">Spanish</option>
-                                    <option value="French">French</option>
-                                    <option value="German">German</option>
-                                    <option value="Italian">Italian</option>
-                                    <option value="Mandarin">Mandarin</option>
-                                    <option value="Japanese">Japanese</option>
-                                    <option value="Korean">Korean</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="processing-controls">
-                    <h3 id="doc-count-title">Process All</h3>
-                    <div id="processing-status" class="hidden" style="margin-bottom: 15px;">
-                        <div style="margin-bottom: 5px; font-size: 0.9rem; color: var(--secondary-text);">Processing
-                            <span id="progress-current">0</span> of <span id="progress-total">0</span>...
-                        </div>
-                        <div class="progress-bar-container">
-                            <div class="progress-fill" id="progress-bar" style="width: 0%;"></div>
-                        </div>
-                    </div>
-                    <button id="process-btn" class="btn" style="width: 100%;" disabled>
-                        <span id="process-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                                stroke-width="1.5" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-                            </svg></span>
-                        <span id="loader-icon" class="spinner hidden"></span>
-                        <span id="process-text">Process All</span>
-                    </button>
-                </div>
-            </div>
-            <div class="ai-panel">
-                <h2 id="doc-list-count">Documents (0)</h2>
-                <div class="document-list" id="document-list">
-                    <div id="empty-doc-list" class="list-empty-state">
-                        <div class="list-empty-state-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
-                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                            </svg></div>
-                        <p>Your uploaded documents will appear here.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="ai-panel">
-                <h2 id="flashcard-count">Generated Flashcards (0)</h2>
-                <div class="flashcard-list" id="flashcard-list">
-                    <div id="empty-flashcard-list" class="list-empty-state">
-                        <div class="list-empty-state-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
-                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-                            </svg></div>
-                        <p>Generated cards will appear here after processing.</p>
-                    </div>
-                </div>
-                <div id="flashcard-summary" class="processing-controls hidden" style="margin-top: 15px;">
-                    <button id="save-deck-btn" class="btn btn-success" style="width: 100%;"
-                        onclick="saveAiGeneratedDeck()">Save as New Deck</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="editorView" class="container view-container">
-        <div class="editor-container" style="margin-top:20px;">
-            <div
-                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid var(--border-color);">
-                <h2 style="font-size: 1.8rem; font-weight: 700;">Create / Edit Deck</h2>
-                <button class="btn btn-success" onclick="editorSaveDeck()">Save Deck</button>
-            </div>
-            <div class="form-section">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="deckTitle">Title</label>
-                        <input type="text" id="deckTitle" placeholder="Enter deck title">
-                    </div>
-                    <div class="form-group">
-                        <label for="deckCategory">Category</label>
-                        <select id="deckCategory" class="form-group"></select>
-                    </div>
-                    <div class="form-group">
-                        <label for="deckTypeHint">Deck Type (AI Hint)</label>
-                        <select id="deckTypeHint">
-                            <option value="General">General / Q&A</option>
-                            <option value="Vocabulary">Vocabulary</option>
-                            <option value="Sequence">Sequence / Ordered List</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <label for="deckNotes" style="margin-bottom: 0;">Notes (optional, shown before studying)</label>
-                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;"
-                            onclick="triggerNotesImageUpload(this)">Add Image</button>
-                        <input type="file" class="image-upload-input" accept="image/*" style="display:none;"
-                            onchange="handleNotesImageUpload(this)">
-                    </div>
-                    <textarea id="deckNotes"
-                        placeholder="Add any notes, summaries, or instructions for this deck..."></textarea>
-                </div>
-            </div>
-            <div class="flashcards-section">
-                <div id="flashcardsContainer"></div>
-                <button class="add-question-btn" onclick="editorAddNewCard()">+ Add Question</button>
-                <div class="actions-section">
-                    <button class="btn btn-success" onclick="editorSaveDeck()">Save Deck</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="settingsView" class="container view-container">
-        <a href="#" class="termly-display-preferences">Consent Preferences</a>
-        <div class="settings-container" style="margin-top:20px;">
-            <div class="settings-section">
-                <h2>Profile</h2>
-                <div class="form-group">
-                    <label for="usernameInput">Your Name</label>
-                    <input type="text" id="usernameInput" placeholder="Username">
-                </div>
-                <button class="btn" onclick="saveUsername()">Save Name</button>
-            </div>
-            <div class="settings-section">
-                <h2>Appearance</h2>
-                <div class="dark-mode-toggle">
-                    <label for="darkModeToggle">Dark Mode</label>
-                    <label class="switch">
-                        <input type="checkbox" id="darkModeToggle">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-            </div>
-            <div class="settings-section">
-                <h2>Study Settings</h2>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="enableInStudyEditing">
-                    <label for="enableInStudyEditing">Enable card editing during study sessions</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="enableToastsToggle">
-                    <label for="enableToastsToggle">Enable motivational messages</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="toggleExamPlanBanner">
-                    <label for="toggleExamPlanBanner">Show the "Create Exam Plan" banner on the dashboard</label>
-                </div>
-
-                <button class="btn" onclick="saveStudySettings()">Save Study Settings</button>
-
-            </div>
-            <div class="settings-section">
-                <h2>Data Contribution</h2>
-                <p style="color: var(--secondary-text); font-size: 0.9rem; margin-bottom: 15px;">
-                    Help improve Lagiote Revise by exporting your study data.
-                    You can email the generated file to the developer for analysis.
-                </p>
-                <button class="btn btn-secondary" onclick="generateFullDataExport()">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                        stroke="currentColor" width="20" height="20" style="vertical-align: middle; margin-right: 8px;">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                    </svg>
-                    Export Research Data
-                </button>
-            </div>
-            <div class="settings-section">
-                <h2>Danger Zone</h2>
-                <p style="color: var(--secondary-text); margin-bottom: 15px;">These actions are permanent and cannot be
-                    undone.</p>
-                <button class="btn btn-danger" onclick="clearAllDecks()">Clear All Decks</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="studyMode" class="container view-container">
-        <div class="study-container">
-            <div class="study-header">
-                <!-- Left side: Pomodoro Timer -->
-                <div style="position: absolute; left: 0; top: 50%; transform: translateY(-50%);">
-                    <div id="pomodoroTimer" class="hidden"
-                        style="display: inline-flex; flex-direction: column; align-items: center; padding: 10px; border-radius: 8px; background: rgba(0,0,0,0.05); transition: background 0.3s; box-shadow: 0 2px 8px var(--shadow-color);">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-                            <span id="pomodoroMode"
-                                style="font-size: 0.8rem; font-weight: 600; color: var(--secondary-text);">WORK</span>
-                            <span id="pomodoroDisplay"
-                                style="font-family: monospace; font-size: 1.2rem; font-weight: 700;">25:00</span>
-                        </div>
-                        <div style="display: flex; gap: 5px;">
-                            <button id="pomodoroPlayPause" onclick="togglePomodoro()"
-                                style="padding: 4px 12px; border: none; border-radius: 4px; background: var(--primary-color); color: white; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">
-                                ▶ Start
-                            </button>
-                            <button onclick="resetPomodoro()"
-                                style="padding: 4px 12px; border: none; border-radius: 4px; background: var(--button-secondary-bg); color: var(--button-secondary-text); cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">
-                                ↻ Reset
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Center: Title and Focus Meter -->
-                <div class="study-header-content">
-                    <div class="study-title" id="studyTitle">Learning Mode</div>
-                    <div class="study-subtitle" id="studySubtitle">Deck Name</div>
-                    <div id="focusMeter" style="display: inline-block; margin-top: 8px;">
-                        <span style="font-size: 0.9rem; color: var(--secondary-text); margin-right: 5px;">Focus:</span>
-                        <div id="focusDot"
-                            style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #38a169; transition: background-color 0.3s;">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Right side: Action buttons -->
-                <div class="study-header-actions">
-                    <button id="accentToggleBtn" class="header-btn hidden" title="Toggle Accents"
-                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;"
-                        onclick="toggleAccentButtons()">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
-                        </svg>
-                    </button>
-                    <button id="editStudyCardBtn" class="header-btn hidden" title="Edit Card">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-                        </svg>
-                    </button>
-                    <button id="switchStudyModeBtn" class="header-btn hidden" title="Switch Study Mode">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
-                        </svg>
-                    </button>
-                    <button id="instructionsBtn" class="header-btn" title="Instructions">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <div id="progressView" class="hidden sub-view">
-                <div class="progress-dashboard">
-                    <div id="deckNotesDisplay" class="hidden"></div>
-                    <div class="progress-title" id="progressTitle">Learning Progress</div>
-
-                    <div style="margin-bottom: 25px;">
-                        <div class="deck-progress-label" style="margin-bottom: 10px;">
-                            <span>Deck Mastery</span>
-                            <span id="deckMasteryValue">0%</span>
-                        </div>
-                        <div class="progress-bar-container">
-                            <div class="progress-fill" id="deckMasteryProgress" style="width: 0%"></div>
-                        </div>
-                    </div>
-
-                    <div class="stats" id="statsContainer">
-                        <div class="stat">
-                            <div class="stat-value" id="masteredCardCount">0</div>
-                            <div class="stat-label">Cards Mastered</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="learningCardCount">0</div>
-                            <div class="stat-label">Cards Learning</div>
-                        </div>
-                    </div>
-
-                    <div id="activeLearningPoolDisplay" style="margin-top: 30px;">
-                        <h4
-                            style="font-weight: 600; color: var(--text-color); margin-bottom: 15px; text-align: center;">
-                            This Round's Focus</h4>
-                        <div id="activePoolList" class="deck-cards-list"
-                            style="max-height: 150px; padding: 10px 20px; border-style: dashed;">
-                            <p style="text-align: center; color: var(--secondary-text);">Preparing your next round...
-                            </p>
-                        </div>
-                    </div>
-
-                    <div style="text-align: center; margin-top: 30px;">
-                        <button class="btn" id="continueBtn">Continue Round</button>
-                        <button class="btn btn-secondary" onclick="endSession()" style="margin-left: 10px;">End
-                            Session</button>
-                        <button class="btn btn-danger" id="resetBtn" onclick="resetProgress()"
-                            style="margin-left: 10px;">Reset Progress</button>
-                    </div>
-                </div>
-            </div>
-            <div id="cardView" class="hidden sub-view">
-                <div id="passiveReviewView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front" style="text-align: left;">
-                        <h3 style="text-align: center; margin-bottom: 20px;">Let's learn these!</h3>
-                        <ol id="passiveReviewList" style="padding-left: 40px; font-size: 1.2rem; line-height: 1.8;">
-                        </ol>
-                    </div>
-                    <div class="answer-buttons">
-                        <button class="btn btn-success" onclick="moveToNextSequencePhase()">Got it, Start
-                            Practice</button>
-                    </div>
-                </div>
-
-                <div id="dragDropView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front">
-                        <h3 style="margin-bottom: 20px;">Put these items in the correct order:</h3>
-                        <div id="dragDropList" class="deck-cards-list" style="max-height: none; border-style: dashed;">
-                        </div>
-                    </div>
-                    <div class="answer-buttons">
-                        <button id="checkDragDropBtn" class="btn btn-show" onclick="checkDragDropOrder()">Check
-                            Order</button>
-                    </div>
-                </div>
-                <div class="round-info" id="cardRoundInfo">Round 1 - Card 1 of 5</div>
-                <div id="flashcardViewContainer">
-                    <div class="flashcard">
-                        <div class="flashcard-inner">
-                            <div class="flashcard-front">
-                                <div id="cardBucketInfo">New</div>
-                                <div id="cardStatsInfo"
-                                    style="position: absolute; top: 15px; right: 20px; font-size: 0.9rem; text-align: right;">
-                                </div>
-                                <div id="cardQuestionContent">
-                                    <div class="question" id="cardQuestion"></div>
-                                </div>
-                            </div>
-                            <div class="flashcard-back">
-                                <div id="cardAnswerContent" class="hidden">
-                                    <div class="answer" id="cardAnswer"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="mcqView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front" style="min-height: 150px; margin-bottom: 20px;">
-                        <div class="question" id="mcqQuestion"></div>
-                    </div>
-                    <div id="mcqOptions" class="answer-buttons" style="flex-direction: column; gap: 15px; width: 100%;">
-                    </div>
-                </div>
-
-                <div style="text-align: center; margin-top: 20px;">
-                    <textarea id="writeAnswerInput" class="form-group textarea hidden"
-                        placeholder="Type your answer here..."></textarea>
-                    <div id="accentButtonsContainer" class="accent-buttons hidden"></div>
-                    <div id="feedbackMessage"
-                        style="text-align: center; margin-top: 10px; font-weight: 500; min-height: 20px;"></div>
-                </div>
-
-                <div class="answer-buttons" id="simpleAnswerButtons">
-                    <button class="btn btn-show" id="showAnswerBtn" onclick="showAnswer()">Show Answer</button>
-                    <button class="btn btn-secondary hidden" id="showQuestionBtn" onclick="showQuestion()">Show
-                        Question</button>
-                    <button class="btn btn-show hidden" id="checkAnswerBtn" onclick="autoCheckAnswer()">Check
-                        Answer</button>
-                    <button class="btn btn-secondary hidden" id="dontKnowBtn" onclick="dontKnowAnswer()">Don't
-                        Know</button>
-                    <button class="btn btn-primary hidden" id="nextBtn" onclick="handleNextCard()">Next
-                        &rarr;</button>
-                    <button class="btn btn-incorrect hidden" id="incorrectBtn"
-                        onclick="markIncorrect()">Incorrect</button>
-                    <button class="btn btn-correct hidden" id="correctBtn" onclick="markCorrect()">Correct</button>
-                </div>
-                <div class="answer-buttons hidden" id="advancedAnswerButtons">
-                    <button class="btn btn-again advanced-answer-btn" onclick="markSpaced(1)">Again</button>
-                    <button class="btn btn-hard advanced-answer-btn" onclick="markSpaced(2)">Hard</button>
-                    <button class="btn btn-good advanced-answer-btn" onclick="markSpaced(3)">Good</button>
-                    <button class="btn btn-easy advanced-answer-btn" onclick="markSpaced(4)">Easy</button>
-                </div>
-            </div>
-            <div id="completeView" class="hidden sub-view">
-                <div class="progress-dashboard">
-                    <div class="progress-title">Complete!</div>
-                    <p style="text-align: center; font-size: 1.2rem; margin: 25px 0; color: var(--secondary-text);">
-                        Congratulations! You've mastered all your flashcards.</p>
-                    <div class="stats" id="finalStats"></div>
-                    <div style="text-align: center; margin-top: 25px;">
-                        <button class="btn" onclick="restartStudy()">Study Again</button>
-                        <button class="btn btn-secondary" onclick="endSession()" style="margin-left: 10px;">End
-                            Session</button>
-                    </div>
-                </div>
-            </div>
-            <div id="preGenerationView" class="hidden sub-view">
-                <div class="progress-dashboard" style="text-align: center;">
-                    <div class="progress-title">Preparing Smart Questions...</div>
-                    <div style="font-size: 3rem; font-weight: 700; color: var(--primary-color); margin: 20px auto;">
-                        <span id="countdownDisplay">10</span>
-                    </div>
-                    <p style="color: var(--secondary-text); margin-bottom: 25px;">
-                        <span id="countdownText">Loading questions... 10 seconds remaining</span>
-                    </p>
-
-                    <div class="progress-bar-container" style="max-width: 300px; margin: 0 auto;">
-                        <div class="progress-fill" id="preGenerationProgress" style="width: 0%;"></div>
-                    </div>
-                    <p id="preGenerationProgressText"
-                        style="margin-top: 10px; font-weight: 500; color: var(--secondary-text);">0 / 0</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="practiceTestModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
-            <span class="close" onclick="closePracticeTestModal()">&times;</span>
-            <h2>Practice Test</h2>
-            <div class="form-group">
-                <label for="testType">Test Type</label>
-                <select id="testType">
-                    <option value="flashcard">Flashcards</option>
-                    <option value="multiple_choice">Multiple Choice</option>
-                    <option value="type">Type Answer</option>
-                    <option value="sequence">Sequence Practice</option>
-                    <option value="mixed">Mixed Types</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="numQuestions">Number of Questions</label>
-                <input type="number" id="numQuestions" min="1" max="100" value="10">
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closePracticeTestModal()">Cancel</button>
-                <button class="btn btn-success" onclick="startPracticeTest()">Start Test</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="practiceTestView" class="container view-container">
-        <div class="study-container">
-            <div class="study-header">
-                <div class="study-header-content">
-                    <div class="study-title" id="testTitle">Practice Test</div>
-                    <div class="study-subtitle" id="testSubtitle">Deck Name</div>
-                </div>
-                <div class="study-header-actions">
-                    <button id="testAccentToggleBtn" class="header-btn hidden" title="Toggle Accents">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c1.356 0 2.673-.174 3.946-.512M12 21c-1.273 0-2.59-.174-3.872-.512M21 12a9 9 0 0 0-9-9c-1.356 0-2.673.174-3.946-.512M3 12a9 9 0 0 1 9-9c1.273 0 2.59.174 3.872.512M12 3v18" />
-                        </svg>
-                    </button>
-                    <button id="testInstructionsBtn" class="header-btn" title="Instructions">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <div id="testProgressView" class="hidden sub-view">
-                <div class="progress-dashboard">
-                    <div class="progress-title">Test Progress</div>
-                    <div class="round-info" id="testInfo">0 of 0 questions</div>
-                    <div class="progress-bar-container">
-                        <div class="progress-fill" id="testProgressBar" style="width: 0%"></div>
-                    </div>
-                    <div class="stats">
-                        <div class="stat">
-                            <div class="stat-value" id="testCorrectCount">0</div>
-                            <div class="stat-label">Correct</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="testIncorrectCount">0</div>
-                            <div class="stat-label">Incorrect</div>
-                        </div>
-                    </div>
-                    <div style="text-align: center; margin-top: 25px;">
-                        <button class="btn" onclick="startTest()">Start Test</button>
-                    </div>
-                </div>
-            </div>
-            <div id="testCardView" class="hidden sub-view">
-                <div class="round-info" id="testCardInfo">Question 1 of 10</div>
-
-
-                <div id="testSequenceView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front">
-                        <h3 style="margin-bottom: 20px;">Put these items in the correct order:</h3>
-                        <div id="testDragDropList" class="deck-cards-list"
-                            style="max-height: none; border-style: dashed;">
-                        </div>
-                    </div>
-                    <div class="answer-buttons">
-                        <button id="testCheckSequenceBtn" class="btn btn-show" onclick="checkTestSequence()">Check
-                            Order</button>
-                    </div>
-                </div>
-
-
-                <div id="testRegularView">
-                    <div class="flashcard">
-                        <div class="flashcard-inner">
-                            <div class="flashcard-front">
-                                <div class="question" id="testQuestion"></div>
-                            </div><br><br><br><br>
-                            <br>
-                            <div class="flashcard-back">
-                                <div id="testAnswerContent" class="hidden">
-                                    <div class="answer" id="testAnswer"></div>
-                                </div>
-                            </div>
-                            <br><br><br>
-                        </div>
-                    </div>
-                    <div id="testOptions" class="hidden"></div>
-                </div>
-                <div style="text-align: center; margin-top: 30px;">
-                    <textarea id="testAnswerInput" class="form-group textarea hidden"
-                        placeholder="Type your answer here..."></textarea>
-                    <div id="testAccentButtonsContainer" class="accent-buttons hidden"></div>
-                </div>
-                <div class="answer-buttons">
-                    <button class="btn btn-show" id="testShowAnswerBtn" onclick="showTestAnswer()">Show Answer</button>
-                    <button class="btn btn-show hidden" id="testCheckAnswerBtn" onclick="checkTestAnswer()">Check
-                        Answer</button>
-                    <button class="btn btn-incorrect hidden" id="testIncorrectBtn"
-                        onclick="markTestIncorrect()">Incorrect</button>
-                    <button class="btn btn-correct hidden" id="testCorrectBtn"
-                        onclick="markTestCorrect()">Correct</button>
-                    <button class="btn btn-success hidden" id="testNextBtn" onclick="nextTestQuestion()">Next</button>
-                </div>
-            </div>
-            <div id="testCompleteView" class="hidden sub-view">
-                <div class="progress-dashboard">
-                    <div class="progress-title">Test Complete!</div>
-                    <p style="text-align: center; font-size: 1.2rem; margin: 25px 0; color: var(--secondary-text);">
-                        You scored <span id="testScore">0</span>% (<span id="testCorrectFinal">0</span> out of <span
-                            id="testTotalFinal">0</span>)
-                    </p>
-                    <div class="stats">
-                        <div class="stat">
-                            <div class="stat-value" id="testTime">0s</div>
-                            <div class="stat-label">Time Taken</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="testAccuracy">0%</div>
-                            <div class="stat-label">Accuracy</div>
-                        </div>
-                    </div>
-                    <div style="text-align: center; margin-top: 25px;">
-                        <button class="btn" onclick="restartTest()">Retake Test</button>
-                        <button class="btn btn-secondary" onclick="endTest()" style="margin-left: 10px;">End
-                            Test</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="importModal" class="modal">
-        <div class="modal-content" style="max-width: 700px;">
-            <span class="close" onclick="closeImportModal()">&times;</span>
-            <h2>Import Deck</h2>
-            <div class="import-tabs">
-                <div id="importTabPaste" class="import-tab active" onclick="switchImportTab('paste')">Paste Text</div>
-                <div id="importTabFile" class="import-tab" onclick="switchImportTab('file')">Import File</div>
-            </div>
-            <div id="importContentPaste">
-                <div class="form-group">
-                    <label for="importPastedText">Paste your content here</label>
-                    <textarea id="importPastedText" style="min-height: 200px;"
-                        placeholder="Question 1<Tab>Answer 1&#x0a;Question 2<Tab>Answer 2"></textarea>
-                </div>
-                <p
-                    style="font-size: 0.9rem; color: var(--secondary-text); text-align: left; margin-top: -15px; margin-bottom: 20px;">
-                    Separate terms and definitions with a Tab, and separate cards with a new line.</p>
-            </div>
-            <div id="importContentFile" class="hidden">
-                <div class="form-group">
-                    <label for="importFileInput" class="custom-file-upload">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20"
-                            style="vertical-align: middle; margin-right: 8px;">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                        </svg>
-                        Choose File
-                    </label>
-                    <input type="file" id="importFileInput" accept=".json,.csv,.txt">
-                    <div id="fileNameDisplay">No file chosen</div>
-                    <p style="font-size: 0.9rem; color: var(--secondary-text); text-align: left; margin-top: 10px;">
-                        Supports .json (exported from here), .csv, and .txt files.</p>
-                </div>
-            </div>
-            <div class="form-row" style="margin-bottom: 0;">
-                <div class="form-group" style="flex: 2;">
-                    <label for="importDeckName">New Deck Name</label>
-                    <input type="text" id="importDeckName" placeholder="e.g., Biology Chapter 5">
-                </div>
-                <div class="form-group">
-                    <label for="importDeckCategory">Category</label>
-                    <select id="importDeckCategory"></select>
-                </div>
-                <div class="form-group">
-                    <label for="importDeckTypeHint">Deck Type</label>
-                    <select id="importDeckTypeHint">
-                        <option value="General">General / Q&A</option>
-                        <option value="Vocabulary">Vocabulary</option>
-                        <option value="Sequence">Sequence / Ordered List</option>
-                    </select>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-success" onclick="importData()">Import and Create Deck</button>
-            </div>
-        </div>
-    </div>
-    <div id="examPlanModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <span class="close" onclick="closeExamPlanModal()">&times;</span>
-            <h2>Create a New Exam Plan</h2>
-            <p>Learn more than one deck for exams.</p>
-            <div class="form-group">
-                <label for="examPlanName">Plan Name</label>
-                <input type="text" id="examPlanName" placeholder="e.g., Biology GCSE">
-            </div>
-            <div class="form-group">
-                <label for="examPlanDate">Exam Date</label>
-                <input type="date" id="examPlanDate">
-            </div>
-            <div class="form-group">
-                <label>Select Decks to Include</label>
-                <div id="examPlanDeckSelector" class="deck-cards-list" style="max-height: 200px; padding: 10px;">
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeExamPlanModal()">Cancel</button>
-                <button class="btn btn-success" onclick="saveExamPlan()">Save Exam Plan</button>
-            </div>
-        </div>
-    </div>
-    <div id="confirmActionModal" class="modal">
-        <div class="modal-content text-center">
-            <h2 id="confirmActionTitle">Confirm Action</h2>
-            <p id="confirmActionText"></p>
-            <div class="modal-actions">
-                <button id="confirmActionCancelBtn" class="btn btn-secondary" onclick="cancelAction()">Cancel</button>
-                <button id="confirmActionConfirmBtn" class="btn btn-danger">Confirm</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="welcomeBackModal" class="modal">
-        <div class="modal-content text-center">
-            <h2>Welcome Back!</h2>
-            <p>Let's pick up where you left off. Ready to continue?</p>
-            <div class="modal-actions">
-                <button id="resumeStudyBtn" class="btn btn-success">Continue</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="editCardModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeEditCardModal()">&times;</span>
-            <h2>Edit Flashcard</h2>
-            <div class="form-group">
-                <label for="editCardQuestion">Question</label>
-                <textarea id="editCardQuestion" class="question-input"></textarea>
-            </div>
-            <div class="form-group">
-                <label for="editCardAnswer">Answer</label>
-                <textarea id="editCardAnswer" class="solution-input"></textarea>
-            </div>
-            <div class="modal-actions" style="margin-top: 15px;">
-                <button class="btn btn-secondary" onclick="closeEditCardModal()">Cancel</button>
-                <button class="btn btn-success" onclick="saveEditedCard()">Save Changes</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="editAiCardModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeEditAiCardModal()">&times;</span>
-            <h2>Edit AI Flashcard</h2>
-            <div class="form-group">
-                <label for="editAiCardQuestion">Question</label>
-                <textarea id="editAiCardQuestion" class="question-input"></textarea>
-            </div>
-            <div class="form-group">
-                <label for="editAiCardAnswer">Answer</label>
-                <textarea id="editAiCardAnswer" class="solution-input"></textarea>
-            </div>
-            <div class="modal-actions" style="margin-top: 15px;">
-                <button class="btn btn-secondary" onclick="closeEditAiCardModal()">Cancel</button>
-                <button class="btn btn-success" onclick="saveAiEditedCard()">Save Changes</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="takeABreakModal" class="modal">
-        <div class="modal-content text-center">
-            <span class="close" onclick="this.parentElement.parentElement.classList.remove('show')">&times;</span>
-            <h2>Focus is Waning</h2>
-            <p>Taking breaks is great for improving learning. Take a moment to recharge your batteries!</p>
-            <div class="modal-actions">
-                <button class="btn btn-secondary"
-                    onclick="document.getElementById('takeABreakModal').classList.remove('show')">Keep Going</button>
-                <button class="btn btn-success" onclick="endSession()">End Session</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="addCategoryModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeAddCategoryModal()">&times;</span>
-            <h2>Add New Category</h2>
-            <div class="form-group">
-                <label for="newCategoryInput">Category Name</label>
-                <input type="text" id="newCategoryInput" placeholder="e.g., Biology">
-            </div>
-            <div class="modal-actions">
-                <button class="btn" onclick="saveNewCategory()">Add Category</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="customPromptModal" class="modal">
-        <div class="modal-content" style="max-width: 700px;">
-            <span class="close" onclick="closeCustomPromptModal()">&times;</span>
-            <h2>Custom AI Prompt</h2>
-            <p>Enter your custom prompt below. The application will append the document content to your prompt.</p>
-            <div class="form-group">
-                <textarea id="customPromptTextarea" style="min-height: 250px;"></textarea>
-            </div>
-            <div class="modal-actions">
-                <button class="btn" onclick="saveCustomPrompt()">Save Prompt</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="learnModeSetupModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <span class="close" onclick="closeLearnModeSetupModal()">&times;</span>
-            <h2>Learn Mode Setup</h2>
-            <p>Configure your learning session for this deck.</p>
-            <div class="form-group">
-                <label for="learnModeExamDate">Exam Date (Optional)</label>
-                <input type="date" id="learnModeExamDate">
-                <small style="color: var(--secondary-text);">Set this to prioritise cards you're likely to forget before
-                    the exam.</small>
-            </div>
-            <div class="form-group">
-                <label for="learnModeRetention">Target Retention: <span id="learnModeRetentionValue">80%</span></label>
-                <input type="range" id="learnModeRetention" min="70" max="99" value="80"
-                    oninput="document.getElementById('learnModeRetentionValue').textContent = this.value + '%'">
-                <small style="color: var(--secondary-text);">Higher retention means more cards to review.</small>
-            </div>
-            <div class="form-group">
-                <label for="learnModeMaxCards">Max Cards per Round</label>
-                <input type="number" id="learnModeMaxCards" placeholder="Unlimited" min="5">
-                <small style="color: var(--secondary-text);">Leave empty for unlimited (recommended for
-                    cramming).</small>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeLearnModeSetupModal()">Cancel</button>
-                <button class="btn btn-success" onclick="startLearnModeWithSetup()">Start Learning</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="deckSettingsModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <span class="close" onclick="closeDeckSettingsModal()">&times;</span>
-            <h2>Deck Settings</h2>
-            <div id="deckSettingsForm">
-
-                <div class="settings-section">
-                    <div
-                        style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                        <h4 style="margin: 0;">Exam Mode</h4>
-                        <label class="switch">
-                            <input type="checkbox" id="deckSettingsExamModeToggle"
-                                onchange="toggleExamSettingsVisibility()">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <p style="font-size: 0.9rem; color: var(--secondary-text); margin-bottom: 15px;">
-                        Prioritize cards to ensure high retention by a specific date.
-                    </p>
-
-                    <div id="deckSettingsExamContainer" class="hidden"
-                        style="background: var(--input-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 15px;">
-                        <div class="form-group">
-                            <label for="deckSettingsExamDate">Exam Date</label>
-                            <input type="date" id="deckSettingsExamDate">
-                        </div>
-                        <div class="form-group">
-                            <label for="deckSettingsRetention">Target Retention: <span id="deckSettingsRetentionValue"
-                                    style="color: var(--primary-color); font-weight: bold;">80%</span></label>
-                            <input type="range" id="deckSettingsRetention" min="70" max="99" value="80"
-                                style="width: 100%; margin-top: 5px;"
-                                oninput="document.getElementById('deckSettingsRetentionValue').textContent = this.value + '%'">
-                            <small style="color: var(--secondary-text);">Higher retention = more frequent
-                                reviews.</small>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <h4>Learn Mode Options</h4>
-                    <div class="form-group">
-                        <label for="deckSettingsCardsPerRound">Cards Per Round</label>
-                        <input type="number" id="deckSettingsCardsPerRound" value="10" min="3" max="50">
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="retypeIncorrectToggle">
-                        <label for="retypeIncorrectToggle">Require retyping incorrect answers</label>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <h4>Adaptive Learning</h4>
-                    <fieldset class="settings-option-group">
-                        <legend>Adaptive Question Formats</legend>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="adaptiveAutoToggle">
-                            <label for="adaptiveAutoToggle">Automatic Selection (Recommended)</label>
-                        </div>
-                        <hr style="border: none; border-top: 1px solid var(--border-color); margin: 10px 0;">
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="adaptiveMcqToggle">
-                            <label for="adaptiveMcqToggle">Allow Multiple Choice Questions</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="adaptiveClozeToggle">
-                            <label for="adaptiveClozeToggle">Allow Fill-in-the-blank (Cloze)</label>
-                        </div>
-                    </fieldset>
-                </div>
-
-                <div class="settings-section">
-                    <h4>Tools</h4>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enablePomodoroToggle">
-                        <label for="enablePomodoroToggle">Enable Pomodoro Timer</label>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <fieldset class="settings-option-group">
-                        <legend>Default Study Method</legend>
-                        <div class="radio-option-row"
-                            onclick="document.getElementById('deckSettingsStudyModeFlashcard').checked = true;">
-                            <input type="radio" id="deckSettingsStudyModeFlashcard" name="deckSettingsStudyMode"
-                                value="flashcard" checked>
-                            <label for="deckSettingsStudyModeFlashcard">Flashcard Mode</label>
-                        </div>
-                        <div class="radio-option-row"
-                            onclick="document.getElementById('deckSettingsStudyModeWrite').checked = true;">
-                            <input type="radio" id="deckSettingsStudyModeWrite" name="deckSettingsStudyMode"
-                                value="write">
-                            <label for="deckSettingsStudyModeWrite">Type Mode</label>
-                        </div>
-                    </fieldset>
-                </div>
-
-                <div class="settings-section">
-                    <h4>Auto-marking (Type Mode)</h4>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="caseSensitiveToggle">
-                        <label for="caseSensitiveToggle">Case-Sensitive Matching</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="punctuationToggle">
-                        <label for="punctuationToggle">Consider Punctuation</label>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <h4>Review Mode</h4>
-                    <div class="form-group">
-                        <label for="reviewOrder">Card Order</label>
-                        <select id="reviewOrder">
-                            <option value="random">Random</option>
-                            <option value="alphabetical">Alphabetical</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="modal-actions" style="margin-top: 20px;">
-                    <button class="btn btn-secondary" onclick="closeDeckSettingsModal()">Cancel</button>
-                    <button class="btn btn-success" onclick="saveDeckSettings()">Save Settings</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-
-    <div id="instructionsModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="this.parentElement.parentElement.classList.remove('show')">&times;</span>
-            <h2>Keyboard Shortcuts</h2>
-            <p style="text-align: left; margin-top: 20px; line-height: 1.8;">
-                <b>During Simple Flashcard Mode:</b><br>
-                - <b>Space / Enter</b>: Show Answer<br>
-                - <b>→ / 2</b>: Mark as Correct<br>
-                - <b>← / 1</b>: Mark as Incorrect<br><br>
-                <b>During Type Mode:</b><br>
-                - <b>Enter / ↑</b>: Check Answer<br>
-                - <b>→ / 2</b>: Mark as Correct (after checking)<br>
-                - <b>← / 1</b>: Mark as Incorrect (after checking)<br><br>
-                <b>On Progress Screen:</b><br>
-                - <b>Enter</b>: Start Next Round
-            </p>
-        </div>
-    </div>
-
-    <div id="analyticsView" class="container view-container">
-        <div class="section-title" style="padding-top: 20px;">Your Learning Analytics</div>
-
-        <div class="settings-container" style="margin-bottom: 30px;">
-            <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
-                <div class="stat">
-                    <div class="stat-value" id="analyticsStreak">0 days</div>
-                    <div class="stat-label">Current Streak</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="dailyGoalStat">0 / 15m</div>
-                    <div class="stat-label">Daily Goal</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="analyticsTotalTime">0m</div>
-                    <div class="stat-label">Total Study Time</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="analyticsTotalSessions">0</div>
-                    <div class="stat-label">Total Sessions</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="analytics-grid">
-            <div class="settings-container">
-                <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Activity (Last 7 Days)</h3>
-                <canvas id="analyticsActivityChart"></canvas>
-            </div>
-            <div class="settings-container">
-                <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Time per Deck</h3>
-                <canvas id="analyticsDeckBreakdownChart"></canvas>
-            </div>
-        </div>
-
-        <div class="settings-container" style="margin-top: 30px;">
-            <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Recent Sessions</h3>
-            <div id="analyticsSessionList" style="max-height: 300px; overflow-y: auto;">
-                <p>No study sessions recorded yet.</p>
-            </div>
-        </div>
-    </div>
-    <script>
-        console.log('Test 1: Script is starting!');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
-
-        const isElectron = typeof window.electronAPI !== 'undefined';
-        let toastQueue = [];
-        let currentEditingPlanId = null;
-        let dailyPriorityQueue = [];
-        let isToastVisible = false;
-        let sortableInstance = null;
-        let documentsForAi = [];
-        let isOnline = navigator.onLine;
-        let db;
-        let decks = {};
-        let categories = ["Science", "Maths", "Language",];
-        let globalSettings = {};
-        let analyticsData = {
-            lastUsed: null,
-            streak: 0,
-            totalStudyTime: 0,
-            sessions: []
-        };
-
-        let lastKnownFocusScore = 1.0;
-        let focusLossStartTime = null;
-        let accumulatedAwayDuration = 0;
-        let currentDeckId = null;
-        let currentMode = null;
-        let confirmCallback = null;
-        let cardToEdit = { deckId: null, cardIndex: null, from: null };
-        let aiCardToEditIndex = null;
-        let studyState = {
-            buckets: [],
-            currentRound: 1,
-            currentCardIndex: 0,
-            roundCards: [],
-            settings: {},
-            lastRoundIncorrect: [],
-            isRetypingIncorrect: false,
-            startTime: null,
-            activeLearningPool: [],
-            knowledgeStates: new Map(),
-            incorrectInThisRound: [],
-            sequencePhase: null,
-            sequenceCards: [],
-            sequenceChunks: [],
-            currentChunkIndex: 0,
-            correctDragDropOrder: [],
-            preGeneratedDistractors: new Map()
-        };
-        const DEFAULT_DECK_SETTINGS = { learnMode: 'write', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
-        const CURRENT_ANALYSIS_VERSION = 2;
-        const smartCoachMessages = {
-            greetings: [
-                "Welcome back, {username}! Ready to learn something new today?",
-                "Glad to see you again, {username}! Let's build that knowledge.",
-                "Let's get started, {username}! Consistency is key.",
-                "A new day, a new opportunity to learn. Let's do this, {username}!"
-            ],
-            sessionFeedback: {
-                highAccuracy: [
-                    "Excellent work! You achieved over 90% accuracy that round. Keep up the great momentum!",
-                    "Fantastic session! Your focus is clearly paying off. Well done!",
-                    "That was a brilliant round. You've got a strong grasp on this material."
-                ],
-                mediumAccuracy: [
-                    "Good session! You're making solid progress. Every review strengthens your memory.",
-                    "Nice work. You pushed through and learned a lot. Let's keep building on it.",
-                    "Solid effort. The tricky cards are the ones that teach us the most."
-                ],
-                lowAccuracy: [
-                    "That was a tough round, but you stuck with it. That's how real learning happens!",
-                    "Don't be discouraged. The most challenging sessions often lead to the biggest breakthroughs.",
-                    "You've laid the groundwork. The next time you see these cards, they'll be more familiar."
+import { state, DEFAULT_DECK_SETTINGS, resetStudyState, resetPracticeTestState, setCurrentDeck, setCurrentMode, updateGlobalSettings, getDeck, getAllDecks, updateDeck, deleteDeck, updateAnalytics } from './state.js';
+import { showToast, showView, transitionView, transitionSubView } from './ui.js';
+import { initDB, saveDataToDB, getDataFromDB, getAllDataFromDB, deleteDataFromDB, clearStoreInDB } from './db.js';(function () {
+    const applyTheme = (isDark) => {
+        const target = document.documentElement;
+        if (isDark) {
+            target.classList.add('dark-mode');
+            if (document.body) document.body.classList.add('dark-mode');
+        } else {
+            target.classList.remove('dark-mode');
+            if (document.body) document.body.classList.remove('dark-mode');
+        }
+    };
+
+    const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    applyTheme(systemDark);
+})();
+function loadCDNScript(src, onload) {
+    if (!navigator.onLine) {
+        console.warn('Offline: Skipping CDN script', src);
+        if (onload) onload();
+        return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.onerror = () => {
+        console.warn('Failed to load CDN script:', src);
+        if (onload) onload();
+    };
+    if (onload && !src.includes('module')) {
+        script.onload = onload;
+    }
+    document.head.appendChild(script);
+}
                 ]
             },
             roundFeedback: {
@@ -4694,74 +589,7 @@ The help button and the edit card button during the learn modes don't work - not
             console.log('🔧 handleGuestToUserTransition called – no migration logic defined yet.');
         }
 
-        function initDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open('LagioteDB', 7);
-
-                request.onerror = event => reject("Error opening DB: " + (event.target.error ? event.target.error.message : event.target.errorCode));
-
-                request.onsuccess = event => {
-                    db = event.target.result;
-                    resolve();
-                };
-
-                request.onupgradeneeded = event => {
-                    db = event.target.result;
-                    const transaction = event.target.transaction;
-
-                    if (!db.objectStoreNames.contains('decks')) {
-                        db.createObjectStore('decks', { keyPath: 'id' });
-                    }
-                    if (!db.objectStoreNames.contains('analyticsQueue')) {
-                        db.createObjectStore('analyticsQueue', { keyPath: 'id' });
-                    }
-                    if (!db.objectStoreNames.contains('appData')) {
-                        db.createObjectStore('appData', { keyPath: 'key' });
-                    }
-                    if (!db.objectStoreNames.contains('concepts')) {
-                        db.createObjectStore('concepts', { keyPath: 'conceptID' });
-                    }
-                    if (!db.objectStoreNames.contains('userKnowledgeState')) {
-                        db.createObjectStore('userKnowledgeState', { keyPath: ['userID', 'cardID'] });
-                    }
-                    if (!db.objectStoreNames.contains('interactionLogs')) {
-                        const logStore = db.createObjectStore('interactionLogs', { keyPath: 'id', autoIncrement: true });
-                        logStore.createIndex('by_cardID', 'cardID', { unique: false });
-                        logStore.createIndex('by_timestamp', 'timestamp', { unique: false });
-                        console.log("Created 'interactionLogs' object store.");
-                    }
-                    if (!db.objectStoreNames.contains('examPlans')) {
-                        db.createObjectStore('examPlans', { keyPath: 'id' });
-                    }
-                    if (!db.objectStoreNames.contains('analyticsQueue')) {
-                        db.createObjectStore('analyticsQueue', { keyPath: 'id' });
-                        console.log("Created 'analyticsQueue' object store.");
-                    }
-
-                    if (event.oldVersion > 0 && event.oldVersion < 5) {
-                        console.log("Starting database migration for cognitive engine...");
-                        const deckStore = transaction.objectStore('decks');
-                        const stateStore = transaction.objectStore('userKnowledgeState');
-
-                        deckStore.getAll().onsuccess = (e) => {
-                            const allDecks = e.target.result;
-                            if (!allDecks) return;
-
-                            allDecks.forEach(deck => {
-                                let deckNeedsUpdate = false;
-                                deck.cards.forEach(card => {
-                                    if (typeof card.masteryScore === 'undefined') {
-                                        deckNeedsUpdate = true;
-                                        stateStore.put({
-                                            userID: 'default_user',
-                                            cardID: card.id,
-                                            masteryScore: 0.5,
-                                            stability: 1.0,
-                                            lastReviewed: new Date().toISOString(),
-                                            recallHistory: []
-                                        });
-                                    }
-                                });
+        );
                                 if (deckNeedsUpdate) {
                                     deckStore.put(deck);
                                 }
@@ -5290,57 +1118,23 @@ The help button and the edit card button during the learn modes don't work - not
             resultContainer.innerHTML = tableHTML;
         }
 
-        async function saveDataToDB(storeName, data) {
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([storeName], 'readwrite');
-                const store = transaction.objectStore(storeName);
-                const request = store.put(data);
-                request.onsuccess = () => resolve();
-                request.onerror = event => reject("Error saving data: " + event.target.error);
-            });
+        
         }
 
-        async function getDataFromDB(storeName, key) {
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([storeName], 'readonly');
-                const store = transaction.objectStore(storeName);
-                const request = store.get(key);
-                request.onsuccess = event => resolve(event.target.result);
-                request.onerror = event => reject("Error getting data: " + event.target.error);
-            });
+        
         }
 
-        async function getAllDataFromDB(storeName) {
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([storeName], 'readonly');
-                const store = transaction.objectStore(storeName);
-                const request = store.getAll();
-                request.onsuccess = event => resolve(event.target.result);
-                request.onerror = event => reject("Error getting all data: " + event.target.error);
-            });
+        
         }
 
-        async function deleteDataFromDB(storeName, key) {
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([storeName], 'readwrite');
-                const store = transaction.objectStore(storeName);
-                const request = store.delete(key);
-                request.onsuccess = () => resolve();
-                request.onerror = (event) => reject("Error deleting data: " + event.target.error);
-            });
+        
         }
 
-        async function clearStoreInDB(storeName) {
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([storeName], 'readwrite');
-                const store = transaction.objectStore(storeName);
-                const request = store.clear();
-                request.onsuccess = () => resolve();
-                request.onerror = event => reject("Error clearing store: " + event.target.error);
-            });
+        
         }
 
         function setupEventListeners() {
+            console.log('[DEBUG] setupEventListeners called - attaching all event listeners');
 
             // Authentication event listeners will be handled by Auth0 (to be implemented)
             const authSignupBtn = document.getElementById('authSignupBtn');
@@ -5547,9 +1341,20 @@ The help button and the edit card button during the learn modes don't work - not
 
             setupSearch();
             setupKeyboardControls();
+            
+            // Deck detail buttons
+            const deleteBtn = document.getElementById('deckDetailDeleteBtn');
+            console.log('[DEBUG] deckDetailDeleteBtn element found:', !!deleteBtn);
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', () => {
+                    console.log('[DEBUG] Delete deck button clicked, currentViewingDeckId:', currentViewingDeckId);
+                    deleteDeck(currentViewingDeckId);
+                });
+                console.log('[DEBUG] Delete button listener attached');
+            }
+            
             document.getElementById('deckDetailTestBtn').addEventListener('click', () => openPracticeTestModal(currentViewingDeckId));
             document.getElementById('deckDetailEditBtn').addEventListener('click', () => editDeck(currentViewingDeckId));
-            document.getElementById('deckDetailDeleteBtn').addEventListener('click', () => deleteDeck(currentViewingDeckId));
             document.getElementById('deckDetailSettingsBtn').addEventListener('click', () => openDeckSettingsModal(currentViewingDeckId));
             document.getElementById('headerBackBtn').addEventListener('click', goBack);
             const nameForm = document.getElementById('nameForm');
@@ -5747,33 +1552,54 @@ The help button and the edit card button during the learn modes don't work - not
             if (profileBtn) { ... } 
             */
 
-            document.getElementById('logoutBtn').addEventListener('click', async (e) => {
-                e.preventDefault();
-                console.log('Logout button clicked');
-                try {
-                    await logout();
-                } catch (error) {
-                    console.error('Logout error:', error);
-                    showToast('Logout failed. Please try again.', 'error');
-                }
-            });
+            const logoutBtn = document.getElementById('logoutBtn');
+            console.log('[DEBUG] logoutBtn element found:', !!logoutBtn);
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    console.log('[DEBUG] Logout button clicked, e.type:', e.type);
+                    console.log('[DEBUG] Logout button element:', e.target);
+                    try {
+                        console.log('[DEBUG] Calling logout function');
+                        await logout();
+                        console.log('[DEBUG] Logout completed successfully');
+                    } catch (error) {
+                        console.error('[DEBUG] Logout error:', error);
+                        console.error('[DEBUG] Logout error stack:', error.stack);
+                        showToast('Logout failed. Please try again.', 'error');
+                    }
+                });
+                console.log('[DEBUG] Logout button listener attached');
+            }
 
             // Sync button handler
-            document.getElementById('syncBtn')?.addEventListener('click', async (e) => {
-                e.preventDefault();
-                console.log('Manual sync triggered from profile menu');
-                try {
-                    if (isOnline) {
-                        showToast('Syncing your data...', 'info');
-                        await loadUserDataAndSync();
-                    } else {
-                        showToast('You are offline. Please connect to the internet to sync.', 'warning');
+            const syncBtn = document.getElementById('syncBtn');
+            console.log('[DEBUG] syncBtn element found:', !!syncBtn);
+            if (syncBtn) {
+                syncBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    console.log('[DEBUG] Sync button clicked, e.type:', e.type);
+                    console.log('[DEBUG] Sync button element:', e.target);
+                    console.log('[DEBUG] isOnline:', isOnline);
+                    try {
+                        if (isOnline) {
+                            console.log('[DEBUG] Online detected, starting sync');
+                            showToast('Syncing your data...', 'info');
+                            console.log('[DEBUG] Calling loadUserDataAndSync');
+                            await loadUserDataAndSync();
+                            console.log('[DEBUG] Sync completed successfully');
+                        } else {
+                            console.log('[DEBUG] App is offline');
+                            showToast('You are offline. Please connect to the internet to sync.', 'warning');
+                        }
+                    } catch (error) {
+                        console.error('[DEBUG] Manual sync error:', error);
+                        console.error('[DEBUG] Sync error stack:', error.stack);
+                        showToast('Sync failed. Please try again.', 'error');
                     }
-                } catch (error) {
-                    console.error('Manual sync error:', error);
-                    showToast('Sync failed. Please try again.', 'error');
-                }
-            });
+                });
+                console.log('[DEBUG] Sync button listener attached');
+            }
 
             document.getElementById('deckTypeHint').addEventListener('change', (e) => {
                 toggleEditorView(e.target.value);
@@ -5790,11 +1616,7 @@ The help button and the edit card button during the learn modes don't work - not
             setupSystemThemeListener();
         }
 
-        function showToast(message, type = 'info', duration = 3000, icon = null) {
-            if (globalSettings.enableToasts === false) {
-                if (type !== 'error') {
-                    return;
-                }
+        
             }
             toastQueue.push({ message, type, duration, icon });
             if (!isToastVisible) {
@@ -5811,11 +1633,7 @@ The help button and the edit card button during the learn modes don't work - not
             moveCard(card, false, questionTypeForLog);
         }
 
-        function processToastQueue() {
-            if (toastQueue.length === 0) {
-                isToastVisible = false;
-                return;
-            }
+        
 
             isToastVisible = true;
             const messageItem = toastQueue.shift();
@@ -5922,12 +1740,7 @@ The help button and the edit card button during the learn modes don't work - not
             }
         }
 
-        function showView(viewId, isInitial = false, callback = null) {
-            const nextView = document.getElementById(viewId);
-            if (!nextView) {
-                console.error('View not found:', viewId);
-                return;
-            }
+        
 
             if (isInitial) {
                 nextView.classList.remove('hidden');
@@ -5957,11 +1770,7 @@ The help button and the edit card button during the learn modes don't work - not
             if (callback) callback();
         }
 
-        function transitionView(viewId, isInitial = false, callback = null) {
-            const appHeader = document.getElementById('appHeader');
-            if (viewId !== 'authView') {
-                appHeader.classList.remove('hidden');
-            }
+        
             if (!isInitial && activeView !== viewId && viewId !== 'dashboard') {
                 if (viewHistory[viewHistory.length - 1] !== activeView) {
                     viewHistory.push(activeView);
@@ -6003,16 +1812,7 @@ The help button and the edit card button during the learn modes don't work - not
             }
         }
 
-        function transitionSubView(currentElem, nextElem) {
-            if (currentElem && !currentElem.classList.contains('hidden')) {
-                currentElem.classList.add('sub-view-fade-out', 'animating');
-                setTimeout(() => {
-                    currentElem.classList.add('hidden');
-                    currentElem.classList.remove('sub-view-fade-out', 'animating');
-                    if (nextElem) {
-                        nextElem.classList.remove('hidden');
-                        nextElem.classList.add('sub-view-fade-in', 'animating');
-                    }
+        
                 }, 400);
             } else if (nextElem) {
                 nextElem.classList.remove('hidden');
@@ -6412,7 +2212,7 @@ The help button and the edit card button during the learn modes don't work - not
                     let actionButtonsHTML;
                     if (deck.typeHint === 'Sequence') {
                         actionButtonsHTML = `
-                        <button class="action-btn learn-btn spaced-btn" style="grid-column: 1 / 3;" onclick="event.stopPropagation(); startSequenceSession('${deck.id}')">
+                        <button class="action-btn learn-btn" style="grid-column: 1 / 3;" onclick="event.stopPropagation(); startSequenceSession('${deck.id}')">
                             Learn Sequence
                         </button>
                     `;
@@ -6580,7 +2380,7 @@ The help button and the edit card button during the learn modes don't work - not
                         if (idx > -1) arr[idx] = { ...arr[idx], question: newQuestion, answer: newAnswer };
                     };
 
-                    if (currentMode === 'learn' || currentMode === 'spaced') {
+                    if (currentMode === 'learn') {
                         studyState.buckets.forEach(bucket => updateCardInArray(bucket));
                     } else if (currentMode === 'review') {
                         updateCardInArray(studyState.stillLearning);
@@ -6600,24 +2400,40 @@ The help button and the edit card button during the learn modes don't work - not
         }
 
         async function deleteCardFromDetail(deckId, cardIndex) {
+            console.log('[DEBUG] deleteCardFromDetail called with deckId:', deckId, 'cardIndex:', cardIndex);
             const deck = decks[deckId];
-            if (!deck || !deck.cards[cardIndex]) return;
+            console.log('[DEBUG] Deck found:', !!deck);
+            if (!deck || !deck.cards[cardIndex]) {
+                console.log('[DEBUG] Deck or card not found, returning');
+                return;
+            }
 
             showConfirmModal('Are you sure you want to delete this card?', async () => {
+                console.log('[DEBUG] deleteCardFromDetail confirm callback executed');
                 try {
+                    console.log('[DEBUG] Splicing card at index:', cardIndex);
                     deck.cards.splice(cardIndex, 1);
+                    console.log('[DEBUG] Card spliced, saving to database');
                     await saveDataToDB('decks', deck);
+                    console.log('[DEBUG] Deck saved to database');
+                    
                     if (isOnline) {
                         const auth0Session = localStorage.getItem('auth0Session');
+                        console.log('[DEBUG] isOnline:', isOnline, 'auth0Session:', !!auth0Session);
                         if (auth0Session) {
+                            console.log('[DEBUG] Syncing after card deletion');
                             await loadUserDataAndSync();
+                            console.log('[DEBUG] Sync completed after card deletion');
                         }
                     }
+                    console.log('[DEBUG] Showing deck detail and updating dashboard');
                     showDeckDetail(deckId);
                     updateDashboard();
                     showToast('Card deleted.', 'success');
+                    console.log('[DEBUG] Card deletion completed successfully');
                 } catch (error) {
-                    console.error('Error deleting card:', error);
+                    console.error('[DEBUG] Error deleting card:', error);
+                    console.error('[DEBUG] Error stack:', error.stack);
                     showToast(`Failed to delete card: ${error.message}`, 'error');
                     throw error;
                 }
@@ -6718,31 +2534,49 @@ The help button and the edit card button during the learn modes don't work - not
         }
 
         function deleteDeck(deckId) {
+            console.log('[DEBUG] deleteDeck called with deckId:', deckId);
+            console.log('[DEBUG] decks object keys:', Object.keys(decks));
+            console.log('[DEBUG] currentViewingDeckId:', currentViewingDeckId);
+            
             const deckName = decks[deckId]?.name || 'this deck';
+            console.log('[DEBUG] deckName:', deckName);
+            
             showConfirmModal(`Are you sure you want to permanently delete the deck "${deckName}"? This action cannot be undone.`, async () => {
+                console.log('[DEBUG] Confirm callback for deleteDeck executed');
                 try {
-                    console.log('Deleting deck:', deckId);
+                    console.log('[DEBUG] Starting deck deletion process for:', deckId);
+                    console.log('[DEBUG] Deck exists in decks object:', deckId in decks);
+                    
                     delete decks[deckId];
+                    console.log('[DEBUG] Deleted from decks object, remaining decks:', Object.keys(decks));
+                    
                     await deleteDataFromDB('decks', deckId);
-                    console.log('Deck deleted from database');
+                    console.log('[DEBUG] Deleted from database');
 
                     // Navigate back to dashboard if viewing deleted deck
                     if (currentViewingDeckId === deckId) {
+                        console.log('[DEBUG] Was viewing deleted deck, going back to dashboard');
                         backToDashboard();
                     } else {
+                        console.log('[DEBUG] Updating dashboard after deletion');
                         updateDashboard();
                     }
 
+                    console.log('[DEBUG] About to show success toast');
                     showToast(`Deck "${deckName}" deleted.`, 'success');
 
                     // Sync if online and authenticated (check auth0Session instead of userToken)
                     const auth0Session = localStorage.getItem('auth0Session');
+                    console.log('[DEBUG] isOnline:', isOnline, 'auth0Session:', !!auth0Session);
                     if (isOnline && auth0Session) {
-                        console.log('Syncing after deck deletion');
+                        console.log('[DEBUG] Syncing after deck deletion');
                         await loadUserDataAndSync();
+                        console.log('[DEBUG] Sync completed after deck deletion');
                     }
+                    console.log('[DEBUG] Deck deletion completed successfully');
                 } catch (error) {
-                    console.error('Error deleting deck:', error);
+                    console.error('[DEBUG] Error deleting deck:', error);
+                    console.error('[DEBUG] Error stack:', error.stack);
                     showToast(`Failed to delete deck: ${error.message}`, 'error');
                     throw error;
                 }
@@ -7413,9 +3247,7 @@ The help button and the edit card button during the learn modes don't work - not
                 }
             } else if (mode === 'review') {
                 startReviewMode(currentDeckId);
-            } else if (mode === 'spaced') {
-                startSpacedLearning(currentDeckId);
-            }
+
         }
 
         async function startLearnMode(deckId) {
@@ -7626,42 +3458,7 @@ The help button and the edit card button during the learn modes don't work - not
             }
         }
 
-        async function startSpacedLearning(deckId) {
-            document.getElementById('progressView').classList.add('hidden');
-            document.getElementById('cardView').classList.add('hidden');
-            document.getElementById('completeView').classList.add('hidden');
-            currentMode = 'spaced';
-            currentDeckId = deckId;
-            const deck = decks[deckId];
 
-            const allCards = [...deck.cards];
-            const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
-            const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
-
-            const dueCards = allCards.filter(card => {
-                const state = knowledgeMap.get(card.id);
-                if (!state) return true;
-                const pRecall = calculatePRecall(state.stability, state.lastReviewed);
-                return pRecall <= 0.90;
-            });
-
-            studyState.roundCards = shuffleArray(dueCards);
-            studyState.settings = deck.settings;
-            studyState.currentRound = 1;
-            studyState.currentCardIndex = 0;
-            studyState.startTime = new Date();
-
-            showView('studyMode');
-            document.getElementById('studyTitle').textContent = 'Spaced Learning';
-            document.getElementById('studySubtitle').textContent = deck.name;
-
-            if (studyState.roundCards.length > 0) {
-                transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
-                showNextCard();
-            } else {
-                showProgress();
-                showToast("No cards are due for review right now!");
-            }
         }
 
         async function startReviewMode(deckId) {
@@ -7751,7 +3548,7 @@ The help button and the edit card button during the learn modes don't work - not
             else if (currentMode === 'exam') {
                 updateExamProgress();
             }
-            else if (currentMode === 'spaced') updateSpacedProgress();
+
         }
 
         function getBucketName(index, totalBuckets) {
@@ -7859,26 +3656,7 @@ The help button and the edit card button during the learn modes don't work - not
             document.getElementById('statsContainer').innerHTML = `<div class="stat"><div class='stat-value'>${mastered}</div><div class='stat-label'>Total Mastered</div></div><div class='stat'><div class='stat-value'>${remaining}</div><div class='stat-label'>Remaining</div></div>`;
         }
 
-        function updateSpacedProgress() {
-            const deck = decks[currentDeckId];
-            const now = new Date();
-            const dueCards = deck.cards.filter(c => new Date(c.sm2Data.dueDate) <= now);
-            const total = deck.cards.length;
 
-            document.getElementById('progressTitle').textContent = 'Spaced Learning';
-            document.getElementById('roundInfo').textContent = `${studyState.roundCards.length} cards in this session`;
-            document.getElementById('bucketsContainer').innerHTML = '';
-            document.getElementById('progressBarFill').style.width = total > 0 ? `${((total - dueCards.length) / total) * 100}%` : '0%';
-            document.getElementById('statsContainer').innerHTML = `<div class="stat"><div class="stat-value">${dueCards.length}</div><div class="stat-label">Cards Due</div></div><div class="stat"><div class="stat-value">${total}</div><div class="stat-label">Total Cards</div></div>`;
-
-            if (studyState.roundCards.length === 0) {
-                document.getElementById('continueBtn').textContent = 'Finish';
-                document.getElementById('continueBtn').onclick = endSession;
-            } else {
-                document.getElementById('continueBtn').textContent = 'Start Round';
-                document.getElementById('continueBtn').onclick = continueStudy;
-            }
-        }
 
         async function continueStudy() {
             const continueBtn = document.getElementById('continueBtn');
@@ -8033,6 +3811,8 @@ The help button and the edit card button during the learn modes don't work - not
                 showComplete();
                 return;
             }
+            studyState.cardStartTime = new Date();
+
             const cardStatsInfo = document.getElementById('cardStatsInfo');
             if (cardStatsInfo) cardStatsInfo.innerHTML = '';
             document.getElementById('flashcardViewContainer').classList.add('hidden');
@@ -8439,48 +4219,44 @@ The help button and the edit card button during the learn modes don't work - not
         }
         async function logout() {
             try {
-                // Get Auth0 configuration
-                const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-sxs00xsv43d5qfx7.us.auth0.com';
-                const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-                // Load Auth0 SDK if needed
-                if (!window.auth0) {
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
-                    document.head.appendChild(script);
-                    await new Promise(resolve => script.onload = resolve);
-                }
-
-                // Create Auth0 client
-                const auth0Client = await auth0.createAuth0Client({
-                    domain: auth0Domain,
-                    clientId: auth0ClientId,
-                    authorizationParams: {
-                        redirect_uri: window.location.origin
-                    }
-                });
-
-                // Clear local storage first
+                console.log('[DEBUG] Starting logout process');
+                
+                // Clear local storage
                 localStorage.removeItem('auth0Session');
-
-                // Update UI
+                console.log('[DEBUG] Auth0 session cleared from localStorage');
+                
+                // Clear user data
+                decks = {};
+                analyticsData = {};
+                console.log('[DEBUG] User data cleared');
+                
+                // Update UI - hide logged in view, show dashboard
                 document.getElementById('userProfileMenu').classList.add('hidden');
+                document.getElementById('userProfileDropdown').classList.add('hidden');
                 document.getElementById('guestSignupBtn').classList.remove('hidden');
                 document.getElementById('loggedInView').classList.add('hidden');
-                document.getElementById('loggedOutView').classList.remove('hidden');
-                document.getElementById('appHeader').classList.add('hidden');
-
-                // Call Auth0 logout
-                await auth0Client.logout({
-                    logoutParams: {
-                        returnTo: window.location.origin
-                    }
-                });
+                document.getElementById('appHeader').classList.remove('hidden');
+                console.log('[DEBUG] UI updated for logged out state');
+                
+                // Navigate to dashboard (guest mode)
+                showView('dashboard', true);
+                updateOnlineStatusUI();
+                console.log('[DEBUG] Navigated to guest dashboard');
+                
+                showToast('You have been logged out', 'success');
+                console.log('[DEBUG] Logout completed successfully');
             } catch (error) {
-                console.error('Logout error:', error);
-                // Fallback: just clear session and reload
+                console.error('[DEBUG] Logout error:', error);
+                console.error('[DEBUG] Logout error stack:', error.stack);
+                // Fallback: just clear session and show dashboard
                 localStorage.removeItem('auth0Session');
-                location.reload();
+                decks = {};
+                analyticsData = {};
+                document.getElementById('userProfileMenu').classList.add('hidden');
+                document.getElementById('loggedInView').classList.add('hidden');
+                document.getElementById('appHeader').classList.remove('hidden');
+                showView('dashboard', true);
+                showToast('Logged out (with errors)', 'warning');
             }
         }
 
@@ -8834,18 +4610,7 @@ The help button and the edit card button during the learn modes don't work - not
 
 
 
-        async function markSpaced(quality) {
-            if (!isActionAllowed()) return;
-            const card = studyState.roundCards[studyState.currentCardIndex];
-            const cardInDeck = decks[currentDeckId].cards.find(c => c.id === card.id);
-            if (cardInDeck) {
-                const sm2 = new SM2Algorithm();
-                cardInDeck.sm2Data = sm2.calculateNextReview(cardInDeck)(quality);
-                await saveDataToDB('decks', decks[currentDeckId]);
-            }
-            studyState.currentCardIndex++;
-            showNextCard();
-        }
+
 
         function markCorrect(isAutomated = false) {
             if (!isAutomated && !isActionAllowed()) return;
@@ -8854,11 +4619,7 @@ The help button and the edit card button during the learn modes don't work - not
             btn.classList.add('feedback-correct');
             setTimeout(() => {
                 btn.classList.remove('feedback-correct');
-                if (currentMode === 'spaced') {
-                    markSpaced(4);
-                } else {
-                    moveCard(studyState.roundCards[studyState.currentCardIndex], true);
-                }
+                moveCard(studyState.roundCards[studyState.currentCardIndex], true);
             }, 200);
         }
         function markIncorrect(isAutomated = false) {
@@ -8886,11 +4647,7 @@ The help button and the edit card button during the learn modes don't work - not
             btn.classList.add('feedback-incorrect');
             setTimeout(() => {
                 btn.classList.remove('feedback-incorrect');
-                if (currentMode === 'spaced') {
-                    markSpaced(1);
-                } else {
-                    moveCard(studyState.roundCards[studyState.currentCardIndex], false);
-                }
+                moveCard(studyState.roundCards[studyState.currentCardIndex], false);
             }, 200);
         }
 
@@ -9342,17 +5099,13 @@ The help button and the edit card button during the learn modes don't work - not
                 } else if (currentMode === 'review') {
                     deck.reviewState = { stillLearning: [...deck.cards], correct: [], currentRound: 1, lastRoundIncorrect: [] };
                     await saveDataToDB('decks', deck);
-                } else if (currentMode === 'spaced') {
-                    const sm2 = new SM2Algorithm();
-                    deck.cards.forEach(card => card.sm2Data = sm2.calculateNextReview({})(3));
-                    await saveDataToDB('decks', deck);
-                }
+
 
                 showToast("Progress has been reset.", "success");
 
                 if (currentMode === 'learn') startLearnMode(currentDeckId);
                 else if (currentMode === 'review') startReviewMode(currentDeckId);
-                else if (currentMode === 'spaced') startSpacedLearning(currentDeckId);
+            }
 
             } catch (error) {
                 console.error("Failed to reset knowledge state:", error);
@@ -9414,10 +5167,7 @@ The help button and the edit card button during the learn modes don't work - not
                 if (!advancedButtons.classList.contains('hidden')) {
                     e.preventDefault();
                     switch (e.key) {
-                        case '1': markSpaced(1); break;
-                        case '2': markSpaced(2); break;
-                        case '3': markSpaced(3); break;
-                        case '4': markSpaced(4); break;
+
                     }
                     return;
                 }
@@ -9761,30 +5511,44 @@ The help button and the edit card button during the learn modes don't work - not
         }
 
         function showConfirmModal(text, onConfirm, title = "Confirm Action") {
+            console.log('[DEBUG] showConfirmModal called with title:', title);
             const modal = document.getElementById('confirmActionModal');
+            console.log('[DEBUG] Modal element found:', !!modal);
+            
             document.getElementById('confirmActionTitle').textContent = title;
             document.getElementById('confirmActionText').textContent = text;
+            console.log('[DEBUG] Modal content set');
 
             const confirmBtn = document.getElementById('confirmActionConfirmBtn');
+            console.log('[DEBUG] Original confirm button found:', !!confirmBtn);
+            
             const newConfirmBtn = confirmBtn.cloneNode(true);
             confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+            console.log('[DEBUG] Button cloned and replaced');
 
             newConfirmBtn.addEventListener('click', async () => {
+                console.log('[DEBUG] Confirm button clicked');
                 // Disable button to prevent multiple clicks
                 newConfirmBtn.disabled = true;
                 newConfirmBtn.textContent = 'Processing...';
+                console.log('[DEBUG] Button disabled, showing Processing state');
                 try {
+                    console.log('[DEBUG] Calling onConfirm callback');
                     await onConfirm();
+                    console.log('[DEBUG] onConfirm callback completed successfully');
                     cancelAction();
                 } catch (error) {
-                    console.error('Error in confirm action:', error);
+                    console.error('[DEBUG] Error in confirm action:', error);
+                    console.error('[DEBUG] Error stack:', error.stack);
                     showToast('An error occurred. Please try again.', 'error');
                     newConfirmBtn.disabled = false;
                     newConfirmBtn.textContent = 'Confirm';
+                    console.log('[DEBUG] Button re-enabled after error');
                 }
             });
 
             modal.classList.add('show');
+            console.log('[DEBUG] Modal shown');
         }
 
         function cancelAction() {
@@ -10477,19 +6241,7 @@ The help button and the edit card button during the learn modes don't work - not
                     }
                 });
 
-                const spacedBtn = document.querySelector(`.deck-card[data-deck-id="${deckId}"] .spaced-btn`);
-                if (spacedBtn) {
-                    const existingBadge = spacedBtn.querySelector('.due-badge');
-                    if (existingBadge) existingBadge.remove();
 
-                    if (dueCount > 0) {
-                        const badge = document.createElement('span');
-                        badge.className = 'due-badge';
-                        badge.textContent = dueCount;
-                        badge.style.cssText = 'background-color: var(--danger-color); color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; margin-left: 8px;';
-                        spacedBtn.appendChild(badge);
-                    }
-                }
             }
         }
 
@@ -12094,6 +7846,7 @@ The help button and the edit card button during the learn modes don't work - not
         }
 
         async function updateUIAfterLogin(user) {
+            console.log('[DEBUG] updateUIAfterLogin called with user:', user.email);
             document.getElementById('guestSignupBtn').classList.add('hidden');
             document.getElementById('userProfileMenu').classList.remove('hidden');
             document.getElementById('userEmail').textContent = user.email;
@@ -12110,6 +7863,10 @@ The help button and the edit card button during the learn modes don't work - not
 
             document.getElementById('loggedOutView').classList.add('hidden');
             document.getElementById('loggedInView').classList.remove('hidden');
+            
+            console.log('[DEBUG] Setting up event listeners for logged in user');
+            setupEventListeners();
+            
             await loadUserDataAndSync();
 
             loadCookieConsent();
@@ -12671,11 +8428,8 @@ The help button and the edit card button during the learn modes don't work - not
                 const dropdown = document.getElementById('userProfileDropdown');
                 const btn = document.getElementById('userProfileBtn');
                 if (dropdown && !dropdown.classList.contains('hidden') && !dropdown.contains(e.target) && !btn.contains(e.target)) {
-                    dropdown.classList.add('hidden');
-                }
-            });
-        });
-    </script>
-</body>
 
-</html>
+
+
+
+
