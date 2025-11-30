@@ -4,11 +4,31 @@ export function getDB() {
     return db;
 }
 
-export function initDB() {
+export function initDB(isRetry = false) {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('LagioteDB', 7);
+        // Incremented DB version to 8 to force onupgradeneeded
+        const request = indexedDB.open('LagioteDB', 8);
 
-        request.onerror = event => reject("Error opening DB: " + (event.target.error ? event.target.error.message : event.target.errorCode));
+        request.onerror = event => {
+            console.error("DB Open Error:", event.target.error);
+            // If this is the first attempt and it failed, try the destructive recovery
+            if (!isRetry) {
+                console.warn("Attempting to recover from DB error by deleting the database.");
+                const deleteRequest = indexedDB.deleteDatabase('LagioteDB');
+                deleteRequest.onsuccess = () => {
+                    console.log("Database deleted successfully. Retrying initialization.");
+                    // Retry initDB, marking it as a retry to prevent infinite loops
+                    initDB(true).then(resolve).catch(reject);
+                };
+                deleteRequest.onerror = (err) => {
+                    console.error("Failed to delete database:", err.target.error);
+                    reject("Error opening DB, and failed to recover: " + (event.target.error ? event.target.error.message : event.target.errorCode));
+                };
+            } else {
+                // If the retry also fails, then there's a deeper issue.
+                reject("Error opening DB even after recovery attempt: " + (event.target.error ? event.target.error.message : event.target.errorCode));
+            }
+        };
 
         request.onsuccess = event => {
             db = event.target.result;
@@ -18,67 +38,26 @@ export function initDB() {
         request.onupgradeneeded = event => {
             db = event.target.result;
             const transaction = event.target.transaction;
+            
+            console.log(`Upgrading database from version ${event.oldVersion} to ${event.newVersion}`);
 
-            if (!db.objectStoreNames.contains('decks')) {
-                db.createObjectStore('decks', { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains('analyticsQueue')) {
-                db.createObjectStore('analyticsQueue', { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains('appData')) {
-                db.createObjectStore('appData', { keyPath: 'key' });
-            }
-            if (!db.objectStoreNames.contains('concepts')) {
-                db.createObjectStore('concepts', { keyPath: 'conceptID' });
-            }
-            if (!db.objectStoreNames.contains('userKnowledgeState')) {
-                db.createObjectStore('userKnowledgeState', { keyPath: ['userID', 'cardID'] });
-            }
-            if (!db.objectStoreNames.contains('interactionLogs')) {
-                const logStore = db.createObjectStore('interactionLogs', { keyPath: 'id', autoIncrement: true });
-                logStore.createIndex('by_cardID', 'cardID', { unique: false });
-                logStore.createIndex('by_timestamp', 'timestamp', { unique: false });
-                console.log("Created 'interactionLogs' object store.");
-            }
-            if (!db.objectStoreNames.contains('examPlans')) {
-                db.createObjectStore('examPlans', { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains('analyticsQueue')) {
-                db.createObjectStore('analyticsQueue', { keyPath: 'id' });
-                console.log("Created 'analyticsQueue' object store.");
-            }
+            // Use a set of required stores for cleaner checking
+            const requiredStores = new Set(['decks', 'analyticsQueue', 'appData', 'concepts', 'userKnowledgeState', 'interactionLogs', 'examPlans']);
 
-            if (event.oldVersion > 0 && event.oldVersion < 5) {
-                console.log("Starting database migration for cognitive engine...");
-                const deckStore = transaction.objectStore('decks');
-                const stateStore = transaction.objectStore('userKnowledgeState');
-
-                deckStore.getAll().onsuccess = (e) => {
-                    const allDecks = e.target.result;
-                    if (!allDecks) return;
-
-                    allDecks.forEach(deck => {
-                        let deckNeedsUpdate = false;
-                        deck.cards.forEach(card => {
-                            if (typeof card.masteryScore === 'undefined') {
-                                deckNeedsUpdate = true;
-                                stateStore.put({
-                                    userID: 'default_user',
-                                    cardID: card.id,
-                                    masteryScore: 0.5,
-                                    stability: 1.0,
-                                    lastReviewed: new Date().toISOString(),
-                                    recallHistory: []
-                                });
-                            }
-                        });
-                        if (deckNeedsUpdate) {
-                            deckStore.put(deck);
-                        }
-                    });
-                    console.log("Cognitive engine migration complete.");
-                };
-            }
+            requiredStores.forEach(storeName => {
+                if (!db.objectStoreNames.contains(storeName)) {
+                    console.log(`Creating object store: ${storeName}`);
+                    if (storeName === 'userKnowledgeState') {
+                        db.createObjectStore(storeName, { keyPath: ['userID', 'cardID'] });
+                    } else if (storeName === 'interactionLogs') {
+                        const logStore = db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: true });
+                        logStore.createIndex('by_cardID', 'cardID', { unique: false });
+                        logStore.createIndex('by_timestamp', 'timestamp', { unique: false });
+                    } else {
+                         db.createObjectStore(storeName, { keyPath: storeName === 'appData' ? 'key' : 'id' });
+                    }
+                }
+            });
         };
     });
 }

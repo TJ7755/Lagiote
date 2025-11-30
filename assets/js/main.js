@@ -6,125 +6,86 @@ import { initDB, saveDataToDB, getDataFromDB, getAllDataFromDB, deleteDataFromDB
 // FSRS Algorithm Integration
 // ============================================
 
-const fsrs = window.electronAPI.fsrsAPI.fsrs;
-const Rating = window.electronAPI.fsrsAPI.Rating;
-const State = window.electronAPI.fsrsAPI.State;
-const f = fsrs(); // Use default parameters
+let State, Rating; // Will be populated from main process
 let userBaseline = { latency: 2000, corrections: 1 }; // Default baseline
 
 async function calculateUserBaseline() {
     try {
         const logs = await getAllDataFromDB('interactionLogs');
-        if (logs.length < 10) {
-            return; // Not enough data, use default baseline
-        }
+        if (logs.length < 10) return;
         const correctLogs = logs.filter(log => log.wasCorrect);
-        if (correctLogs.length < 5) {
-            return;
-        }
+        if (correctLogs.length < 5) return;
 
         const totalLatency = correctLogs.reduce((sum, log) => sum + (log.latency || 0), 0);
         const totalCorrections = correctLogs.reduce((sum, log) => sum + (log.corrections || 0), 0);
-
-        const avgLatency = totalLatency / correctLogs.length;
-        const avgCorrections = totalCorrections / correctLogs.length;
-
         userBaseline = {
-            latency: avgLatency,
-            corrections: avgCorrections,
+            latency: totalLatency / correctLogs.length,
+            corrections: totalCorrections / correctLogs.length,
         };
-        console.log('Calculated user baseline:', userBaseline);
     } catch (error) {
         console.error('Failed to calculate user baseline:', error);
     }
 }
 
 function getImplicitFSRSGrade(interactionData) {
-    if (!interactionData.wasCorrect) {
-        return Rating.Again; // Grade 1
-    }
-
-    // Grade 4 (Easy): Correct, 1st attempt, latency < 50% of baseline, 0 corrections
-    if (interactionData.attemptCount === 1 && interactionData.recallLatency < userBaseline.latency * 0.5 && interactionData.totalCorrections === 0) {
-        return Rating.Easy; // Grade 4
-    }
-
-    // Grade 2 (Hard): Correct, but latency > 150% of baseline OR corrections are high
-    if (interactionData.recallLatency > userBaseline.latency * 1.5 || interactionData.totalCorrections > userBaseline.corrections + 2) {
-        return Rating.Hard; // Grade 2
-    }
-
-    // Grade 3 (Good): The default for a correct answer that isn't exceptionally fast or slow.
-    return Rating.Good; // Grade 3
+    if (!Rating) return 3; // Return "Good" if enums not loaded
+    if (!interactionData.wasCorrect) return Rating.Again;
+    if (interactionData.attemptCount === 1 && interactionData.recallLatency < userBaseline.latency * 0.5 && interactionData.totalCorrections === 0) return Rating.Easy;
+    if (interactionData.recallLatency > userBaseline.latency * 1.5 || interactionData.totalCorrections > userBaseline.corrections + 2) return Rating.Hard;
+    return Rating.Good;
 }
 
 async function updateCardKnowledgeWithFSRS(card, interactionData) {
+    if (!State || !Rating) {
+        console.error("FSRS Enums not loaded, skipping update.");
+        return;
+    }
     const grade = getImplicitFSRSGrade(interactionData);
     const now = new Date();
-    
-    // Get current FSRS state or initialize a new one (lazy migration)
     let cardState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
 
     let fsrsCard;
     if (cardState && cardState.fsrs) {
-        // Card already has FSRS data
-        fsrsCard = {
-            ...card,
-            due: new Date(cardState.fsrs.due),
-            stability: cardState.fsrs.stability,
-            difficulty: cardState.fsrs.difficulty,
-            elapsed_days: cardState.fsrs.elapsed_days,
-            scheduled_days: cardState.fsrs.scheduled_days,
-            reps: cardState.fsrs.reps,
-            lapses: cardState.fsrs.lapses,
-            state: cardState.fsrs.state,
-            last_review: new Date(cardState.fsrs.last_review)
-        };
+        fsrsCard = { ...card, ...cardState.fsrs };
     } else {
-        // New card or card with old SM-2 data, initialize it
         fsrsCard = {
-            ...card,
-            due: now,
-            stability: 0,
-            difficulty: 0,
-            elapsed_days: 0,
-            scheduled_days: 0,
-            reps: 0,
-            lapses: 0,
-            state: State.New,
-            last_review: now
+            due: now, stability: 0, difficulty: 0, elapsed_days: 0,
+            scheduled_days: 0, reps: 0, lapses: 0, state: State.New, last_review: now
         };
     }
     
-    const scheduling_cards = f.repeat(fsrsCard, now);
-    const newFSRSState = scheduling_cards[grade];
+    // Pass plain objects to IPC
+    const result_of_repeat = await window.electronAPI.fsrsRepeat(fsrsCard, now.toISOString());
+    if (!result_of_repeat) {
+        console.error("FSRS repeat call failed.");
+        return;
+    }
+    const newFSRSState = result_of_repeat[grade];
 
-    // Create or update the knowledge state entry
     const newKnowledgeState = {
         userID: 'default_user',
         cardID: card.id,
-        masteryScore: newFSRSState.stability, // Use stability as a proxy for mastery
+        masteryScore: newFSRSState.stability,
         stability: newFSRSState.stability,
         difficulty: newFSRSState.difficulty,
         lastReviewed: now.toISOString(),
-        fsrs: {
-            due: newFSRSState.due.toISOString(),
-            stability: newFSRSState.stability,
-            difficulty: newFSRSState.difficulty,
-            elapsed_days: newFSRSState.elapsed_days,
-            scheduled_days: newFSRSState.scheduled_days,
-            reps: newFSRSState.reps,
-            lapses: newFSRSState.lapses,
-            state: newFSRSState.state,
-            last_review: newFSRSState.last_review.toISOString()
-        },
+        fsrs: newFSRSState,
         recallHistory: cardState?.recallHistory ? [...cardState.recallHistory, { date: now.toISOString(), grade }] : [{ date: now.toISOString(), grade }]
     };
 
     await saveDataToDB('userKnowledgeState', newKnowledgeState);
-    
-    // Also update the in-memory state for the current session
     state.studyState.knowledgeStates.set(card.id, newKnowledgeState);
+}
+
+function calculateRetrievability(cardState, now) {
+    if (!cardState || !cardState.fsrs || cardState.fsrs.state === State.New) {
+        return 1.0; // New cards are considered 100% retrievable until first review
+    }
+    const elapsed_days = (now.getTime() - new Date(cardState.fsrs.last_review).getTime()) / (1000 * 3600 * 24);
+    const stability = cardState.fsrs.stability;
+    if (stability <= 0) return 1.0;
+    // Formula from FSRS algorithm
+    return Math.pow(1 + elapsed_days / (9 * stability), -1);
 }
 
 
@@ -545,6 +506,12 @@ function loadCDNScript(src, onload) {
         window.onload = async function () {
             console.log('Script is starting! Online:', navigator.onLine);
 
+            if (window.electronAPI) {
+                const enums = await window.electronAPI.getFsrsEnums();
+                State = enums.State;
+                Rating = enums.Rating;
+            }
+
             await initDB();
             console.log('Database initialized.');
 
@@ -833,38 +800,174 @@ function loadCDNScript(src, onload) {
 
         let chartInstances = {};
 
-        async function showInternalAnalytics() {
-            showView('internalAnalyticsView');
+        let globalForecastChartInstance = null;
+        let globalKnowledgeHeatmapInstance = null;
 
-            try {
-                const [allLogs, allKnowledgeStates] = await Promise.all([
-                    getAllDataFromDB('interactionLogs'),
-                    getAllDataFromDB('userKnowledgeState')
-                ]);
+        async function renderGlobalAnalytics() {
+            showView('globalAnalyticsView');
 
+            const allDecks = Object.values(decks);
+            const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
+            const knowledgeMap = new Map(allKnowledgeStates.map(item => [item.cardID, item]));
 
-                if (!allLogs || allLogs.length === 0) {
-                    console.warn("No interaction logs found to generate analytics.");
-                    document.getElementById('latencyHistogram').parentNode.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No interaction data available yet.</p>';
-                    document.getElementById('fluencyHistogram').parentNode.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No interaction data available yet.</p>';
-                    document.getElementById('correctionsHistogram').parentNode.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No interaction data available yet.</p>';
-                    document.getElementById('latencyScatterPlot').parentNode.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No interaction data available yet.</p>';
-                    document.getElementById('deckStatisticsResult').innerHTML = '<p>No interaction data available yet.</p>';
-                    return;
+            const allCards = allDecks.flatMap(deck => deck.cards);
+
+            renderGlobalForecastGraph(allCards, knowledgeMap);
+            renderGlobalKnowledgeHeatmap(allCards, knowledgeMap);
+            renderGlobalProblemCardsList(allCards, knowledgeMap);
+        }
+
+        async function renderGlobalForecastGraph(cards, knowledgeMap) {
+            const ctx = document.getElementById('globalForecastGraphCanvas').getContext('2d');
+            if (globalForecastChartInstance) {
+                globalForecastChartInstance.destroy();
+            }
+
+            if (cards.length === 0) {
+                ctx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards to forecast globally.</p>';
+                return;
+            }
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const forecastDays = 30;
+            const labels = [];
+            const data = [];
+
+            for (let i = 0; i < forecastDays; i++) {
+                const futureDate = new Date(today);
+                futureDate.setDate(today.getDate() + i);
+                labels.push(futureDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }));
+
+                let totalRetrievability = 0;
+                let cardCount = 0;
+
+                for (const card of cards) {
+                    const knowledgeState = knowledgeMap.get(card.id);
+                    totalRetrievability += calculateRetrievability(knowledgeState, futureDate);
+                    cardCount++;
                 }
 
-                renderHistograms(allLogs);
-                renderLatencyScatterPlot(allLogs);
-                renderInteractionsTimeSeries(allLogs);
+                data.push(cardCount > 0 ? (totalRetrievability / cardCount) * 100 : 0);
+            }
 
-                setupErrorAnalysisAndDeckStats(allLogs, allKnowledgeStates);
+            globalForecastChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Average Retrievability (%)',
+                        data: data,
+                        borderColor: 'rgb(102, 126, 234)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Global Retrievability Forecast'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(0) + '%';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { title: { display: true, text: 'Days from Today' } },
+                        y: { title: { display: true, text: 'Retrievability (%)' }, min: 0, max: 100 }
+                    }
+                }
+            });
+        }
 
-            } catch (error) {
-                console.error("Failed to fetch data for analytics:", error);
+        async function renderGlobalKnowledgeHeatmap(cards, knowledgeMap) {
+            const heatmapContainer = document.getElementById('globalKnowledgeHeatmapContainer');
+            heatmapContainer.innerHTML = '';
 
-                showToast("Error loading analytics data. Please try again later.", "error");
+            if (cards.length === 0) {
+                heatmapContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards for global heatmap.</p>';
+                return;
+            }
+
+            for (const card of cards) {
+                const knowledgeState = knowledgeMap.get(card.id);
+
+                let stabilityLevel = 'new';
+                let stabilityText = 'New Card';
+                if (knowledgeState && knowledgeState.fsrs) {
+                    const stability = knowledgeState.fsrs.stability;
+                    stabilityText = `${stability.toFixed(1)} days`;
+                    if (stability < 5) {
+                        stabilityLevel = 'low';
+                    } else if (stability < 30) {
+                        stabilityLevel = 'medium';
+                    } else if (stability < 100) {
+                        stabilityLevel = 'high';
+                    } else {
+                        stabilityLevel = 'very-high';
+                    }
+                }
+
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                cell.setAttribute('data-stability-level', stabilityLevel);
+                cell.title = `Q: ${card.question}\nStability: ${stabilityText}`;
+                heatmapContainer.appendChild(cell);
             }
         }
+
+        async function renderGlobalProblemCardsList(cards, knowledgeMap) {
+            const problemCardsContainer = document.getElementById('globalProblemCardsListContainer');
+            problemCardsContainer.innerHTML = '';
+
+            if (cards.length === 0) {
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards to analyze for global problems.</p>';
+                return;
+            }
+
+            const now = new Date();
+            const difficultCards = [];
+
+            for (const card of cards) {
+                const knowledgeState = knowledgeMap.get(card.id);
+
+                if (knowledgeState && knowledgeState.fsrs && knowledgeState.fsrs.state !== State.New) {
+                    difficultCards.push({
+                        card: card,
+                        difficulty: knowledgeState.fsrs.difficulty,
+                        stability: knowledgeState.fsrs.stability,
+                        retrievability: calculateRetrievability(knowledgeState, now)
+                    });
+                }
+            }
+
+            difficultCards.sort((a, b) => b.difficulty - a.difficulty);
+            const topProblemCards = difficultCards.slice(0, 10); // Show top 10 global problem cards
+
+            if (topProblemCards.length === 0) {
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No reviewed cards with difficulty data yet.</p>';
+                return;
+            }
+
+            for (const item of topProblemCards) {
+                const cardItem = document.createElement('div');
+                cardItem.className = 'card-item';
+                cardItem.innerHTML = `
+                    <div class="question" title="${item.card.question}">${item.card.question.substring(0, 50)}${item.card.question.length > 50 ? '...' : ''}</div>
+                    <div class="difficulty" title="Difficulty">${item.difficulty.toFixed(1)}</div>
+                `;
+                problemCardsContainer.appendChild(cardItem);
+            }
+        }
+
 
         function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
             console.log('[Test 1] Raw data from DB:', allKnowledgeStates);
@@ -1641,55 +1744,6 @@ function loadCDNScript(src, onload) {
             if (profileBtn) { ... } 
             */
 
-            const logoutBtn = document.getElementById('logoutBtn');
-            console.log('[DEBUG] logoutBtn element found:', !!logoutBtn);
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    console.log('[DEBUG] Logout button clicked, e.type:', e.type);
-                    console.log('[DEBUG] Logout button element:', e.target);
-                    try {
-                        console.log('[DEBUG] Calling logout function');
-                        await logout();
-                        console.log('[DEBUG] Logout completed successfully');
-                    } catch (error) {
-                        console.error('[DEBUG] Logout error:', error);
-                        console.error('[DEBUG] Logout error stack:', error.stack);
-                        showToast('Logout failed. Please try again.', 'error');
-                    }
-                });
-                console.log('[DEBUG] Logout button listener attached');
-            }
-
-            // Sync button handler
-            const syncBtn = document.getElementById('syncBtn');
-            console.log('[DEBUG] syncBtn element found:', !!syncBtn);
-            if (syncBtn) {
-                syncBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    console.log('[DEBUG] Sync button clicked, e.type:', e.type);
-                    console.log('[DEBUG] Sync button element:', e.target);
-                    console.log('[DEBUG] isOnline:', isOnline);
-                    try {
-                        if (isOnline) {
-                            console.log('[DEBUG] Online detected, starting sync');
-                            showToast('Syncing your data...', 'info');
-                            console.log('[DEBUG] Calling loadUserDataAndSync');
-                            await loadUserDataAndSync();
-                            console.log('[DEBUG] Sync completed successfully');
-                        } else {
-                            console.log('[DEBUG] App is offline');
-                            showToast('You are offline. Please connect to the internet to sync.', 'warning');
-                        }
-                    } catch (error) {
-                        console.error('[DEBUG] Manual sync error:', error);
-                        console.error('[DEBUG] Sync error stack:', error.stack);
-                        showToast('Sync failed. Please try again.', 'error');
-                    }
-                });
-                console.log('[DEBUG] Sync button listener attached');
-            }
-
             document.getElementById('deckTypeHint').addEventListener('change', (e) => {
                 toggleEditorView(e.target.value);
             });
@@ -1704,6 +1758,12 @@ function loadCDNScript(src, onload) {
             // Setup system theme detection
             setupSystemThemeListener();
         }
+
+        // Global event listeners for sync and logout buttons - outside of setupEventListeners to ensure they're always attached
+        
+        console.log('[main.js] Event listeners are defined in index.html instead');
+
+        
 
         
             }
@@ -2277,25 +2337,29 @@ function loadCDNScript(src, onload) {
                     const totalCards = deck.cards.length;
                     let progressPercent = 0;
                     if (totalCards > 0) {
-                        const hasExamDate = deck.settings && deck.settings.examDate;
-                        const targetRetention = (deck.settings && deck.settings.targetRetention) || 0.8;
-                        const examDate = hasExamDate ? new Date(deck.settings.examDate) : null;
+                        const now = new Date();
+                        // This helper calculates recall probability on a given date.
+                        function calculateRetrievability(cardState, effectiveDate) {
+                            if (!cardState || !cardState.fsrs || cardState.fsrs.state === State.New) return 0.0;
+                            const elapsed_days = (effectiveDate.getTime() - new Date(cardState.fsrs.last_review).getTime()) / (1000 * 3600 * 24);
+                            if (elapsed_days < 0) return 1.0; // Should not happen, but handle it.
+                            const stability = cardState.fsrs.stability;
+                            if (stability <= 0) return 0.0;
+                            return Math.pow(1 + elapsed_days / (9 * stability), -1);
+                        }
 
-                        let totalScore = 0;
+                        const hasExamDate = deck.settings && deck.settings.examDate;
+                        const examDate = hasExamDate ? new Date(deck.settings.examDate) : null;
+                        
+                        // Use the exam date for calculation if it's in the future, otherwise use today.
+                        const effectiveDate = (examDate && examDate > now) ? examDate : now;
+
+                        let totalRetrievability = 0;
                         deck.cards.forEach(card => {
                             const state = knowledgeMap.get(card.id);
-                            if (hasExamDate) {
-                                // Use retention for exam mode
-                                const retention = calculateRetentionAtDate(state, examDate);
-                                const score = retention / targetRetention;
-                                totalScore += Math.min(1, score);
-                            } else {
-                                // Use standard mastery score
-                                const mastery = state?.masteryScore || 0.5;
-                                totalScore += mastery;
-                            }
+                            totalRetrievability += calculateRetrievability(state, effectiveDate);
                         });
-                        progressPercent = (totalScore / totalCards) * 100;
+                        progressPercent = totalCards > 0 ? (totalRetrievability / totalCards) * 100 : 0;
                     }
 
                     let actionButtonsHTML;
@@ -2405,13 +2469,30 @@ function loadCDNScript(src, onload) {
 
                     const orderText = card.order ? `${card.order}. ` : `${index + 1}. `;
 
+                    // FSRS Stats Implementation
+                    const knowledgeState = studyState.knowledgeStates.get(card.id);
+                    let statsHTML = '';
+                    if (knowledgeState && knowledgeState.fsrs) {
+                        const s = knowledgeState.fsrs.stability.toFixed(1);
+                        const d = knowledgeState.fsrs.difficulty.toFixed(1);
+                        const r = (calculateRetrievability(knowledgeState, new Date()) * 100).toFixed(0);
+                        statsHTML = `<div class="deck-card-stats" style="margin-top: 10px; font-size: 0.8rem; color: var(--secondary-text); display: flex; gap: 15px; align-items: center;">
+                            <span title="Stability: an index of how long a memory lasts. Higher is better.">S: <b>${s}d</b></span>
+                            <span title="Difficulty: The inherent difficulty of a card. Higher is harder.">D: <b>${d}</b></span>
+                            <span title="Retrievability: Estimated probability of recalling this card right now.">R: <b>${r}%</b></span>
+                        </div>`;
+                    }
+                    // End FSRS Stats Implementation
+
                     cardItem.innerHTML = `<div class="deck-card-content">
                         <div class="deck-card-question">${orderText}${card.question} ${newBadge}</div>
                         ${questionImageHTML}
                         <div class="deck-card-answer">${card.answer}</div>
                         ${answerImageHTML}
+                        ${statsHTML}
                     </div>
                     <div class="deck-card-actions">
+                        <button class="deck-card-action-btn" title="View History" onclick="showCardHistoryModal('${card.id}')"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-graph-up" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M0 0h1v15h15v1H0V0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5z"/></svg></button>
                         <button class="deck-card-action-btn edit" title="Edit Card" onclick="editCard('${deckId}', ${originalIndex}, 'detail')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg></button>
                         <button class="deck-card-action-btn delete" title="Delete Card" onclick="deleteCardFromDetail('${deckId}', ${originalIndex})"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
                     </div>`;
@@ -2422,6 +2503,7 @@ function loadCDNScript(src, onload) {
             document.getElementById('decksSection').classList.add('hidden');
             document.querySelector('.create-section').classList.add('hidden');
             document.getElementById('deckDetailView').classList.remove('hidden');
+            showDeckDetailSubView('cards'); // Initially show the cards list
 
             document.getElementById('headerBackBtn').classList.remove('hidden');
         }
@@ -2488,6 +2570,251 @@ function loadCDNScript(src, onload) {
             }
         }
 
+        let cardHistoryChartInstance = null;
+
+        async function showCardHistoryModal(cardId) {
+            const card = Object.values(decks).flatMap(d => d.cards).find(c => c.id === cardId);
+            const knowledgeState = await getDataFromDB('userKnowledgeState', ['default_user', cardId]);
+
+            if (!card) {
+                showToast("Card not found.", "error");
+                return;
+            }
+
+            const titleEl = document.getElementById('cardHistoryTitle');
+            const tableContainer = document.getElementById('cardHistoryTableContainer');
+            const modal = document.getElementById('cardHistoryModal');
+
+            titleEl.textContent = `History for: "${card.question.substring(0, 30)}..."`;
+            tableContainer.innerHTML = '';
+
+            if (!knowledgeState || !knowledgeState.recallHistory || knowledgeState.recallHistory.length === 0) {
+                tableContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No review history for this card yet.</p>';
+                if (cardHistoryChartInstance) cardHistoryChartInstance.destroy();
+                const chartContainer = document.getElementById('cardHistoryChart').parentNode;
+                chartContainer.style.display = 'none';
+                modal.classList.add('show');
+                return;
+            }
+            
+            const chartContainer = document.getElementById('cardHistoryChart').parentNode;
+            chartContainer.style.display = 'block';
+
+            const history = knowledgeState.recallHistory;
+            let currentStability = 0;
+            const stabilityData = [];
+            const labels = [];
+            const ratingMap = {1: 'Again', 2: 'Hard', 3: 'Good', 4: 'Easy'};
+
+            let tableHTML = `<table class="stats-table">
+                <thead>
+                    <tr>
+                        <th>Review #</th>
+                        <th>Date</th>
+                        <th>Rating</th>
+                        <th>Stability</th>
+                        <th>Difficulty</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            // Re-run FSRS scheduling from scratch to get state at each step
+            let tempCardState = null;
+            for (let i = 0; i < history.length; i++) {
+                const review = history[i];
+                const reviewDate = new Date(review.date);
+                
+                let fsrsCard;
+                if (tempCardState) {
+                    fsrsCard = { ...tempCardState, due: new Date(tempCardState.last_review), last_review: new Date(tempCardState.last_review) };
+                } else {
+                    fsrsCard = f.create_card(card.question);
+                }
+
+                const scheduling_cards = f.repeat(fsrsCard, reviewDate);
+                tempCardState = scheduling_cards[review.grade];
+
+                stabilityData.push(tempCardState.stability);
+                labels.push(`Review ${i + 1}`);
+
+                tableHTML += `<tr>
+                    <td>${i + 1}</td>
+                    <td>${reviewDate.toLocaleDateString()}</td>
+                    <td>${ratingMap[review.grade] || 'N/A'}</td>
+                    <td>${tempCardState.stability.toFixed(1)}d</td>
+                    <td>${tempCardState.difficulty.toFixed(1)}</td>
+                </tr>`;
+            }
+            tableHTML += '</tbody></table>';
+            tableContainer.innerHTML = tableHTML;
+
+            // Render chart
+            const ctx = document.getElementById('cardHistoryChart').getContext('2d');
+            if (cardHistoryChartInstance) {
+                cardHistoryChartInstance.destroy();
+            }
+            cardHistoryChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Stability (days)',
+                        data: stabilityData,
+                        borderColor: 'rgb(102, 126, 234)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Stability' } } }
+                }
+            });
+
+            modal.classList.add('show');
+        }
+
+        function closeCardHistoryModal() {
+            const modal = document.getElementById('cardHistoryModal');
+            modal.classList.remove('show');
+            if (cardHistoryChartInstance) {
+                cardHistoryChartInstance.destroy();
+                cardHistoryChartInstance = null;
+            }
+        }
+
+
+        let forecastChartInstance = null; // To hold Chart.js instance
+        let currentDeckDetailSubView = 'cards'; // 'cards' or 'analytics'
+
+        function showDeckDetailSubView(viewId) {
+            // Hide all sub-views
+            document.getElementById('deckCardsList').classList.add('hidden');
+            document.getElementById('deckAnalyticsView').classList.add('hidden');
+
+            // Show the requested sub-view
+            document.getElementById('deck' + viewId.charAt(0).toUpperCase() + viewId.slice(1) + 'View').classList.remove('hidden');
+            currentDeckDetailSubView = viewId;
+
+            // Update button active states
+            // Assuming there are buttons with IDs 'deckDetailCardsBtn' and 'deckDetailAnalyticsBtn'
+            const cardsBtn = document.getElementById('deckDetailCardsBtn');
+            const analyticsBtn = document.getElementById('deckDetailAnalyticsBtn');
+
+            if (cardsBtn) cardsBtn.classList.remove('active');
+            if (analyticsBtn) analyticsBtn.classList.remove('active');
+            
+            if (viewId === 'cards' && cardsBtn) {
+                cardsBtn.classList.add('active');
+            } else if (viewId === 'analytics' && analyticsBtn) {
+                analyticsBtn.classList.add('active');
+            }
+
+            if (viewId === 'analytics') {
+                renderForecastGraph(currentViewingDeckId);
+                renderKnowledgeHeatmap(currentViewingDeckId);
+                renderProblemCardsList(currentViewingDeckId); // Implemented
+            }
+        }
+
+        async function renderForecastGraph(deckId) {
+            const deck = decks[deckId];
+            if (!deck || deck.cards.length === 0) {
+                const forecastContainer = document.getElementById('forecastGraphCanvas').parentNode;
+                forecastContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck to forecast.</p>';
+                if (forecastChartInstance) {
+                    forecastChartInstance.destroy();
+                    forecastChartInstance = null;
+                }
+                return;
+            }
+
+            const ctx = document.getElementById('forecastGraphCanvas').getContext('2d');
+
+            if (forecastChartInstance) {
+                forecastChartInstance.destroy();
+            }
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const forecastDays = 30; // Forecast for the next 30 days
+            const labels = [];
+            const data = [];
+
+            for (let i = 0; i < forecastDays; i++) {
+                const futureDate = new Date(today);
+                futureDate.setDate(today.getDate() + i);
+                labels.push(futureDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }));
+
+                let totalRetrievability = 0;
+                let cardCount = 0;
+
+                // Ensure knowledgeStates are up-to-date for calculation
+                for (const card of deck.cards) {
+                    let knowledgeState = studyState.knowledgeStates.get(card.id);
+                    if (!knowledgeState && card.id) {
+                        const fetchedState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
+                        if (fetchedState) {
+                            studyState.knowledgeStates.set(card.id, fetchedState);
+                            knowledgeState = fetchedState;
+                        }
+                    }
+                    totalRetrievability += calculateRetrievability(knowledgeState, futureDate);
+                    cardCount++;
+                }
+
+                data.push(cardCount > 0 ? (totalRetrievability / cardCount) * 100 : 0);
+            }
+
+            forecastChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Average Retrievability (%)',
+                        data: data,
+                        borderColor: 'rgb(102, 126, 234)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Deck Retrievability Forecast'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(0) + '%';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Days from Today'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Retrievability (%)'
+                            },
+                            min: 0,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+
         async function deleteCardFromDetail(deckId, cardIndex) {
             console.log('[DEBUG] deleteCardFromDetail called with deckId:', deckId, 'cardIndex:', cardIndex);
             const deck = decks[deckId];
@@ -2527,6 +2854,156 @@ function loadCDNScript(src, onload) {
                     throw error;
                 }
             });
+        }
+        
+        async function renderKnowledgeHeatmap(deckId) {
+            const deck = decks[deckId];
+            const heatmapContainer = document.getElementById('knowledgeHeatmapContainer');
+            heatmapContainer.innerHTML = ''; // Clear previous content
+
+            if (!deck || deck.cards.length === 0) {
+                heatmapContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck for heatmap.</p>';
+                return;
+            }
+
+            const now = new Date();
+            for (const card of deck.cards) {
+                let knowledgeState = studyState.knowledgeStates.get(card.id);
+                if (!knowledgeState && card.id) {
+                    const fetchedState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
+                    if (fetchedState) {
+                        studyState.knowledgeStates.set(card.id, fetchedState);
+                        knowledgeState = fetchedState;
+                    }
+                }
+
+                let stabilityLevel = 'new';
+                let stabilityText = 'New Card';
+                if (knowledgeState && knowledgeState.fsrs) {
+                    const stability = knowledgeState.fsrs.stability;
+                    stabilityText = `${stability.toFixed(1)} days`;
+                    if (stability < 5) {
+                        stabilityLevel = 'low';
+                    } else if (stability < 30) {
+                        stabilityLevel = 'medium';
+                    } else if (stability < 100) {
+                        stabilityLevel = 'high';
+                    } else {
+                        stabilityLevel = 'very-high';
+                    }
+                }
+
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                cell.setAttribute('data-stability-level', stabilityLevel);
+                cell.title = `Q: ${card.question}\nStability: ${stabilityText}`;
+                heatmapContainer.appendChild(cell);
+            }
+        }
+
+        async function renderProblemCardsList(deckId) {
+            const deck = decks[deckId];
+            const problemCardsContainer = document.getElementById('problemCardsListContainer');
+            problemCardsContainer.innerHTML = ''; // Clear previous content
+
+            if (!deck || deck.cards.length === 0) {
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck to analyze.</p>';
+                return;
+            }
+
+            const now = new Date();
+            const difficultCards = [];
+
+            for (const card of deck.cards) {
+                let knowledgeState = studyState.knowledgeStates.get(card.id);
+                // Ensure knowledgeStates are up-to-date for calculation
+                if (!knowledgeState && card.id) {
+                    const fetchedState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
+                    if (fetchedState) {
+                        studyState.knowledgeStates.set(card.id, fetchedState);
+                        knowledgeState = fetchedState;
+                    }
+                }
+
+                if (knowledgeState && knowledgeState.fsrs && knowledgeState.fsrs.state !== State.New) {
+                    difficultCards.push({
+                        card: card,
+                        difficulty: knowledgeState.fsrs.difficulty,
+                        stability: knowledgeState.fsrs.stability,
+                        retrievability: calculateRetrievability(knowledgeState, now)
+                    });
+                }
+            }
+
+            difficultCards.sort((a, b) => b.difficulty - a.difficulty);
+
+            const topProblemCards = difficultCards.slice(0, 5);
+
+            if (topProblemCards.length === 0) {
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No reviewed cards with difficulty data yet.</p>';
+                return;
+            }
+            
+            const drillBtn = document.createElement('button');
+            drillBtn.className = 'btn btn-secondary';
+            drillBtn.textContent = 'Drill Problem Cards';
+            drillBtn.style.marginBottom = '15px';
+            drillBtn.onclick = () => startLeechDrillSession(deckId, topProblemCards.map(p => p.card.id));
+            problemCardsContainer.appendChild(drillBtn);
+
+            for (const item of topProblemCards) {
+                const cardIndex = deck.cards.findIndex(c => c.id === item.card.id);
+                const cardItem = document.createElement('div');
+                cardItem.className = 'card-item';
+                cardItem.innerHTML = `
+                    <div class="question" title="${item.card.question}">${item.card.question.substring(0, 50)}${item.card.question.length > 50 ? '...' : ''}</div>
+                    <div class="difficulty" title="Difficulty">${item.difficulty.toFixed(1)}</div>
+                    <div class="card-actions" style="display:flex; gap: 5px;">
+                        <button class="deck-card-action-btn" title="Reset Card Progress" onclick="resetCardProgress('${item.card.id}', '${deckId}')">🔄</button>
+                        <button class="deck-card-action-btn" title="Edit Card" onclick="editCard('${deckId}', ${cardIndex}, 'detail')">✏️</button>
+                    </div>
+                `;
+                problemCardsContainer.appendChild(cardItem);
+            }
+        }
+        
+        async function resetCardProgress(cardId, deckId) {
+            showConfirmModal('Are you sure you want to reset the progress for this card?', async () => {
+                await deleteDataFromDB('userKnowledgeState', ['default_user', cardId]);
+                studyState.knowledgeStates.delete(cardId);
+                showToast('Card progress reset.', 'success');
+                // Re-render the analytics view
+                if (currentViewingDeckId === deckId && currentDeckDetailSubView === 'analytics') {
+                    renderForecastGraph(deckId);
+                    renderKnowledgeHeatmap(deckId);
+                    renderProblemCardsList(deckId);
+                }
+            });
+        }
+
+        function startLeechDrillSession(deckId, cardIds) {
+            const deck = decks[deckId];
+            if (!deck) return;
+
+            const problemCards = deck.cards.filter(c => cardIds.includes(c.id));
+            
+            // Start a simple review mode session with just these cards
+            currentMode = 'review';
+            currentDeckId = deckId;
+            studyState.settings = deck.settings;
+            studyState.currentCardIndex = 0;
+            studyState.startTime = new Date();
+            studyState.originPlanId = null;
+            studyState.stillLearning = shuffleArray([...problemCards]);
+            studyState.correct = [];
+            studyState.lastRoundIncorrect = [];
+            studyState.roundCards = [...studyState.stillLearning];
+
+            showView('studyMode');
+            document.getElementById('studyTitle').textContent = 'Problem Card Drill';
+            document.getElementById('studySubtitle').textContent = deck.name;
+            transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
+            showNextCard();
         }
 
         function setupSearch() {
@@ -3354,83 +3831,38 @@ function loadCDNScript(src, onload) {
             } else {
                 editBtn.classList.add('hidden');
             }
-
+            
             // Fetch latest knowledge states
             const allKnowledge = await getAllDataFromDB('userKnowledgeState');
             studyState.knowledgeStates = new Map(allKnowledge.map(k => [k.cardID, k]));
 
             const allCards = deck.cards;
             let candidates = [];
+            const now = new Date();
 
-            // Check for Exam Mode
-            const examDateObj = deck.settings.examDate ? new Date(deck.settings.examDate) : null;
-            if (examDateObj) examDateObj.setHours(23, 59, 59, 999);
+            // FSRS based filtering and sorting
+            candidates = allCards.map(c => {
+                const state = studyState.knowledgeStates.get(c.id);
+                c.retrievability = calculateRetrievability(state, now);
+                return c;
+            });
 
-            const isExamInFuture = examDateObj && (examDateObj > new Date());
+            // Filter for cards that are "due" (retrievability < 90%)
+            let dueCards = candidates.filter(c => c.retrievability < 0.9);
 
-            if (deck.settings.examDate && isExamInFuture) {
-                const examDate = new Date(deck.settings.examDate);
-                const targetRetention = deck.settings.targetRetention || 0.8;
-
-                candidates = allCards.filter(c => {
-                    const state = studyState.knowledgeStates.get(c.id);
-                    if (!state) return true;
-
-                    // Force review if mastery is very low
-                    if (state.masteryScore < 0.5) return true;
-
-                    const retention = calculateRetentionAtDate(state, examDate);
-                    c.projectedRetention = retention;
-                    return retention < targetRetention;
-                });
-
-                // --- FIX: Overlearning Fallback for Exam Mode ---
-                if (candidates.length === 0 && allCards.length > 0) {
-                    showToast("Target retention met! Reviewing all cards (Overlearning).", "success");
-                    candidates = [...allCards];
-                }
-                // ------------------------------------------------
-
-                // Shuffle then sort
-                candidates = shuffleArray(candidates);
-                candidates.sort((a, b) => {
-                    const rA = a.projectedRetention !== undefined ? a.projectedRetention : 0;
-                    const rB = b.projectedRetention !== undefined ? b.projectedRetention : 0;
-                    return rA - rB;
-                });
-
-            } else {
-                // Standard Mode
-                candidates = allCards.filter(c => {
-                    const mastery = studyState.knowledgeStates.get(c.id)?.masteryScore ?? 0.5;
-                    return mastery < 0.90;
-                });
-
-                // Overlearning Fallback for Standard Mode
-                if (candidates.length === 0 && allCards.length > 0) {
-                    showToast("Deck Mastered! Entering over-learning mode.", "success");
-                    candidates = [...allCards];
-                }
-
-                // Shuffle then sort
-                candidates = shuffleArray(candidates);
-                candidates.sort((a, b) => {
-                    const mA = studyState.knowledgeStates.get(a.id)?.masteryScore ?? 0.5;
-                    const mB = studyState.knowledgeStates.get(b.id)?.masteryScore ?? 0.5;
-                    return mA - mB;
-                });
+            // --- Overlearning Fallback ---
+            if (dueCards.length === 0 && allCards.length > 0) {
+                showToast("Deck Mastered! Entering over-learning mode.", "success");
+                dueCards = [...allCards]; // If no cards are due, review all of them
             }
+            
+            // Sort by lowest retrievability first
+            dueCards.sort((a, b) => a.retrievability - b.retrievability);
 
             // Determine Session Size
-            let sessionSize = 20;
-            if (deck.settings.learnModeMaxCards) {
-                sessionSize = parseInt(deck.settings.learnModeMaxCards);
-            } else if (deck.settings.examDate && isExamInFuture) {
-                sessionSize = candidates.length;
-                if (sessionSize < 5 && candidates.length >= 5) sessionSize = 5;
-            }
+            let sessionSize = deck.settings.learnModeMaxCards ? parseInt(deck.settings.learnModeMaxCards) : 20;
 
-            studyState.roundCards = candidates.slice(0, sessionSize);
+            studyState.roundCards = dueCards.slice(0, sessionSize);
             studyState.sessionCardIds = studyState.roundCards.map(c => c.id);
 
             if (studyState.roundCards.length === 0) {
@@ -3466,6 +3898,9 @@ function loadCDNScript(src, onload) {
 
             studyState.currentCardIndex = 0;
             studyState.startTime = new Date();
+
+            // Calculate user baseline at the start of a session
+            await calculateUserBaseline();
 
             transitionSubView(document.getElementById('preGenerationView'), document.getElementById('cardView'));
             showNextCard();
@@ -7782,7 +8217,7 @@ function loadCDNScript(src, onload) {
                 const analyticsContent = document.getElementById('planAnalyticsContent');
                 analyticsContent.innerHTML = `
                     <div class="no-decks" style="padding: 40px;">
-                        <p>This plan has no cards to analyze.</p>
+                        <p>This plan has no cards to analyse.</p>
                         <p style="font-size: 0.9rem; margin-top: 10px;">Edit the plan to add some decks.</p>
                     </div>
                 `;
@@ -8450,48 +8885,41 @@ function loadCDNScript(src, onload) {
             if (!deck) return;
 
             showConfirmModal(`Are you sure you want to reset all learning progress for "${deck.name}"? This cannot be undone.`, async () => {
-                const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
-                const store = transaction.objectStore('userKnowledgeState');
+                try {
+                    await new Promise((resolve, reject) => {
+                        const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
+                        const store = transaction.objectStore('userKnowledgeState');
+                        transaction.oncomplete = resolve;
+                        transaction.onerror = (event) => reject('Transaction error: ' + event.target.error);
 
-                // Create reset promises for all cards in this deck
-                const resetPromises = deck.cards.map(card => {
-                    return new Promise((resolve, reject) => {
-                        const defaultState = {
-                            userID: 'default_user',
-                            cardID: card.id,
-                            masteryScore: 0.5,
-                            stability: 1.0,
-                            lastReviewed: new Date().toISOString(),
-                            recallHistory: []
-                        };
-                        const request = store.put(defaultState);
-                        request.onsuccess = resolve;
-                        request.onerror = reject;
+                        const deletePromises = deck.cards.map(card => {
+                            return new Promise((resolveCard, rejectCard) => {
+                                // The key is a compound key
+                                const request = store.delete([card.userID || 'default_user', card.id]);
+                                request.onsuccess = resolveCard;
+                                request.onerror = (e) => rejectCard('Delete error: ' + e.target.error);
+                            });
+                        });
+
+                        Promise.all(deletePromises).catch(reject);
                     });
-                });
 
-                await Promise.all(resetPromises);
+                    // Also clear any cached knowledge states in memory
+                    deck.cards.forEach(card => {
+                        studyState.knowledgeStates.delete(card.id);
+                    });
 
-                // Also reset internal SM2 data if it exists on the deck object
-                const sm2 = new SM2Algorithm();
-                deck.cards.forEach(card => {
-                    // Reset to default SM2 state (interval 0, factor 2.5)
-                    card.sm2Data = sm2.calculateNextReview({})(3);
-                    // The '3' passed above is just to trigger the default structure generation in the helper
-                    // Manually reset specific fields to be sure
-                    card.sm2Data.interval = 0;
-                    card.sm2Data.repetition = 0;
-                });
+                    showToast(`Progress for "${deck.name}" has been reset.`, "success");
 
-                await saveDataToDB('decks', deck);
-
-                showToast(`Progress for "${deck.name}" has been reset.`, "success");
-
-                // Refresh the current view to show 0% progress
-                if (currentViewingDeckId === deckId) {
-                    showDeckDetail(deckId);
-                } else {
+                    // Refresh the UI
+                    if (currentViewingDeckId === deckId) {
+                        showDeckDetail(deckId);
+                    }
                     updateDashboard();
+
+                } catch (error) {
+                    console.error('Failed to reset deck progress:', error);
+                    showToast('An error occurred while resetting progress.', 'error');
                 }
             });
         }

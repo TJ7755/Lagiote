@@ -1,16 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { fsrs, Rating, State } = require('ts-fsrs');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
-  fsrsAPI: {
-    fsrs,
-    Rating,
-    State,
-  },
+
+  // FSRS calculations
+  getFsrsEnums: () => ipcRenderer.invoke('get-fsrs-enums'),
+  fsrsRepeat: (card, now) => ipcRenderer.invoke('fsrs-repeat', card, now),
 
   // 1. AI Generation - Use IPC handler from main.js
   generateDeck: (data) => ipcRenderer.invoke('gemini-generate-deck', data),
+
 
 
   // 2. Sync Data - Use IPC handler from main.js

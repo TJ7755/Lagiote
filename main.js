@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
+require('ts-fsrs'); // Hint for packager
 const { updateElectronApp } = require('update-electron-app');
 const path = require('path');
 const fs = require('fs');
@@ -419,10 +420,13 @@ app.whenReady().then(() => {
   }
 
   // Initialize auto-updater after app is ready
+  // This will check for updates immediately and then every 1 hour in the background
   updateElectronApp({
     repo: 'TJ7755/Lagiote-revise',
     updateInterval: '1 hour'
   });
+  
+  console.log('[Auto-Update] App loaded - background update check initiated');
 
   app.setAsDefaultProtocolClient("lagioterevise");
   createWindow();
@@ -594,5 +598,28 @@ ipcMain.handle('sync-data', async (event, arg) => {
       offline: true,
       originalError: error.message
     };
+  }
+});
+
+// FSRS calculations handled in the main process to avoid sandbox issues
+const { fsrs, State, Rating } = require('ts-fsrs');
+const f = fsrs(); // Initialize with default parameters
+
+ipcMain.handle('get-fsrs-enums', () => {
+  return { State, Rating };
+});
+
+ipcMain.handle('fsrs-repeat', (event, card, now) => {
+  try {
+    // The card object from the renderer needs to be reconstituted with Date objects
+    const cardForFsrs = {
+        ...card,
+        due: new Date(card.due),
+        last_review: new Date(card.last_review),
+    };
+    return f.repeat(cardForFsrs, new Date(now));
+  } catch (e) {
+    console.error('FSRS repeat error:', e);
+    return null;
   }
 });
