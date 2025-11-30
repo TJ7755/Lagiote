@@ -11,8 +11,8 @@ You can access Lagiote Revise in two ways:
 ## Features
 
 - **Offline Capability**: Study anywhere, anytime, without an internet connection.
-- **AI-Powered Deck Generation**: Create comprehensive flashcard decks from a simple topic or text using advanced AI.
-- **Smart Study Modes**: Tailored algorithms to maximise your learning efficiency.
+- **AI-Powered Deck Generation**: Create comprehensive flashcard decks from a simple topic or text using AI.
+- **Smart Study Modes**: 4 different modes of learning.
 - **Cross-Platform**: Available as a web app and a desktop application.
 
 ## Algorithms
@@ -60,4 +60,4 @@ To set up the project locally:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
