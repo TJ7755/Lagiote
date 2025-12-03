@@ -1,7 +1,7 @@
-<!--
+﻿<!--
 These are the notes of issues:
 
-Have syncing analytics as well as normal syncing.
+There are too many MCQs and not enought typing ones.
 -->
 
 <!DOCTYPE html>
@@ -2902,6 +2902,16 @@ Have syncing analytics as well as normal syncing.
                         </svg>
                         Sync Data
                     </a>
+                    <a id="checkUpdatesBtn" href="#" onclick="checkForUpdates(event)"
+                        style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px; cursor: pointer; pointer-events: auto;">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                            stroke="currentColor"
+                            style="width: 16px; height: 16px; display: inline-block; margin-right: 8px; vertical-align: middle;">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                        </svg>
+                        Check for Updates
+                    </a>
                     <a id="logoutBtn" href="#"
                         style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px; cursor: pointer; pointer-events: auto;">Log
                         Out</a>
@@ -2911,17 +2921,6 @@ Have syncing analytics as well as normal syncing.
     </header>
 
     <div id="dashboard" class="container view-container">
-        <div id="loggedOutView" class="hidden" style="text-align: center; padding: 80px 20px;">
-            <h2 style="font-size: 2.5rem; font-weight: 700;">Unlock Your Full Learning Potential</h2>
-            <p
-                style="font-size: 1.2rem; color: var(--secondary-text); margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
-                Create an account to save your progress, sync across devices, and access the curricula library.
-            </p>
-            <div style="margin-top: 40px;">
-                <button class="btn btn-prominent" onclick="console.log('Signup will be implemented with Auth0');">Create
-                    Free Account</button>
-            </div>
-        </div>
         <div id="loggedInView" class="hidden">
             <div class="main-content">
                 <div id="decksSection">
@@ -3169,7 +3168,7 @@ Have syncing analytics as well as normal syncing.
                             <div class="progress-fill" id="progress-bar" style="width: 0%;"></div>
                         </div>
                     </div>
-                    <button id="process-btn" class="btn" style="width: 100%;" disabled>
+                    <button id="process-btn" class="btn" style="width: 100%;" disabled onclick="processAllDocuments()">
                         <span id="process-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                 stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -3366,8 +3365,7 @@ Have syncing analytics as well as normal syncing.
                 <!-- Right side: Action buttons -->
                 <div class="study-header-actions">
                     <button id="accentToggleBtn" class="header-btn hidden" title="Toggle Accents"
-                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;"
-                        onclick="toggleAccentButtons()">
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
                             stroke="currentColor" width="20" height="20">
                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -4159,7 +4157,7 @@ Have syncing analytics as well as normal syncing.
             correctDragDropOrder: [],
             preGeneratedDistractors: new Map()
         };
-        const DEFAULT_DECK_SETTINGS = { learnMode: 'write', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
+        const DEFAULT_DECK_SETTINGS = { learnMode: 'flashcard', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
         const CURRENT_ANALYSIS_VERSION = 2;
         const smartCoachMessages = {
             greetings: [
@@ -5811,6 +5809,125 @@ Have syncing analytics as well as normal syncing.
                 }
             });
 
+            // Keyboard Shortcuts Handler
+            document.addEventListener('keydown', (e) => {
+                // Don't trigger shortcuts when typing in text inputs
+                if (e.target.matches('input[type="text"], textarea, [contenteditable="true"]') && e.target.id !== 'searchInput') {
+                    return;
+                }
+
+                // Global Shortcuts
+                const isMeta = e.ctrlKey || e.metaKey;
+
+                // Ctrl/Cmd + K: Search
+                if (isMeta && e.key === 'k') {
+                    e.preventDefault();
+                    document.getElementById('searchInput')?.focus();
+                    console.log('[Shortcut] Search activated');
+                }
+                
+                // Ctrl/Cmd + N: New Deck
+                if (isMeta && e.key === 'n') {
+                    e.preventDefault();
+                    showEditor();
+                    console.log('[Shortcut] New deck');
+                }
+                
+                // Ctrl/Cmd + S: Sync
+                if (isMeta && e.key === 's') {
+                    e.preventDefault();
+                    if (isOnline && localStorage.getItem('auth0Session')) {
+                        loadUserDataAndSync();
+                    }
+                    console.log('[Shortcut] Sync triggered');
+                }
+                
+                // Ctrl/Cmd + ,: Settings
+                if (isMeta && e.key === ',') {
+                    e.preventDefault();
+                    showSettings();
+                    console.log('[Shortcut] Settings opened');
+                }
+                
+                // Escape: Close modals
+                if (e.key === 'Escape') {
+                    document.querySelectorAll('.modal.show').forEach(modal => {
+                        modal.classList.remove('show');
+                    });
+                    console.log('[Shortcut] Closed modals');
+                }
+                
+                // Study Mode Shortcuts
+                const studyView = document.getElementById('studyMode');
+                if (!studyView.classList.contains('hidden')) {
+                    // Space: Show/Check Answer
+                    if (e.code === 'Space') {
+                        e.preventDefault();
+                        const showAnswerBtn = document.getElementById('showAnswerBtn');
+                        const checkAnswerBtn = document.getElementById('checkAnswerBtn');
+                        const nextBtn = document.getElementById('nextBtn');
+                        
+                        if (!showAnswerBtn.classList.contains('hidden')) {
+                            showAnswerBtn.click();
+                        } else if (!checkAnswerBtn.classList.contains('hidden')) {
+                            checkAnswerBtn.click();
+                        } else if (!nextBtn.classList.contains('hidden')) {
+                            nextBtn.click();
+                        }
+                        console.log('[Shortcut] Space pressed in study mode');
+                    }
+                    
+                    // H: Show/Hide Answer
+                    if (e.key === 'h' || e.key === 'H') {
+                        e.preventDefault();
+                        const showAnswerBtn = document.getElementById('showAnswerBtn');
+                        if (!showAnswerBtn.classList.contains('hidden')) {
+                            showAnswerBtn.click();
+                        }
+                        console.log('[Shortcut] Show answer toggle');
+                    }
+                    
+                    // Arrow Right or N: Next Card
+                    if (e.key === 'ArrowRight' || e.key === 'n' || e.key === 'N') {
+                        e.preventDefault();
+                        const nextBtn = document.getElementById('nextBtn');
+                        const testNextBtn = document.getElementById('testNextBtn');
+                        if (!nextBtn.classList.contains('hidden')) {
+                            nextBtn.click();
+                        } else if (!testNextBtn.classList.contains('hidden')) {
+                            testNextBtn.click();
+                        }
+                        console.log('[Shortcut] Next card');
+                    }
+                    
+                    // C: Mark as Correct
+                    if (e.key === 'c' || e.key === 'C') {
+                        e.preventDefault();
+                        const correctBtn = document.getElementById('correctBtn');
+                        const testCorrectBtn = document.getElementById('testCorrectBtn');
+                        if (!correctBtn.classList.contains('hidden')) {
+                            correctBtn.click();
+                        } else if (!testCorrectBtn.classList.contains('hidden')) {
+                            testCorrectBtn.click();
+                        }
+                        console.log('[Shortcut] Marked correct');
+                    }
+                    
+                    // X: Mark as Incorrect
+                    if (e.key === 'x' || e.key === 'X') {
+                        e.preventDefault();
+                        const incorrectBtn = document.getElementById('incorrectBtn');
+                        const testIncorrectBtn = document.getElementById('testIncorrectBtn');
+                        if (!incorrectBtn.classList.contains('hidden')) {
+                            incorrectBtn.click();
+                        } else if (!testIncorrectBtn.classList.contains('hidden')) {
+                            testIncorrectBtn.click();
+                        }
+                        console.log('[Shortcut] Marked incorrect');
+                    }
+                }
+            });
+
             // Setup system theme detection
             setupSystemThemeListener();
         }
@@ -6120,7 +6237,13 @@ Have syncing analytics as well as normal syncing.
 
             const container = document.getElementById('flashcardsContainer');
             if (sortableInstance) {
-                sortableInstance.destroy();
+                try {
+                    sortableInstance.destroy();
+                } catch (error) {
+                    console.warn('Failed to destroy Sortable instance:', error);
+                    // Continue execution even if destroy fails
+                }
+                sortableInstance = null;
             }
             sortableInstance = new Sortable(container, {
                 animation: 150,
@@ -10278,61 +10401,17 @@ Have syncing analytics as well as normal syncing.
             });
         }
 
-        function showDownloadsModal() {
-            document.getElementById('downloadsModal').classList.add('show');
-            fetchLatestDownloads();
-        }
-
-        async function fetchLatestDownloads() {
-            const repo = 'TJ7755/Lagiote-Revise';
-            const apiUrl = `https://api.github.com/repos/${repo}/releases`;
-            const container = document.getElementById('download-buttons-container');
-
-            container.innerHTML = `<p style="color: var(--secondary-text);">Loading latest downloads...</p>`;
-
-            try {
-                const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
-                const data = await response.json();
-
-                if (!Array.isArray(data) || data.length === 0) {
-                    container.innerHTML = `<p style="color: var(--secondary-text);">No releases found for this repository.</p>`;
-                    return;
-                }
-                const latestRelease = data[0];
-
-                if (latestRelease && latestRelease.assets && latestRelease.assets.length > 0) {
-                    container.innerHTML = '';
-
-                    const winAsset = latestRelease.assets.find(a => a.name.endsWith('.exe'));
-                    const macAsset = latestRelease.assets.find(a => a.name.endsWith('.dmg'));
-
-                    if (winAsset) {
-                        const winBtn = document.createElement('a');
-                        winBtn.href = winAsset.browser_download_url;
-                        winBtn.className = 'btn';
-                        winBtn.innerHTML = `Download for Windows`;
-                        container.appendChild(winBtn);
-                    }
-
-                    if (macAsset) {
-                        const macBtn = document.createElement('a');
-                        macBtn.href = macAsset.browser_download_url;
-                        macBtn.className = 'btn';
-                        macBtn.innerHTML = `Download for Mac`;
-                        container.appendChild(macBtn);
-                    }
-
-                    if (!winAsset && !macAsset) {
-                        container.innerHTML = `<p style="color: var(--secondary-text);">No compatible downloads found in the latest release.</p>`;
-                    }
-
-                } else {
-                    container.innerHTML = `<p style="color: var(--secondary-text);">Could not find any download files in the latest release.</p>`;
-                }
-            } catch (error) {
-                console.error('Failed to fetch downloads:', error);
-                container.innerHTML = `<p style="color: var(--secondary-text);">Failed to load downloads. Please try again later.</p>`;
+        function checkForUpdates(event) {
+            event.preventDefault();
+            console.log('[Updates] Checking for updates');
+            
+            if (window.electronAPI) {
+                console.log('[Updates] Using Electron auto-update');
+                showToast('Checking for updates...', 'info');
+            } else {
+                console.log('[Updates] Web environment - opening GitHub releases');
+                showToast('Opening updates page...', 'info');
+                window.open('https://github.com/TJ7755/Lagiote-Revise/releases', '_blank');
             }
         }
 
@@ -10717,60 +10796,86 @@ Have syncing analytics as well as normal syncing.
                 return;
             }
 
-            if (correctCard.distractors && correctCard.distractors.length >= 3) {
-                console.log("Using cached distractors for card:", correctCard.id);
-                const finalOptions = shuffleArray([correctCard.answer, ...correctCard.distractors]);
+            // Check if card in study state has cached distractors
+            const cardInDeck = deckForThisCard.cards.find(c => c.id === correctCard.id);
+            if (cardInDeck?.distractors && cardInDeck.distractors.length >= 3) {
+                console.log("[MCQ] Using cached distractors for card:", correctCard.id);
+                const finalOptions = shuffleArray([correctCard.answer, ...cardInDeck.distractors]);
                 displayMCQButtons(finalOptions, correctCard);
                 return;
             }
 
             if (isOnline) {
-                console.log("No cached data. Calling API to generate distractors for card:", correctCard.id);
+                console.log("[MCQ] No cached data. Calling API to generate distractors for card:", correctCard.id);
                 try {
                     const requestBody = { question: correctCard.question, answer: correctCard.answer };
                     let generatedDistractors;
 
                     if (isElectron) {
+                        console.log("[MCQ] Using Electron API for distractor generation");
                         generatedDistractors = await window.electronAPI.generateDistractors(requestBody);
                     } else {
+                        console.log("[MCQ] Using Netlify function for distractor generation");
                         const response = await fetch('/.netlify/functions/generateDistractors', {
                             method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${localStorage.getItem('auth0Token')}`
+                            },
                             body: JSON.stringify(requestBody)
                         });
-                        if (!response.ok) throw new Error('Server function for distractors failed.');
+                        
+                        if (response.status === 401) {
+                            console.warn("[MCQ] Token expired, attempting to refresh");
+                            if (localStorage.getItem('auth0Session')) {
+                                await loadUserDataAndSync();
+                            }
+                            throw new Error("Token expired, please try again");
+                        }
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error("[MCQ] API error response:", errorText);
+                            throw new Error(`Server function for distractors failed: ${response.status}`);
+                        }
                         const result = await response.json();
                         generatedDistractors = result.distractors;
                     }
-
 
                     if (generatedDistractors?.offline) {
                         throw new Error("Offline: " + (generatedDistractors.message || "Cannot generate distractors"));
                     }
 
                     if (generatedDistractors && generatedDistractors.length >= 3) {
-                        const cardInDeck = deckForThisCard.cards.find(c => c.id === correctCard.id);
+                        // Cache distractors in both the deck and the study state card
                         if (cardInDeck) {
                             cardInDeck.distractors = generatedDistractors;
                             await saveDataToDB('decks', deckForThisCard);
-                            console.log("Distractors cached successfully for card:", correctCard.id);
+                            console.log("[MCQ] Distractors cached to deck for card:", correctCard.id);
                         }
+                        // Also update the study state card
+                        correctCard.distractors = generatedDistractors;
 
                         const finalOptions = shuffleArray([correctCard.answer, ...generatedDistractors]);
                         displayMCQButtons(finalOptions, correctCard);
                         return;
+                    } else {
+                        console.warn("[MCQ] API returned insufficient distractors:", generatedDistractors?.length || 0);
                     }
                 } catch (error) {
-                    console.error("Failed to generate/cache distractors, falling back to random.", error);
+                    console.error("[MCQ] Failed to generate/cache distractors:", error);
                     const errorMsg = error.message || "Error generating options";
-                    if (errorMsg.includes('Offline')) {
-                        console.log("Offline mode detected, using random distractors");
+                    if (errorMsg.includes('Offline') || errorMsg.includes('expired')) {
+                        console.log("[MCQ] Offline or auth issue detected, using random distractors");
                     } else {
                         showToast("Couldn't generate smart options, using random.", "warning");
                     }
                 }
+            } else {
+                console.log("[MCQ] Offline mode - skipping API call");
             }
 
-            console.warn("Falling back to random distractors for card:", correctCard.id);
+            console.warn("[MCQ] Falling back to random distractors for card:", correctCard.id);
             const allCardsInDeck = deckForThisCard.cards;
             const options = new Set([correctCard.answer]);
             const randomFill = shuffleArray(allCardsInDeck.filter(card => card.id !== correctCard.id));
@@ -11508,7 +11613,13 @@ Have syncing analytics as well as normal syncing.
             `).join('');
 
             if (sortableInstance) {
-                sortableInstance.destroy();
+                try {
+                    sortableInstance.destroy();
+                } catch (error) {
+                    console.warn('Failed to destroy Sortable instance:', error);
+                    // Continue execution even if destroy fails
+                }
+                sortableInstance = null;
             }
             sortableInstance = new Sortable(list, {
                 animation: 150,
@@ -11708,6 +11819,14 @@ Have syncing analytics as well as normal syncing.
             });
         }
 
+        function calculateFSRSRetrievability(stability, lastReviewedISO, futureDate) {
+            if (!lastReviewedISO || !stability) return 1.0;
+            const lastReviewed = new Date(lastReviewedISO);
+            const elapsed_days = (futureDate.getTime() - lastReviewed.getTime()) / (1000 * 3600 * 24);
+            if (elapsed_days < 0) return 1.0;
+            return Math.pow(1 + elapsed_days / (9 * stability), -1);
+        }
+
         function renderForgettingCurveChart(cardState, deckId) {
             const canvasId = 'forgettingCurveChart';
             const cardDetailP = document.getElementById('cardDetailForCurve');
@@ -11728,11 +11847,17 @@ Have syncing analytics as well as normal syncing.
             cardDetailP.textContent = `Predicted curve for: "${card.question}"`;
 
             const stability = cardState.stability;
+            const lastReviewed = cardState.lastReviewed;
             const labels = [];
             const data = [];
-            for (let t = 0; t <= stability * 3; t += Math.max(1, Math.round(stability / 10))) {
+            const today = new Date();
+            const forecastDays = Math.max(30, Math.ceil(stability * 3));
+
+            for (let t = 0; t <= forecastDays; t++) {
+                const futureDate = new Date(today);
+                futureDate.setDate(today.getDate() + t);
                 labels.push(t);
-                const pRecall = Math.pow(2, -t / stability);
+                const pRecall = calculateFSRSRetrievability(stability, lastReviewed, futureDate);
                 data.push(pRecall * 100);
             }
 
@@ -11752,7 +11877,7 @@ Have syncing analytics as well as normal syncing.
                 options: {
                     scales: {
                         y: { min: 0, max: 100, title: { display: true, text: 'Recall Probability (%)' } },
-                        x: { title: { display: true, text: 'Days Since Last Review' } }
+                        x: { title: { display: true, text: 'Days From Today' } }
                     },
                     plugins: { legend: { display: false } }
                 }
@@ -12195,7 +12320,6 @@ Have syncing analytics as well as normal syncing.
                 authView.classList.remove('is-visible');
             }
 
-            document.getElementById('loggedOutView').classList.add('hidden');
             document.getElementById('loggedInView').classList.remove('hidden');
             await loadUserDataAndSync();
 
@@ -12207,16 +12331,15 @@ Have syncing analytics as well as normal syncing.
         function updateUIAfterLogout() {
             document.getElementById('userProfileMenu').classList.add('hidden');
             document.getElementById('userProfileDropdown').classList.add('hidden');
-            document.getElementById('appHeader').classList.add('hidden');
+            document.getElementById('appHeader').classList.remove('hidden');
             document.getElementById('welcomeMessage').textContent = `Lagiote Revise`;
-            document.getElementById('loggedInView').classList.add('hidden');
-            document.getElementById('loggedOutView').classList.remove('hidden');
+            document.getElementById('loggedInView').classList.remove('hidden');
 
             decks = {};
             analyticsData = {};
             updateDashboard();
 
-            showView('authView');
+            showView('dashboard');
         }
 
         async function clearLocalData() {
@@ -12420,6 +12543,20 @@ Have syncing analytics as well as normal syncing.
                     decks[deck.id] = deck;
                 });
 
+                // Ensure all cards have a deckId after sync
+                const sm2 = new SM2Algorithm();
+                Object.values(decks).forEach(deck => {
+                    deck.cards.forEach(card => {
+                        if (!card.sm2Data) {
+                            card.sm2Data = sm2.calculateNextReview(card)(3);
+                        }
+                        // Ensure each card has a reference to its deck
+                        if (!card.deckId) {
+                            card.deckId = deck.id;
+                        }
+                    });
+                });
+
                 console.log('After reload - All decks:', Object.keys(decks));
 
                 if (conflictsResolved > 0) {
@@ -12577,7 +12714,15 @@ Have syncing analytics as well as normal syncing.
                 addBtn.onclick = () => editorAddNewCard('Sequence');
                 document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Sequence');
                 cards.forEach(card => editorAddNewCard('Sequence', card));
-                if (sortableInstance) sortableInstance.destroy();
+                if (sortableInstance) {
+                    try {
+                        sortableInstance.destroy();
+                    } catch (error) {
+                        console.warn('Failed to destroy Sortable instance:', error);
+                        // Continue execution even if destroy fails
+                    }
+                    sortableInstance = null;
+                }
                 sortableInstance = new Sortable(container, {
                     animation: 150,
                     handle: '.drag-handle',
@@ -12587,7 +12732,15 @@ Have syncing analytics as well as normal syncing.
             } else {
                 document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Standard');
                 cards.forEach(card => editorAddNewCard('Standard', card));
-                if (sortableInstance) sortableInstance.destroy();
+                if (sortableInstance) {
+                    try {
+                        sortableInstance.destroy();
+                    } catch (error) {
+                        console.warn('Failed to destroy Sortable instance:', error);
+                        // Continue execution even if destroy fails
+                    }
+                    sortableInstance = null;
+                }
             }
             editorRenumberCards();
         }

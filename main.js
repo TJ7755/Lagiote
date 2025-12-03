@@ -465,32 +465,26 @@ ipcMain.handle('open-login-window', async () => {
 
 ipcMain.handle('generate-distractors', async (event, { question, answer }) => {
   try {
-    if (!require('os').platform() || process.versions.electron) {
-      try {
-        const response = await Promise.race([
-          fetch(DISTRACTOR_FUNCTION_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, answer })
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
-        ]);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return await response.json();
-      } catch (fetchError) {
-        console.error('Distractor generation error:', fetchError.message);
-        return {
-          error: 'offline',
-          message: 'Cannot generate distractors offline. Saved decks will work without AI features.',
-          offline: true
-        };
-      }
+    const response = await Promise.race([
+      fetch(DISTRACTOR_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer })
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+    ]);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
-  } catch (error) {
-    console.error('Distractor generation error:', error);
-    throw error;
+    const data = await response.json();
+    return data.distractors || [];
+  } catch (fetchError) {
+    console.error('Distractor generation error:', fetchError.message);
+    return {
+      error: 'offline',
+      message: 'Cannot generate distractors offline. Saved decks will work without AI features.',
+      offline: true
+    };
   }
 });
 

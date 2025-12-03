@@ -3028,7 +3028,7 @@ function loadCDNScript(src, onload) {
 
             const settings = {
                 ...DEFAULT_DECK_SETTINGS,
-                learnMode: 'write',
+                learnMode: 'flashcard',
                 reviewMode: 'flashcard',
                 adaptiveModes: { auto: true, mcq: true, cloze: true }
             };

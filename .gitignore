@@ -131,3 +131,5 @@ dist
 .pnp.*
 *.example
 AGENTS.md
+GEMINI.md
+repo.md
