@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lagiote Revise - Study</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
+    <link rel="stylesheet" href="./css/global.css">
+    <link rel="stylesheet" href="./css/components.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo-section">
+            <div class="logo">
+                <img src="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png" alt="Lagiote Revise">
+            </div>
+            <div>
+                <div class="welcome-text" id="studyTitle">Study Session</div>
+                <div style="color: var(--secondary-text); font-size: 0.9rem;" id="studySubtitle"></div>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button class="header-btn" id="backToDashboardBtn" title="Back">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12l7.5-7.5M3 12h18" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <main class="container" id="studyMode">
+        <div class="study-container">
+            <div id="progressView" class="sub-view">
+                <div class="progress-dashboard">
+                    <div class="stat">
+                        <div class="stat-value" id="progressCounter">0 / 0</div>
+                        <div class="stat-label">Completed</div>
+                    </div>
+                </div>
+                <div style="margin-top:20px;">
+                    <button class="btn btn-primary" id="startSessionBtn">Start Session</button>
+                </div>
+            </div>
+
+            <div id="cardView" class="sub-view hidden">
+                <div class="flashcard">
+                    <div class="card-face">
+                        <div id="cardQuestion" style="font-size: 1.2rem; font-weight: 600; margin-bottom: 16px;"></div>
+                        <div id="cardAnswerContent" class="hidden" style="margin-top: 12px; color: var(--secondary-text);">
+                            <div id="cardAnswer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-actions" style="margin-top: 16px;">
+                    <button class="btn btn-secondary" id="showAnswerBtn">Show Answer</button>
+                    <button class="btn btn-primary hidden" id="correctBtn">Correct</button>
+                    <button class="btn btn-danger hidden" id="incorrectBtn">Incorrect</button>
+                </div>
+                <div style="margin-top: 12px; color: var(--secondary-text);" id="cardProgressText"></div>
+            </div>
+
+            <div id="completeView" class="sub-view hidden">
+                <div class="stat">
+                    <div class="stat-value" id="finalCardsReviewed">0</div>
+                    <div class="stat-label">Cards Reviewed</div>
+                </div>
+                <div style="margin-top: 16px;">
+                    <button class="btn btn-primary" id="finishBtn">Back to Dashboard</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="messageBar" class="message-bar hidden"></div>
+
+    <script type="module" src="./js/pages/study.js"></script>
+</body>
+</html>
