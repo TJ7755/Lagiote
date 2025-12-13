@@ -1,7 +1,8 @@
 ﻿<!--
 These are the notes of issues:
 
-Keyboard shortcuts are a bit funky - fix this.
+Keyboard shortcuts are a bit funky - fix this, especially in sequence mode.
+The accents in the manual editor are a bit off.
 -->
 
 <!DOCTYPE html>
@@ -460,6 +461,11 @@ Keyboard shortcuts are a bit funky - fix this.
             box-shadow: 0 12px 35px var(--shadow-color);
         }
 
+        .deck-card.deck-card-selected {
+            box-shadow: 0 12px 35px var(--shadow-color), 0 0 0 3px rgba(102, 126, 234, 0.25);
+            outline: 2px solid var(--primary-color);
+        }
+
         .deck-card[data-category="Science"] {
             border-color: #4ecdc4;
         }
@@ -536,19 +542,19 @@ Keyboard shortcuts are a bit funky - fix this.
         .dark-mode .deck-card[data-category="Language"] .deck-category,
         .dark-mode .deck-detail-category.Language {
             color: #f6ad55;
-            background-color: #c5303030;
+            background-color: #c5303015;
         }
 
         .dark-mode .deck-card[data-category="History"] .deck-category,
         .dark-mode .deck-detail-category.History {
             color: #f687b3;
-            background-color: #b8328030;
+            background-color: #b8328015;
         }
 
         .dark-mode .deck-card[data-category="Other"] .deck-category,
         .dark-mode .deck-detail-category.Other {
             color: #a3bffa;
-            background-color: #6c5ce730;
+            background-color: #6c5ce715;
         }
 
         .deck-header {
@@ -2727,7 +2733,7 @@ Keyboard shortcuts are a bit funky - fix this.
                     <div id="userEmail"
                         style="padding: 8px 12px; color: var(--secondary-text); border-bottom: 1px solid var(--border-color); margin-bottom: 8px; font-size: 0.9rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     </div>
-                    <a id="syncBtn" href="#"
+                    <a id="syncBtn" href="javascript:void(0)"
                         style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px; cursor: pointer; pointer-events: auto;">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor"
@@ -2737,7 +2743,7 @@ Keyboard shortcuts are a bit funky - fix this.
                         </svg>
                         Sync Data
                     </a>
-                    <a id="checkUpdatesBtn" href="#" onclick="checkForUpdates(event)"
+                    <a id="checkUpdatesBtn" href="javascript:void(0)" onclick="checkForUpdates(event)"
                         style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px; cursor: pointer; pointer-events: auto;">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor"
@@ -2747,7 +2753,7 @@ Keyboard shortcuts are a bit funky - fix this.
                         </svg>
                         Check for Updates
                     </a>
-                    <a id="logoutBtn" href="#"
+                    <a id="logoutBtn" href="javascript:void(0)"
                         style="display: block; padding: 8px 12px; text-decoration: none; color: var(--text-color); border-radius: 6px; cursor: pointer; pointer-events: auto;">Log
                         Out</a>
                 </div>
@@ -3097,7 +3103,7 @@ Keyboard shortcuts are a bit funky - fix this.
     </div>
 
     <div id="settingsView" class="container view-container">
-        <a href="#" class="termly-display-preferences">Consent Preferences</a>
+        <a href="javascript:void(0)" class="termly-display-preferences">Consent Preferences</a>
         <div class="settings-container" style="margin-top:20px;">
             <div class="settings-section">
                 <h2>Profile</h2>
@@ -3141,7 +3147,7 @@ Keyboard shortcuts are a bit funky - fix this.
                     Help improve Lagiote Revise by exporting your study data.
                     You can email the generated file to the developer for analysis.
                 </p>
-                <button class="btn btn-secondary" onclick="generateFullDataExport()">
+                <button class="btn btn-secondary" onclick="generateFullDataExport(event)">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                         stroke="currentColor" width="20" height="20" style="vertical-align: middle; margin-right: 8px;">
                         <path stroke-linecap="round" stroke-linejoin="round"
@@ -3795,6 +3801,8 @@ Keyboard shortcuts are a bit funky - fix this.
                     <div class="form-group">
                         <label for="deckSettingsCardsPerRound">Cards Per Round</label>
                         <input type="number" id="deckSettingsCardsPerRound" value="10" min="3" max="50">
+                        <label for="deckSettingsLearnHorizon">Learn Horizon (days)</label>
+                        <input type="number" id="deckSettingsLearnHorizon" value="0" min="0" max="14" placeholder="0 = auto">
                     </div>
                     <div class="checkbox-group">
                         <input type="checkbox" id="retypeIncorrectToggle">
@@ -3941,6 +3949,7 @@ Keyboard shortcuts are a bit funky - fix this.
             </div>
         </div>
     </div>
+    <script type="module" src="./js/core/keyboard.js"></script>
     <script type="module" src="./js/pages/bridge.js"></script>
     <script src="./js/pages/dashboard.js"></script>
 

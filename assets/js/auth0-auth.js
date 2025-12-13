@@ -168,31 +168,44 @@ async function displayProfile() {
     const user = await auth0Client.getUser();
     const placeholderImage = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110' viewBox='0 0 110 110'%3E%3Ccircle cx='55' cy='55' r='55' fill='%2363b3ed'/%3E%3Cpath d='M55 50c8.28 0 15-6.72 15-15s-6.72-15-15-15-15 6.72-15 15 6.72 15 15 15zm0 7.5c-10 0-30 5.02-30 15v3.75c0 2.07 1.68 3.75 3.75 3.75h52.5c2.07 0 3.75-1.68 3.75-3.75V72.5c0-9.98-20-15-30-15z' fill='%23fff'/%3E%3C/svg%3E`;
 
-    profileContainer.innerHTML = `
-      <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
-        <img 
-          src="${user.picture || placeholderImage}" 
-          alt="${user.name || 'User'}" 
-          class="profile-picture"
-          style="
-            width: 110px; 
-            height: 110px; 
-            border-radius: 50%; 
-            object-fit: cover;
-            border: 3px solid #63b3ed;
-          "
-          onerror="this.src='${placeholderImage}'"
-        />
-        <div style="text-align: center;">
-          <div class="profile-name" style="font-size: 2rem; font-weight: 600; color: #f7fafc; margin-bottom: 0.5rem;">
-            ${user.name || 'User'}
-          </div>
-          <div class="profile-email" style="font-size: 1.15rem; color: #a0aec0;">
-            ${user.email || 'No email provided'}
-          </div>
-        </div>
-      </div>
-    `;
+    profileContainer.innerHTML = ''; // clear
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.alignItems = 'center';
+    wrapper.style.gap = '1rem';
+
+    const img = document.createElement('img');
+    img.src = user.picture || placeholderImage;
+    img.alt = user.name || 'User';
+    img.className = 'profile-picture';
+    img.style.width = '110px';
+    img.style.height = '110px';
+    img.style.borderRadius = '50%';
+    img.style.objectFit = 'cover';
+    img.style.border = '3px solid #63b3ed';
+    img.onerror = () => { img.src = placeholderImage; };
+
+    const infoDiv = document.createElement('div');
+    infoDiv.style.textAlign = 'center';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'profile-name';
+    nameDiv.style.fontSize = '2rem';
+    nameDiv.style.fontWeight = '600';
+    nameDiv.style.color = '#f7fafc';
+    nameDiv.style.marginBottom = '0.5rem';
+    nameDiv.textContent = user.name || 'User';
+    const emailDiv = document.createElement('div');
+    emailDiv.className = 'profile-email';
+    emailDiv.style.fontSize = '1.15rem';
+    emailDiv.style.color = '#a0aec0';
+    emailDiv.textContent = user.email || 'No email provided';
+
+    infoDiv.appendChild(nameDiv);
+    infoDiv.appendChild(emailDiv);
+    wrapper.appendChild(img);
+    wrapper.appendChild(infoDiv);
+    profileContainer.appendChild(wrapper);
   } catch (err) {
     console.error('Error displaying profile:', err);
   }

@@ -114,10 +114,14 @@ export function transitionView(viewId, isInitial = false, callback = null) {
     const nextView = document.getElementById(viewId);
 
     const isDashboard = viewId === 'dashboard';
-    document.querySelector('.search-bar').style.display = isDashboard ? 'flex' : 'none';
-    document.getElementById('headerSettingsBtn').style.display = isDashboard ? 'flex' : 'none';
-    document.getElementById('headerBackBtn').classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
-    document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
+    const searchBar = document.querySelector('.search-bar');
+    if (searchBar) searchBar.style.display = isDashboard ? 'flex' : 'none';
+    const headerSettingsBtn = document.getElementById('headerSettingsBtn');
+    if (headerSettingsBtn) headerSettingsBtn.style.display = isDashboard ? 'flex' : 'none';
+    const headerBackBtn = document.getElementById('headerBackBtn');
+    if (headerBackBtn) headerBackBtn.classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
+    const headerHomeBtn = document.getElementById('headerHomeBtn');
+    if (headerHomeBtn) headerHomeBtn.classList.toggle('hidden', isDashboard);
 
     document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
 

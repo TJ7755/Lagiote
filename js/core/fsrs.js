@@ -4,7 +4,7 @@ export class FSRSAlgorithm {
         this.Rating = null;
         this.fsrsClient = null;
         this.fsrsRepeat = null;
-        this.adaptiveBaseline = null;
+        this.isAvailable = false;
         this.defaultImplicitBaseline = {
             latency: 2500,
             corrections: 1,
@@ -21,57 +21,46 @@ export class FSRSAlgorithm {
             this.State = enums?.State || null;
             this.Rating = enums?.Rating || null;
             this.fsrsRepeat = (card, now) => window.electronAPI.fsrsRepeat(card, now);
+            this.isAvailable = true;
             return;
         }
 
         if (typeof window.fsrs === 'function') {
-            // Browser build of ts-fsrs exposed on window
             this.fsrsClient = window._fsrsInstance || window.fsrs();
             window._fsrsInstance = this.fsrsClient;
             this.State = window.State || this.fsrsClient.State || null;
             this.Rating = window.Rating || this.fsrsClient.Rating || null;
+            this.isAvailable = true;
             return;
         }
 
-        throw new Error('FSRS engine is not available in this environment.');
+        // Instead of throwing here, mark the engine unavailable so callers can
+        // still use non-FSRS helpers (prepareCard/getRatings) without crashing.
+        // Methods that actually require the engine (repeat/reviewCard) will still
+        // throw if they are used while the engine is unavailable.
+        this.isAvailable = false;
+        return;
     }
 
     getRatings() {
         return this.Rating || { Again: 0, Hard: 1, Good: 2, Easy: 3 };
     }
 
-    setAdaptiveBaseline(baseline = null) {
-        if (baseline && typeof baseline === 'object') {
-            this.adaptiveBaseline = {
-                ...baseline
-            };
-        } else {
-            this.adaptiveBaseline = null;
-        }
-    }
-
     prepareCard(card) {
         const now = new Date();
-        const baseCard = {
-            due: now,
-            stability: 0,
-            difficulty: 0,
-            elapsed_days: 0,
-            scheduled_days: 0,
-            reps: 0,
-            lapses: 0,
-            state: this.State?.New ?? 0,
-            last_review: now
+        const source = card?.fsrs || card || {};
+        const prepared = {
+            state: typeof source.state === 'number' ? source.state : this.State?.New ?? 0,
+            stability: typeof source.stability === 'number' ? source.stability : 0,
+            difficulty: typeof source.difficulty === 'number' ? source.difficulty : 0,
+            reps: typeof source.reps === 'number' ? source.reps : 0,
+            lapses: typeof source.lapses === 'number' ? source.lapses : 0,
+            elapsed_days: typeof source.elapsed_days === 'number' ? source.elapsed_days : 0,
+            scheduled_days: typeof source.scheduled_days === 'number' ? source.scheduled_days : 0,
+            due: source.due ? new Date(source.due) : now,
+            last_review: source.last_review ? new Date(source.last_review) : now
         };
-
-        if (!card) return baseCard;
-
-        return {
-            ...baseCard,
-            ...card,
-            due: card.due ? new Date(card.due) : now,
-            last_review: card.last_review ? new Date(card.last_review) : now
-        };
+        return prepared;
     }
 
     async repeat(card, now = new Date()) {
@@ -91,64 +80,41 @@ export class FSRSAlgorithm {
     }
 
     calculateRetrievability(cardState, now = new Date()) {
-        if (!cardState || !cardState.fsrs || cardState.fsrs.state === (this.State?.New ?? 0)) {
+        const fsrsState = cardState?.fsrs || cardState;
+        if (!fsrsState || fsrsState.state === (this.State?.New ?? 0)) {
             return 1.0;
         }
-        const lastReview = cardState.fsrs.last_review || cardState.lastReviewed || cardState.fsrs.due || now;
-        const elapsedDays = (now.getTime() - new Date(lastReview).getTime()) / (1000 * 3600 * 24);
-        const stability = cardState.fsrs.stability || cardState.stability || 0;
+        const lastReview = fsrsState.last_review || cardState?.lastReviewed || now;
+        const lastReviewDate = new Date(lastReview);
+        const elapsedDays = Math.max(0, (now.getTime() - lastReviewDate.getTime()) / (1000 * 3600 * 24));
+        const stability = fsrsState.stability || 0;
         if (stability <= 0) return 1.0;
-        return Math.pow(1 + elapsedDays / (9 * stability), -1);
+        const retention = Math.exp(-elapsedDays / stability);
+        return Math.max(0, Math.min(1, retention));
     }
 
     getImplicitGrade(interactionData, userBaseline = {}) {
         const ratings = this.getRatings();
-        const baseline = {
-            ...this.defaultImplicitBaseline,
-            ...(this.adaptiveBaseline || {}),
-            ...(userBaseline || {})
-        };
+        const baseline = { ...this.defaultImplicitBaseline, ...(userBaseline || {}) };
 
         if (!interactionData?.wasCorrect) return ratings.Again;
 
-        const latency = typeof interactionData.recallLatency === 'number'
-            ? interactionData.recallLatency
-            : baseline.latency;
-        const corrections = typeof interactionData.totalCorrections === 'number'
-            ? interactionData.totalCorrections
-            : baseline.corrections;
-        const attempts = typeof interactionData.attemptCount === 'number'
-            ? interactionData.attemptCount
-            : baseline.attempts;
-        const fluency = typeof interactionData.answerFluency === 'number'
-            ? interactionData.answerFluency
-            : baseline.fluency;
+        const latency = typeof interactionData.recallLatency === 'number' ? interactionData.recallLatency : baseline.latency;
+        const corrections = typeof interactionData.totalCorrections === 'number' ? interactionData.totalCorrections : baseline.corrections;
+        const attempts = typeof interactionData.attemptCount === 'number' ? interactionData.attemptCount : baseline.attempts;
+        const fluency = typeof interactionData.answerFluency === 'number' ? interactionData.answerFluency : baseline.fluency;
 
-        // Scores are normalized against baseline to form an implicit 1-4 grade
-        const latencyScore = 1 - (Math.min(latency / baseline.latency, 2) / 2);
-        const correctionScore = 1 - (Math.min(corrections / (baseline.corrections || 1), 1.5) / 1.5);
-        const attemptScore = 1 - (Math.min(Math.max(attempts - 1, 0) / (baseline.attempts || 1), 1));
-        const fluencyScore = Math.min(fluency / (baseline.fluency || 5), 1.5) / 1.5;
+        const latencyScore = Math.exp(-Math.max(0, latency - baseline.latency) / (baseline.latency * 1.8));
+        const correctionScore = 1 / (1 + Math.max(0, corrections) * 0.4);
+        const attemptScore = 1 / (1 + Math.max(0, attempts - 1) * 0.35);
+        const fluencyScore = Math.min(1, fluency / (baseline.fluency || 5));
 
-        const composite = (latencyScore * 0.4) + (correctionScore * 0.2) + (attemptScore * 0.2) + (fluencyScore * 0.2);
+        const composite = (latencyScore * 0.35) + (fluencyScore * 0.35) + (correctionScore * 0.15) + (attemptScore * 0.15);
 
-        if (composite >= 0.75) return ratings.Easy;
-        if (composite >= 0.50) return ratings.Good;
-        if (composite >= 0.30) return ratings.Hard;
+        if (composite >= 0.8) return ratings.Easy;
+        if (composite >= 0.55) return ratings.Good;
+        if (composite >= 0.3) return ratings.Hard;
         return ratings.Again;
-    }
-
-    convertSm2ToFsrs(sm2Data, now = new Date()) {
-        if (!sm2Data) return null;
-        const dueDate = sm2Data.dueDate ? new Date(sm2Data.dueDate) : now;
-        return this.prepareCard({
-            due: dueDate,
-            last_review: dueDate,
-            stability: Math.max(1, sm2Data.interval || 0),
-            difficulty: Math.max(0, (sm2Data.factor || 2.5) - 1.3),
-            reps: sm2Data.repetition || 0,
-            lapses: 0
-        });
     }
 
     async reviewCard(cardState, rating, now = new Date()) {
@@ -166,9 +132,31 @@ export class FSRSAlgorithm {
         }
 
         const ratings = this.getRatings();
-        const selected = repeatResult?.[rating] ?? repeatResult?.[ratings.Good];
-        const updatedCard = selected?.card || preparedCard;
-        updatedCard.last_review = selected?.log?.review ? new Date(selected.log.review) : evaluationDate;
-        return updatedCard;
+        const ratingIndex = typeof rating === 'number' ? rating : ratings.Good;
+        const outcome = Array.isArray(repeatResult)
+            ? repeatResult[ratingIndex]
+            : repeatResult?.[ratingIndex] ?? repeatResult?.[ratings.Good];
+
+        if (!outcome) {
+            throw new Error('FSRS repeat result missing for rating: ' + ratingIndex);
+        }
+
+        const updatedFsrs = {
+            ...preparedCard,
+            ...(outcome.card || outcome)
+        };
+        if (updatedFsrs.due) updatedFsrs.due = new Date(updatedFsrs.due);
+        if (outcome?.log?.review) {
+            updatedFsrs.last_review = new Date(outcome.log.review);
+        } else if (updatedFsrs.last_review) {
+            updatedFsrs.last_review = new Date(updatedFsrs.last_review);
+        } else {
+            updatedFsrs.last_review = evaluationDate;
+        }
+
+        return {
+            ...cardState,
+            fsrs: updatedFsrs
+        };
     }
 }

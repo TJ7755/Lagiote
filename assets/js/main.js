@@ -800,6 +800,19 @@ function loadCDNScript(src, onload) {
 
         let chartInstances = {};
 
+        function getCanvasContextSafe(canvasId) {
+            if (!canvasId) return null;
+            const el = document.getElementById(canvasId);
+            if (!el) return null;
+            if (typeof getCanvasContext === 'function') return getCanvasContext(el);
+            try {
+                return (el.getContext && el.getContext('2d')) || null;
+            } catch (e) {
+                console.warn('getCanvasContextSafe: failed to get context for', canvasId, e);
+                return null;
+            }
+        }
+
         let globalForecastChartInstance = null;
         let globalKnowledgeHeatmapInstance = null;
 
@@ -818,7 +831,8 @@ function loadCDNScript(src, onload) {
         }
 
         async function renderGlobalForecastGraph(cards, knowledgeMap) {
-            const ctx = document.getElementById('globalForecastGraphCanvas').getContext('2d');
+            const ctx = getCanvasContextSafe('globalForecastGraphCanvas');
+            if (!ctx) return;
             if (globalForecastChartInstance) {
                 globalForecastChartInstance.destroy();
             }
@@ -1079,7 +1093,8 @@ function loadCDNScript(src, onload) {
         function createBarChart(canvasId, label, data, color) {
             if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
 
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
 
             const valueCounts = data.reduce((acc, value) => {
                 acc[value] = (acc[value] || 0) + 1;
@@ -1114,7 +1129,8 @@ function loadCDNScript(src, onload) {
             }));
 
             if (data.length === 0) {
-                const ctx = document.getElementById(canvasId).getContext('2d');
+                const ctx = getCanvasContextSafe(canvasId);
+                if (!ctx) return;
                 chartInstances[canvasId] = new Chart(ctx, {
                     type: 'scatter',
                     data: { datasets: [] },
@@ -1137,7 +1153,8 @@ function loadCDNScript(src, onload) {
                 return;
             }
 
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
             chartInstances[canvasId] = new Chart(ctx, {
                 type: 'scatter',
                 data: {
@@ -1200,7 +1217,8 @@ function loadCDNScript(src, onload) {
             const chartLabels = sortedDays;
             const chartData = sortedDays.map(day => interactionsByDay[day]);
 
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
             chartInstances[canvasId] = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -1647,20 +1665,21 @@ function loadCDNScript(src, onload) {
             });
             document.addEventListener('keydown', function (event) {
                 const practiceTestView = document.getElementById('practiceTestView');
-                if (practiceTestView.classList.contains('hidden')) {
+                if (!practiceTestView || practiceTestView.classList.contains('hidden')) {
                     return;
                 }
 
-                if (event.key === 'Enter' || 'ArrowUp') {
+                if (event.key === 'Enter' || event.key === 'ArrowUp') {
                     const nextBtn = document.getElementById('testNextBtn');
                     const checkBtn = document.getElementById('testCheckAnswerBtn');
                     const showAnswerBtn = document.getElementById('testShowAnswerBtn');
-                    if (!nextBtn.classList.contains('hidden')) {
+                    if (!nextBtn?.classList?.contains('hidden')) {
                         event.preventDefault();
                         nextBtn.click();
                     }
-                    else if (!checkBtn.classList.contains('hidden')) {
-                        if (event.target === document.getElementById('testAnswerInput')) {
+                    else if (!checkBtn?.classList?.contains('hidden')) {
+                        const answerInput = document.getElementById('testAnswerInput');
+                        if (event.target === answerInput) {
                             event.preventDefault();
                         }
                         checkBtn.click();
@@ -1930,10 +1949,14 @@ function loadCDNScript(src, onload) {
             const nextView = document.getElementById(viewId);
 
             const isDashboard = viewId === 'dashboard';
-            document.querySelector('.search-bar').style.display = isDashboard ? 'flex' : 'none';
-            document.getElementById('headerSettingsBtn').style.display = isDashboard ? 'flex' : 'none';
-            document.getElementById('headerBackBtn').classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
-            document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
+            const searchBarEl = document.querySelector('.search-bar');
+            if (searchBarEl) searchBarEl.style.display = isDashboard ? 'flex' : 'none';
+            const headerSettingsEl = document.getElementById('headerSettingsBtn');
+            if (headerSettingsEl) headerSettingsEl.style.display = isDashboard ? 'flex' : 'none';
+            const headerBackEl = document.getElementById('headerBackBtn');
+            if (headerBackEl) headerBackEl.classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
+            const headerHomeEl = document.getElementById('headerHomeBtn');
+            if (headerHomeEl) headerHomeEl.classList.toggle('hidden', isDashboard);
 
             document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
 
@@ -2328,12 +2351,17 @@ function loadCDNScript(src, onload) {
             for (const category of sortedCategories) {
                 const categoryFolder = document.createElement('div');
                 categoryFolder.className = 'category-folder';
-                categoryFolder.innerHTML = `<h3 class="category-title">${category}</h3><div class="decks-grid"></div>`;
-                const decksGrid = categoryFolder.querySelector('.decks-grid');
+                const titleEl = document.createElement('h3');
+                titleEl.className = 'category-title';
+                titleEl.textContent = category;
+                categoryFolder.appendChild(titleEl);
+                const decksGrid = document.createElement('div');
+                decksGrid.className = 'decks-grid';
+                categoryFolder.appendChild(decksGrid);
 
                 const sortedDecks = groupedDecks[category].sort((a, b) => new Date(b.created) - new Date(a.created));
 
-                decksGrid.innerHTML = sortedDecks.map(deck => {
+                sortedDecks.forEach(deck => {
                     const totalCards = deck.cards.length;
                     let progressPercent = 0;
                     if (totalCards > 0) {
@@ -2376,27 +2404,93 @@ function loadCDNScript(src, onload) {
                     `;
                     }
 
-                    return `<div class="deck-card" data-category="${category}" data-deck-id="${deck.id}">
-                    <div class="deck-card-main-clickable" onclick="showDeckDetail('${deck.id}', this.parentElement)">
-                        <div class="deck-header">
-                            <div class="deck-category">${category}</div>
-                            <div class="deck-name">${deck.name}</div>
-                            <div class="deck-info"><span>${totalCards} cards</span></div>
-                        </div>
-                        <div class="deck-progress-container">
-                            <div class="deck-progress-label"><span>Progress</span><span>${Math.round(progressPercent)}%</span></div>
-                            <div class="deck-progress-bar-outer"><div class="deck-progress-bar-inner" style="width: ${progressPercent}%;"></div></div>
-                        </div>
-                        <div class="deck-date">Created: ${formatDate(deck.created)}</div>
-                    </div>
-                    <div class="deck-actions">
-                        ${actionButtonsHTML}
-                        <button class="action-btn export-btn" title="Export Deck" onclick="exportDeck('${deck.id}', event)">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-                        </button>
-                    </div>
-                </div>`;
-                }).join('');
+                    const deckCard = document.createElement('div');
+                    deckCard.className = 'deck-card';
+                    deckCard.setAttribute('data-category', category);
+                    deckCard.dataset.deckId = deck.id;
+
+                    const mainClickable = document.createElement('div');
+                    mainClickable.className = 'deck-card-main-clickable';
+                    mainClickable.onclick = (e) => {
+                        e.stopPropagation();
+                        showDeckDetail(deck.id, deckCard);
+                    };
+
+                    const header = document.createElement('div');
+                    header.className = 'deck-header';
+                    const deckCategory = document.createElement('div');
+                    deckCategory.className = 'deck-category';
+                    deckCategory.textContent = category;
+                    const deckName = document.createElement('div');
+                    deckName.className = 'deck-name';
+                    deckName.textContent = deck.name;
+                    const deckInfo = document.createElement('div');
+                    deckInfo.className = 'deck-info';
+                    const deckInfoSpan = document.createElement('span');
+                    deckInfoSpan.textContent = `${totalCards} cards`;
+                    deckInfo.appendChild(deckInfoSpan);
+                    header.appendChild(deckCategory);
+                    header.appendChild(deckName);
+                    header.appendChild(deckInfo);
+
+                    const progressContainer = document.createElement('div');
+                    progressContainer.className = 'deck-progress-container';
+                    const progressLabel = document.createElement('div');
+                    progressLabel.className = 'deck-progress-label';
+                    const progressLabelLeft = document.createElement('span');
+                    progressLabelLeft.textContent = 'Progress';
+                    const progressLabelRight = document.createElement('span');
+                    progressLabelRight.textContent = `${Math.round(progressPercent)}%`;
+                    progressLabel.appendChild(progressLabelLeft);
+                    progressLabel.appendChild(progressLabelRight);
+                    const barOuter = document.createElement('div');
+                    barOuter.className = 'deck-progress-bar-outer';
+                    const barInner = document.createElement('div');
+                    barInner.className = 'deck-progress-bar-inner';
+                    barInner.style.width = `${progressPercent}%`;
+                    barOuter.appendChild(barInner);
+                    progressContainer.appendChild(progressLabel);
+                    progressContainer.appendChild(barOuter);
+
+                    const deckDateEl = document.createElement('div');
+                    deckDateEl.className = 'deck-date';
+                    deckDateEl.textContent = `Created: ${formatDate(deck.created)}`;
+
+                    mainClickable.appendChild(header);
+                    mainClickable.appendChild(progressContainer);
+                    mainClickable.appendChild(deckDateEl);
+                    deckCard.appendChild(mainClickable);
+
+                    const actionsDiv = document.createElement('div');
+                    actionsDiv.className = 'deck-actions';
+                    if (deck.typeHint === 'Sequence') {
+                        const seqBtn = document.createElement('button');
+                        seqBtn.className = 'action-btn learn-btn';
+                        seqBtn.style.gridColumn = '1 / 3';
+                        seqBtn.textContent = 'Learn Sequence';
+                        seqBtn.onclick = (e) => { e.stopPropagation(); startSequenceSession(deck.id); };
+                        actionsDiv.appendChild(seqBtn);
+                    } else {
+                        const learnBtn = document.createElement('button');
+                        learnBtn.className = 'action-btn learn-btn';
+                        learnBtn.textContent = 'Learn';
+                        learnBtn.onclick = (e) => { e.stopPropagation(); configureStudy('learn', deck.id); };
+                        const reviewBtn = document.createElement('button');
+                        reviewBtn.className = 'action-btn review-btn';
+                        reviewBtn.textContent = 'Review';
+                        reviewBtn.onclick = (e) => { e.stopPropagation(); configureStudy('review', deck.id); };
+                        actionsDiv.appendChild(learnBtn);
+                        actionsDiv.appendChild(reviewBtn);
+                    }
+                    const exportBtn = document.createElement('button');
+                    exportBtn.className = 'action-btn export-btn';
+                    exportBtn.title = 'Export Deck';
+                    exportBtn.onclick = (e) => { e.stopPropagation(); exportDeck(deck.id, e); };
+                    exportBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>`;
+                    actionsDiv.appendChild(exportBtn);
+                    deckCard.appendChild(actionsDiv);
+                    decksGrid.appendChild(deckCard);
+                });
                 decksContainer.appendChild(categoryFolder);
             }
 
@@ -2462,40 +2556,94 @@ function loadCDNScript(src, onload) {
                     const cardItem = document.createElement('div');
                     cardItem.className = 'deck-card-item';
                     const originalIndex = deck.cards.findIndex(c => c.id === card.id);
-                    const newBadge = card.isNew ? '<span class="new-badge">New</span>' : '';
+                    const newBadge = card.isNew ? true : false;
 
-                    const questionImageHTML = card.questionImage ? `<img src="${card.questionImage}" class="card-image">` : '';
-                    const answerImageHTML = card.answerImage ? `<img src="${card.answerImage}" class="card-image">` : '';
+                    const questionImageSrc = card.questionImage || '';
+                    const answerImageSrc = card.answerImage || '';
 
                     const orderText = card.order ? `${card.order}. ` : `${index + 1}. `;
 
                     // FSRS Stats Implementation
                     const knowledgeState = studyState.knowledgeStates.get(card.id);
-                    let statsHTML = '';
+                    let statsEl = null;
                     if (knowledgeState && knowledgeState.fsrs) {
                         const s = knowledgeState.fsrs.stability.toFixed(1);
                         const d = knowledgeState.fsrs.difficulty.toFixed(1);
                         const r = (calculateRetrievability(knowledgeState, new Date()) * 100).toFixed(0);
-                        statsHTML = `<div class="deck-card-stats" style="margin-top: 10px; font-size: 0.8rem; color: var(--secondary-text); display: flex; gap: 15px; align-items: center;">
-                            <span title="Stability: an index of how long a memory lasts. Higher is better.">S: <b>${s}d</b></span>
-                            <span title="Difficulty: The inherent difficulty of a card. Higher is harder.">D: <b>${d}</b></span>
-                            <span title="Retrievability: Estimated probability of recalling this card right now.">R: <b>${r}%</b></span>
-                        </div>`;
+                        statsEl = document.createElement('div');
+                        statsEl.className = 'deck-card-stats';
+                        statsEl.style.marginTop = '10px';
+                        statsEl.style.fontSize = '0.8rem';
+                        statsEl.style.color = 'var(--secondary-text)';
+                        statsEl.style.display = 'flex';
+                        statsEl.style.gap = '15px';
+                        statsEl.style.alignItems = 'center';
+                        const sSpan = document.createElement('span');
+                        sSpan.title = 'Stability: an index of how long a memory lasts. Higher is better.';
+                        sSpan.innerHTML = `S: <b>${s}d</b>`;
+                        const dSpan = document.createElement('span');
+                        dSpan.title = 'Difficulty: The inherent difficulty of a card. Higher is harder.';
+                        dSpan.innerHTML = `D: <b>${d}</b>`;
+                        const rSpan = document.createElement('span');
+                        rSpan.title = 'Retrievability: Estimated probability of recalling this card right now.';
+                        rSpan.innerHTML = `R: <b>${r}%</b>`;
+                        statsEl.appendChild(sSpan);
+                        statsEl.appendChild(dSpan);
+                        statsEl.appendChild(rSpan);
                     }
                     // End FSRS Stats Implementation
 
-                    cardItem.innerHTML = `<div class="deck-card-content">
-                        <div class="deck-card-question">${orderText}${card.question} ${newBadge}</div>
-                        ${questionImageHTML}
-                        <div class="deck-card-answer">${card.answer}</div>
-                        ${answerImageHTML}
-                        ${statsHTML}
-                    </div>
-                    <div class="deck-card-actions">
-                        <button class="deck-card-action-btn" title="View History" onclick="showCardHistoryModal('${card.id}')"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-graph-up" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M0 0h1v15h15v1H0V0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5z"/></svg></button>
-                        <button class="deck-card-action-btn edit" title="Edit Card" onclick="editCard('${deckId}', ${originalIndex}, 'detail')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg></button>
-                        <button class="deck-card-action-btn delete" title="Delete Card" onclick="deleteCardFromDetail('${deckId}', ${originalIndex})"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
-                    </div>`;
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'deck-card-content';
+                    const qDiv = document.createElement('div');
+                    qDiv.className = 'deck-card-question';
+                    qDiv.textContent = `${orderText}${card.question}`;
+                    if (newBadge) {
+                        const newSpan = document.createElement('span');
+                        newSpan.className = 'new-badge';
+                        newSpan.textContent = 'New';
+                        qDiv.appendChild(newSpan);
+                    }
+                    contentDiv.appendChild(qDiv);
+                    if (questionImageSrc) {
+                        const qi = document.createElement('img');
+                        qi.src = questionImageSrc;
+                        qi.className = 'card-image';
+                        contentDiv.appendChild(qi);
+                    }
+                    const aDiv = document.createElement('div');
+                    aDiv.className = 'deck-card-answer';
+                    aDiv.textContent = card.answer;
+                    contentDiv.appendChild(aDiv);
+                    if (answerImageSrc) {
+                        const ai = document.createElement('img');
+                        ai.src = answerImageSrc;
+                        ai.className = 'card-image';
+                        contentDiv.appendChild(ai);
+                    }
+                    if (statsEl) contentDiv.appendChild(statsEl);
+                    const actDiv = document.createElement('div');
+                    actDiv.className = 'deck-card-actions';
+                    const historyBtn = document.createElement('button');
+                    historyBtn.className = 'deck-card-action-btn';
+                    historyBtn.title = 'View History';
+                    historyBtn.onclick = function() { showCardHistoryModal(card.id); };
+                    historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-graph-up" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M0 0h1v15h15v1H0V0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5z"/></svg>`;
+                    const editBtn = document.createElement('button');
+                    editBtn.className = 'deck-card-action-btn edit';
+                    editBtn.title = 'Edit Card';
+                    editBtn.onclick = function() { editCard(deckId, originalIndex, 'detail'); };
+                    editBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>`;
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'deck-card-action-btn delete';
+                    delBtn.title = 'Delete Card';
+                    delBtn.onclick = function() { deleteCardFromDetail(deckId, originalIndex); };
+                    delBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>`;
+                    actDiv.appendChild(historyBtn);
+                    actDiv.appendChild(editBtn);
+                    actDiv.appendChild(delBtn);
+                    cardItem.appendChild(contentDiv);
+                    cardItem.appendChild(actDiv);
                     cardsList.appendChild(cardItem);
                 });
             }
@@ -2649,7 +2797,8 @@ function loadCDNScript(src, onload) {
             tableContainer.innerHTML = tableHTML;
 
             // Render chart
-            const ctx = document.getElementById('cardHistoryChart').getContext('2d');
+            const ctx = getCanvasContextSafe('cardHistoryChart');
+            if (!ctx) return;
             if (cardHistoryChartInstance) {
                 cardHistoryChartInstance.destroy();
             }
@@ -2729,7 +2878,8 @@ function loadCDNScript(src, onload) {
                 return;
             }
 
-            const ctx = document.getElementById('forecastGraphCanvas').getContext('2d');
+            const ctx = getCanvasContextSafe('forecastGraphCanvas');
+            if (!ctx) return;
 
             if (forecastChartInstance) {
                 forecastChartInstance.destroy();
@@ -2955,14 +3105,34 @@ function loadCDNScript(src, onload) {
                 const cardIndex = deck.cards.findIndex(c => c.id === item.card.id);
                 const cardItem = document.createElement('div');
                 cardItem.className = 'card-item';
-                cardItem.innerHTML = `
-                    <div class="question" title="${item.card.question}">${item.card.question.substring(0, 50)}${item.card.question.length > 50 ? '...' : ''}</div>
-                    <div class="difficulty" title="Difficulty">${item.difficulty.toFixed(1)}</div>
-                    <div class="card-actions" style="display:flex; gap: 5px;">
-                        <button class="deck-card-action-btn" title="Reset Card Progress" onclick="resetCardProgress('${item.card.id}', '${deckId}')">🔄</button>
-                        <button class="deck-card-action-btn" title="Edit Card" onclick="editCard('${deckId}', ${cardIndex}, 'detail')">✏️</button>
-                    </div>
-                `;
+                const questionDiv = document.createElement('div');
+                questionDiv.className = 'question';
+                questionDiv.title = item.card.question || '';
+                const questionText = item.card.question || '';
+                questionDiv.textContent = `${questionText.substring(0, 50)}${questionText.length > 50 ? '...' : ''}`;
+                const difficultyDiv = document.createElement('div');
+                difficultyDiv.className = 'difficulty';
+                difficultyDiv.title = 'Difficulty';
+                difficultyDiv.textContent = item.difficulty.toFixed(1);
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'card-actions';
+                actionsDiv.style.display = 'flex';
+                actionsDiv.style.gap = '5px';
+                const resetBtn = document.createElement('button');
+                resetBtn.className = 'deck-card-action-btn';
+                resetBtn.title = 'Reset Card Progress';
+                resetBtn.textContent = '🔄';
+                resetBtn.onclick = () => resetCardProgress(item.card.id, deckId);
+                const editBtnLocal = document.createElement('button');
+                editBtnLocal.className = 'deck-card-action-btn';
+                editBtnLocal.title = 'Edit Card';
+                editBtnLocal.textContent = '✏️';
+                editBtnLocal.onclick = () => editCard(deckId, cardIndex, 'detail');
+                actionsDiv.appendChild(resetBtn);
+                actionsDiv.appendChild(editBtnLocal);
+                cardItem.appendChild(questionDiv);
+                cardItem.appendChild(difficultyDiv);
+                cardItem.appendChild(actionsDiv);
                 problemCardsContainer.appendChild(cardItem);
             }
         }
@@ -3201,8 +3371,8 @@ function loadCDNScript(src, onload) {
             newRow.className = 'flashcard-editor-row';
             newRow.setAttribute('data-card-id', editorCardCounter);
 
-            const questionImagePreview = questionImage ? `<img src="${questionImage}">` : '';
-            const answerImagePreview = answerImage ? `<img src="${answerImage}">` : '';
+            const questionImagePreview = questionImage ? `<img src="${escapeHtml(String(questionImage))}">` : '';
+            const answerImagePreview = answerImage ? `<img src="${escapeHtml(String(answerImage))}">` : '';
 
             const deckType = document.getElementById('deckTypeHint').value;
             const cardNumber = document.querySelectorAll('.flashcard-editor-row').length + 1;
@@ -3217,23 +3387,23 @@ function loadCDNScript(src, onload) {
                     <span>${cardNumber}.</span>
                 </div>
                 
-                <textarea class="question-input" placeholder="Question (e.g., The event or item in the sequence)" data-card-id="${editorCardCounter}">${question}</textarea>
+                <textarea class="question-input" placeholder="Question (e.g., The event or item in the sequence)" data-card-id="${editorCardCounter}">${escapeHtml(String(question))}</textarea>
                 <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
                 <div class="image-controls">
                     <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1">Upload Image</button>
                 </div>
                 <div class="question-image-preview image-preview">${questionImagePreview}</div>
                 <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
-                <input type="hidden" class="question-image-input" value="${questionImage}">
+                <input type="hidden" class="question-image-input" value="${escapeHtml(String(questionImage))}">
                 
-                <textarea class="solution-input" placeholder="Answer (e.g., The name of the event or item)" style="margin-top:20px;" data-card-id="${editorCardCounter}">${answer}</textarea>
+                <textarea class="solution-input" placeholder="Answer (e.g., The name of the event or item)" style="margin-top:20px;" data-card-id="${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
                 <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
                 <div class="image-controls">
                     <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1">Upload Image</button>
                 </div>
                 <div class="answer-image-preview image-preview">${answerImagePreview}</div>
                 <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
-                <input type="hidden" class="answer-image-input" value="${answerImage}">
+                <input type="hidden" class="answer-image-input" value="${escapeHtml(String(answerImage))}">
             </div>
             <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
             <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text);">
@@ -3282,7 +3452,7 @@ function loadCDNScript(src, onload) {
                     <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
                 </svg>
             </div>
-            <div class="flashcard-item" data-original-id="${card.id || ''}" style="flex-grow: 1; display: flex; flex-direction: column; gap: 15px;">
+            <div class="flashcard-item" data-original-id="${escapeHtml(String(card.id || ''))}" style="flex-grow: 1; display: flex; flex-direction: column; gap: 15px;">
                 
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div class="flashcard-number" style="
@@ -3311,7 +3481,7 @@ function loadCDNScript(src, onload) {
                         type="text" 
                         class="sequence-term-input" 
                         placeholder="e.g., 'Battle of Hastings' or 'Mitosis'" 
-                        value="${answer}" 
+                        value="${escapeHtml(String(answer))}"
                         style="
                             width: 100%; 
                             padding: 12px 15px; 
@@ -3397,7 +3567,10 @@ function loadCDNScript(src, onload) {
                     const compressedUrl = await compressImage(dataUrl);
                     const preview = input.previousElementSibling;
                     const dataInput = input.nextElementSibling;
-                    preview.innerHTML = `<img src="${compressedUrl}">`;
+                    preview.innerHTML = '';
+                    const img = document.createElement('img');
+                    img.src = compressedUrl;
+                    preview.appendChild(img);
                     dataInput.value = compressedUrl;
                 };
                 reader.readAsDataURL(file);
@@ -3416,7 +3589,10 @@ function loadCDNScript(src, onload) {
                         const textarea = event.target;
                         const preview = textarea.nextElementSibling.nextElementSibling;
                         const dataInput = preview.nextElementSibling.nextElementSibling;
-                        preview.innerHTML = `<img src="${dataUrl}">`;
+                        preview.innerHTML = '';
+                        const img = document.createElement('img');
+                        img.src = dataUrl;
+                        preview.appendChild(img);
                         dataInput.value = dataUrl;
                     };
                     reader.readAsDataURL(blob);
@@ -3642,8 +3818,17 @@ function loadCDNScript(src, onload) {
                 if (!dropdown) return;
                 const currentValue = dropdown.value;
                 dropdown.innerHTML = '';
-                categories.forEach(cat => dropdown.innerHTML += `<option value="${cat}">${cat}</option>`);
-                dropdown.innerHTML += `<option value="add_new_category" style="font-style: italic;">+ Add New Category...</option>`;
+                categories.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = String(cat);
+                    opt.textContent = String(cat);
+                    dropdown.appendChild(opt);
+                });
+                const addOpt = document.createElement('option');
+                addOpt.value = 'add_new_category';
+                addOpt.style.fontStyle = 'italic';
+                addOpt.textContent = '+ Add New Category...';
+                dropdown.appendChild(addOpt);
                 if (currentValue && currentValue !== 'add_new_category') {
                     dropdown.value = currentValue;
                 }
@@ -3978,7 +4163,13 @@ function loadCDNScript(src, onload) {
 
             if (text) {
                 const current = Math.round(visualPercent);
-                text.innerHTML = `Progress: <span style="color: var(--primary-color);">${current}%</span>`;
+                text.innerHTML = '';
+                const label = document.createTextNode('Progress: ');
+                const percentSpan = document.createElement('span');
+                percentSpan.style.color = 'var(--primary-color)';
+                percentSpan.textContent = `${current}%`;
+                text.appendChild(label);
+                text.appendChild(percentSpan);
             }
         }
 
@@ -4127,12 +4318,24 @@ function loadCDNScript(src, onload) {
             document.getElementById('learningCardCount').textContent = learningCount;
 
             const poolList = document.getElementById('activePoolList');
-            if (studyState.activeLearningPool && studyState.activeLearningPool.length > 0) {
-                poolList.innerHTML = studyState.activeLearningPool.map(card =>
-                    `<div class="deck-card-item" style="padding: 10px; border: none;">${card.question}</div>`
-                ).join('');
-            } else {
-                poolList.innerHTML = `<p style="text-align: center; color: var(--secondary-text);">Click 'Continue' to start!</p>`;
+            if (poolList) {
+                poolList.innerHTML = '';
+                if (studyState.activeLearningPool && studyState.activeLearningPool.length > 0) {
+                    studyState.activeLearningPool.forEach(card => {
+                        const item = document.createElement('div');
+                        item.className = 'deck-card-item';
+                        item.style.padding = '10px';
+                        item.style.border = 'none';
+                        item.textContent = card.question;
+                        poolList.appendChild(item);
+                    });
+                } else {
+                    const placeholder = document.createElement('p');
+                    placeholder.style.textAlign = 'center';
+                    placeholder.style.color = 'var(--secondary-text)';
+                    placeholder.textContent = "Click 'Continue' to start!";
+                    poolList.appendChild(placeholder);
+                }
             }
 
             const continueBtn = document.getElementById('continueBtn');
@@ -4157,7 +4360,13 @@ function loadCDNScript(src, onload) {
 
             const notesContainer = document.getElementById('deckNotesDisplay');
             if (deck.notes && studyState.currentRound === 1) {
-                notesContainer.innerHTML = `<h3>Notes for this deck:</h3><div>${deck.notes}</div>`;
+                notesContainer.innerHTML = '';
+                const title = document.createElement('h3');
+                title.textContent = 'Notes for this deck:';
+                const noteDiv = document.createElement('div');
+                noteDiv.textContent = String(deck.notes);
+                notesContainer.appendChild(title);
+                notesContainer.appendChild(noteDiv);
                 notesContainer.classList.remove('hidden');
             } else {
                 notesContainer.classList.add('hidden');
@@ -4174,10 +4383,60 @@ function loadCDNScript(src, onload) {
             }
             document.getElementById('progressTitle').textContent = 'Review Progress';
             document.getElementById('roundInfo').textContent = `Round ${studyState.currentRound}`;
-            document.getElementById('bucketsContainer').innerHTML = `<div class="bucket"><div class="bucket-number">Still Learning</div><div class="bucket-count">${remaining}</div></div><div class="bucket"><div class="bucket-number">Correct</div><div class="bucket-count">${mastered}</div></div>`;
+            const bucketsContainer3 = document.getElementById('bucketsContainer');
+            if (bucketsContainer3) {
+                bucketsContainer3.innerHTML = '';
+                const bucketStill = document.createElement('div');
+                bucketStill.className = 'bucket';
+                const bucketNumberS = document.createElement('div');
+                bucketNumberS.className = 'bucket-number';
+                bucketNumberS.textContent = 'Still Learning';
+                const bucketCountS = document.createElement('div');
+                bucketCountS.className = 'bucket-count';
+                bucketCountS.textContent = String(remaining);
+                bucketStill.appendChild(bucketNumberS);
+                bucketStill.appendChild(bucketCountS);
+                const bucketCorrect = document.createElement('div');
+                bucketCorrect.className = 'bucket';
+                const bucketNumberC = document.createElement('div');
+                bucketNumberC.className = 'bucket-number';
+                bucketNumberC.textContent = 'Correct';
+                const bucketCountC = document.createElement('div');
+                bucketCountC.className = 'bucket-count';
+                bucketCountC.textContent = String(mastered);
+                bucketCorrect.appendChild(bucketNumberC);
+                bucketCorrect.appendChild(bucketCountC);
+                bucketsContainer3.appendChild(bucketStill);
+                bucketsContainer3.appendChild(bucketCorrect);
+            }
             const progress = total > 0 ? (mastered / total) * 100 : 0;
             document.getElementById('progressBarFill').style.width = `${progress}%`;
-            document.getElementById('statsContainer').innerHTML = `<div class="stat"><div class='stat-value'>${mastered}</div><div class='stat-label'>Total Mastered</div></div><div class='stat'><div class='stat-value'>${remaining}</div><div class='stat-label'>Remaining</div></div>`;
+            const statsContainer3 = document.getElementById('statsContainer');
+            if (statsContainer3) {
+                statsContainer3.innerHTML = '';
+                const stat1 = document.createElement('div');
+                stat1.className = 'stat';
+                const val1 = document.createElement('div');
+                val1.className = 'stat-value';
+                val1.textContent = String(mastered);
+                const label1 = document.createElement('div');
+                label1.className = 'stat-label';
+                label1.textContent = 'Total Mastered';
+                stat1.appendChild(val1);
+                stat1.appendChild(label1);
+                const stat2 = document.createElement('div');
+                stat2.className = 'stat';
+                const val2 = document.createElement('div');
+                val2.className = 'stat-value';
+                val2.textContent = String(remaining);
+                const label2 = document.createElement('div');
+                label2.className = 'stat-label';
+                label2.textContent = 'Remaining';
+                stat2.appendChild(val2);
+                stat2.appendChild(label2);
+                statsContainer3.appendChild(stat1);
+                statsContainer3.appendChild(stat2);
+            }
         }
 
 
@@ -4367,16 +4626,31 @@ function loadCDNScript(src, onload) {
                         const pRecall = calculatePRecall(state.stability, state.lastReviewed);
                         const urgency = (1 - pRecall) * 100;
 
-                        document.getElementById('cardStatsInfo').innerHTML = `
-                            <div style="font-weight: 500;">Mastery: <span style="color: var(--primary-color);">${masteryPercent}%</span></div>
-                            <div style="font-size: 0.8rem; color: var(--secondary-text);">Urgency: ${urgency.toFixed(0)}%</div>
-                        `;
+                        const cardStatsContainer = document.getElementById('cardStatsInfo');
+                        if (cardStatsContainer) {
+                            cardStatsContainer.innerHTML = '';
+                            const masteryDiv = document.createElement('div');
+                            masteryDiv.style.fontWeight = '500';
+                            masteryDiv.textContent = 'Mastery: ';
+                            const masterySpan = document.createElement('span');
+                            masterySpan.style.color = 'var(--primary-color)';
+                            masterySpan.textContent = `${masteryPercent}%`;
+                            masteryDiv.appendChild(masterySpan);
+                            const urgencyDiv = document.createElement('div');
+                            urgencyDiv.style.fontSize = '0.8rem';
+                            urgencyDiv.style.color = 'var(--secondary-text)';
+                            urgencyDiv.textContent = `Urgency: ${urgency.toFixed(0)}%`;
+                            cardStatsContainer.appendChild(masteryDiv);
+                            cardStatsContainer.appendChild(urgencyDiv);
+                        }
                     }
                 }
 
                 document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('cardQuestion').innerHTML = card.question;
-                document.getElementById('cardAnswer').innerHTML = card.answer;
+                const qEl = document.getElementById('cardQuestion');
+                const aEl = document.getElementById('cardAnswer');
+                if (qEl) qEl.textContent = card.question || '';
+                if (aEl) aEl.textContent = card.answer || '';
 
                 document.getElementById('showAnswerBtn').classList.remove('hidden');
 
@@ -4436,55 +4710,119 @@ function loadCDNScript(src, onload) {
 
                         if (studyState.sequencePhase === 'Forward Chaining') {
                             if (studyState.currentCardIndex === 0) {
-                                qElement.innerHTML = `
-                                    <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Forward Chaining</div>
-                                        <div style="font-size: 1.3rem;">What is the <strong>first item</strong> in this sequence?</div>
-                                    </div>
-                                `;
+                                qElement.innerHTML = '';
+                                (function renderFCFirst() {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.style.textAlign = 'center';
+                                    const header = document.createElement('div');
+                                    header.style.color = 'var(--primary-color)';
+                                    header.style.fontSize = '1rem';
+                                    header.style.fontWeight = 600;
+                                    header.style.marginBottom = '15px';
+                                    header.textContent = 'Forward Chaining';
+                                    const prompt = document.createElement('div');
+                                    prompt.style.fontSize = '1.3rem';
+                                    prompt.innerHTML = 'What is the <strong>first item</strong> in this sequence?';
+                                    wrapper.appendChild(header);
+                                    wrapper.appendChild(prompt);
+                                    qElement.appendChild(wrapper);
+                                })();
+                            } else {
                             } else {
                                 const prevCard = currentChunk[studyState.currentCardIndex - 1];
-                                qElement.innerHTML = `
-                                    <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Forward Chaining </div>
-                                        <div style="font-size: 1.1rem; margin-bottom: 20px;">What comes <strong>after</strong>:</div>
-                                        <div style="
-                                            background: var(--input-bg);
-                                            padding: 20px;
-                                            border-radius: 12px;
-                                            border-left: 4px solid var(--primary-color);
-                                            font-size: 1.3rem;
-                                            font-weight: 600;
-                                        ">${prevCard.answer}</div>
-                                        ${prevCard.question ? `<div style="color: var(--secondary-text); margin-top: 10px; font-size: 0.95rem;">${prevCard.question}</div>` : ''}
-                                    </div>
-                                `;
+                                qElement.innerHTML = '';
+                                (function renderFCAfter() {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.style.textAlign = 'center';
+                                    const header = document.createElement('div');
+                                    header.style.color = 'var(--primary-color)';
+                                    header.style.fontSize = '1rem';
+                                    header.style.fontWeight = 600;
+                                    header.style.marginBottom = '15px';
+                                    header.textContent = 'Forward Chaining';
+                                    const prompt = document.createElement('div');
+                                    prompt.style.fontSize = '1.1rem';
+                                    prompt.style.marginBottom = '20px';
+                                    prompt.innerHTML = 'What comes <strong>after</strong>:';
+                                    const answerBox = document.createElement('div');
+                                    answerBox.style.background = 'var(--input-bg)';
+                                    answerBox.style.padding = '20px';
+                                    answerBox.style.borderRadius = '12px';
+                                    answerBox.style.borderLeft = '4px solid var(--primary-color)';
+                                    answerBox.style.fontSize = '1.3rem';
+                                    answerBox.style.fontWeight = 600;
+                                    answerBox.textContent = prevCard.answer;
+                                    wrapper.appendChild(header);
+                                    wrapper.appendChild(prompt);
+                                    wrapper.appendChild(answerBox);
+                                    if (prevCard.question) {
+                                        const qEl = document.createElement('div');
+                                        qEl.style.color = 'var(--secondary-text)';
+                                        qEl.style.marginTop = '10px';
+                                        qEl.style.fontSize = '0.95rem';
+                                        qEl.textContent = prevCard.question;
+                                        wrapper.appendChild(qEl);
+                                    }
+                                    qElement.appendChild(wrapper);
+                                })();
                             }
                         } else {
                             if (studyState.currentCardIndex === currentChunk.length - 1) {
-                                qElement.innerHTML = `
-                                    <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Backward Chaining</div>
-                                        <div style="font-size: 1.3rem;">What is the <strong>last item</strong> in this sequence?</div>
-                                    </div>
-                                `;
+                                qElement.innerHTML = '';
+                                (function renderBCLast() {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.style.textAlign = 'center';
+                                    const header = document.createElement('div');
+                                    header.style.color = 'var(--primary-color)';
+                                    header.style.fontSize = '1rem';
+                                    header.style.fontWeight = 600;
+                                    header.style.marginBottom = '15px';
+                                    header.textContent = 'Backward Chaining';
+                                    const prompt = document.createElement('div');
+                                    prompt.style.fontSize = '1.3rem';
+                                    prompt.innerHTML = 'What is the <strong>last item</strong> in this sequence?';
+                                    wrapper.appendChild(header);
+                                    wrapper.appendChild(prompt);
+                                    qElement.appendChild(wrapper);
+                                })();
+                            } else {
                             } else {
                                 const nextCard = currentChunk[studyState.currentCardIndex + 1];
-                                qElement.innerHTML = `
-                                    <div style="text-align: center;">
-                                        <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 15px;">Backward Chaining</div>
-                                        <div style="font-size: 1.1rem; margin-bottom: 20px;">What comes <strong>before</strong>:</div>
-                                        <div style="
-                                            background: var(--input-bg);
-                                            padding: 20px;
-                                            border-radius: 12px;
-                                            border-left: 4px solid var(--primary-color);
-                                            font-size: 1.3rem;
-                                            font-weight: 600;
-                                        ">${nextCard.answer}</div>
-                                        ${nextCard.question ? `<div style="color: var(--secondary-text); margin-top: 10px; font-size: 0.95rem;">${nextCard.question}</div>` : ''}
-                                    </div>
-                                `;
+                                qElement.innerHTML = '';
+                                (function renderBCBefore() {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.style.textAlign = 'center';
+                                    const header = document.createElement('div');
+                                    header.style.color = 'var(--primary-color)';
+                                    header.style.fontSize = '1rem';
+                                    header.style.fontWeight = 600;
+                                    header.style.marginBottom = '15px';
+                                    header.textContent = 'Backward Chaining';
+                                    const prompt = document.createElement('div');
+                                    prompt.style.fontSize = '1.1rem';
+                                    prompt.style.marginBottom = '20px';
+                                    prompt.innerHTML = 'What comes <strong>before</strong>:';
+                                    const answerBox = document.createElement('div');
+                                    answerBox.style.background = 'var(--input-bg)';
+                                    answerBox.style.padding = '20px';
+                                    answerBox.style.borderRadius = '12px';
+                                    answerBox.style.borderLeft = '4px solid var(--primary-color)';
+                                    answerBox.style.fontSize = '1.3rem';
+                                    answerBox.style.fontWeight = 600;
+                                    answerBox.textContent = nextCard.answer;
+                                    wrapper.appendChild(header);
+                                    wrapper.appendChild(prompt);
+                                    wrapper.appendChild(answerBox);
+                                    if (nextCard.question) {
+                                        const qEl = document.createElement('div');
+                                        qEl.style.color = 'var(--secondary-text)';
+                                        qEl.style.marginTop = '10px';
+                                        qEl.style.fontSize = '0.95rem';
+                                        qEl.textContent = nextCard.question;
+                                        wrapper.appendChild(qEl);
+                                    }
+                                    qElement.appendChild(wrapper);
+                                })();
                             }
                         }
                         startInteractionLog(card.id);
@@ -4503,8 +4841,10 @@ function loadCDNScript(src, onload) {
                         document.getElementById('checkAnswerBtn').classList.remove('hidden');
                         document.getElementById('dontKnowBtn').classList.remove('hidden');
                         const weakestCard = studyState.roundCards[studyState.currentCardIndex];
-                        document.getElementById('cardQuestion').innerHTML = weakestCard.question;
-                        document.getElementById('cardAnswer').innerHTML = weakestCard.answer;
+                        const weakestQEl = document.getElementById('cardQuestion');
+                        const weakestAEl = document.getElementById('cardAnswer');
+                        if (weakestQEl) weakestQEl.textContent = weakestCard.question || '';
+                        if (weakestAEl) weakestAEl.textContent = weakestCard.answer || '';
                         document.getElementById('cardRoundInfo').textContent = `Weakest Link - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
                         startInteractionLog(weakestCard.id);
                         break;
@@ -4516,15 +4856,20 @@ function loadCDNScript(src, onload) {
                         document.getElementById('checkAnswerBtn').classList.remove('hidden');
                         document.getElementById('dontKnowBtn').classList.remove('hidden');
                         const reviewCard = studyState.roundCards[studyState.currentCardIndex];
-                        document.getElementById('cardQuestion').innerHTML = reviewCard.question;
-                        document.getElementById('cardAnswer').innerHTML = reviewCard.answer;
+                        const reviewQEl = document.getElementById('cardQuestion');
+                        const reviewAEl = document.getElementById('cardAnswer');
+                        if (reviewQEl) reviewQEl.textContent = reviewCard.question || '';
+                        if (reviewAEl) reviewAEl.textContent = reviewCard.answer || '';
                         document.getElementById('cardRoundInfo').textContent = `Quick Review - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
                         startInteractionLog(reviewCard.id);
                         break;
 
                 }
                 document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
-                if (card) document.getElementById('cardAnswer').innerHTML = card.answer;
+                if (card) {
+                    const answerEl = document.getElementById('cardAnswer');
+                    if (answerEl) answerEl.textContent = card.answer || '';
+                }
                 document.getElementById('cardAnswerContent').classList.add('hidden');
                 const writeInput = document.getElementById('writeAnswerInput');
                 writeInput.value = '';
@@ -4557,14 +4902,15 @@ function loadCDNScript(src, onload) {
             switch (questionType) {
                 case 'MultipleChoice':
                     document.getElementById('mcqView').classList.remove('hidden');
-                    document.getElementById('mcqQuestion').innerHTML = card.question;
+                    const mcqQEl = document.getElementById('mcqQuestion');
+                    if (mcqQEl) mcqQEl.textContent = card.question || '';
                     generateAndDisplayMCQ(card);
                     simpleButtons.classList.add('hidden');
                     break;
 
                 case 'Cloze':
                     document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                    let clozeText = card.question;
+                    let clozeText = escapeHtml(String(card.question || ''));
 
                     // Handle explicit blanks
                     if (clozeText.includes('___')) {
@@ -4573,10 +4919,11 @@ function loadCDNScript(src, onload) {
                         clozeText = clozeText.replace(/\.\.\./g, '___________');
                     } else {
                         // Standard Cloze: remove answer from question
-                        clozeText = clozeText.replace(new RegExp(escapeRegExp(card.answer), 'ig'), '___________');
+                        clozeText = clozeText.replace(new RegExp(escapeRegExp(escapeHtml(String(card.answer || ''))), 'ig'), '___________');
                     }
 
-                    document.getElementById('cardQuestion').innerHTML = clozeText;
+                    const clozeQEl = document.getElementById('cardQuestion');
+                    if (clozeQEl) clozeQEl.textContent = clozeText;
 
                     document.getElementById('writeAnswerInput').classList.remove('hidden');
                     document.getElementById('checkAnswerBtn').classList.remove('hidden');
@@ -4590,7 +4937,8 @@ function loadCDNScript(src, onload) {
 
                 case 'Type':
                     document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                    document.getElementById('cardQuestion').innerHTML = card.question;
+                    const typeQEl = document.getElementById('cardQuestion');
+                    if (typeQEl) typeQEl.textContent = card.question || '';
 
                     document.getElementById('writeAnswerInput').classList.remove('hidden');
                     document.getElementById('checkAnswerBtn').classList.remove('hidden');
@@ -4604,14 +4952,16 @@ function loadCDNScript(src, onload) {
 
                 default:
                     document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                    document.getElementById('cardQuestion').innerHTML = card.question;
+                    const defQEl = document.getElementById('cardQuestion');
+                    if (defQEl) defQEl.textContent = card.question || '';
                     document.getElementById('showAnswerBtn').classList.remove('hidden');
                     break;
             }
 
             const flashcardElem = document.querySelector('#cardView .flashcard');
             flashcardElem.classList.remove('is-flipped');
-            document.getElementById('cardAnswer').innerHTML = card.answer;
+            const ansEl = document.getElementById('cardAnswer');
+            if (ansEl) ansEl.textContent = card.answer || '';
             document.getElementById('cardAnswerContent').classList.add('hidden');
 
             const writeInput = document.getElementById('writeAnswerInput');
@@ -5107,7 +5457,7 @@ function loadCDNScript(src, onload) {
             if (settings.retypeIncorrect) {
                 studyState.isRetypingIncorrect = true;
 
-                feedbackMessage.innerHTML = `<strong>The correct answer is:</strong> <span style="color:var(--primary-color)">${card.answer}</span>`;
+                feedbackMessage.innerHTML = `<strong>The correct answer is:</strong> <span style="color:var(--primary-color)">${escapeHtml(String(card.answer))}</span>`;
 
                 writeInput.value = '';
                 writeInput.disabled = false;
@@ -5834,8 +6184,17 @@ function loadCDNScript(src, onload) {
         function showImportModal() {
             const dropdown = document.getElementById('importDeckCategory');
             dropdown.innerHTML = '';
-            categories.forEach(cat => dropdown.innerHTML += `<option value="${cat}">${cat}</option>`);
-            dropdown.innerHTML += `<option value="add_new_category" style="font-style: italic;">+ Add New Category...</option>`;
+            categories.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = String(cat);
+                opt.textContent = String(cat);
+                dropdown.appendChild(opt);
+            });
+            const addOpt = document.createElement('option');
+            addOpt.value = 'add_new_category';
+            addOpt.style.fontStyle = 'italic';
+            addOpt.textContent = '+ Add New Category...';
+            dropdown.appendChild(addOpt);
             dropdown.onchange = handleCategoryChange;
 
             document.getElementById('importModal').classList.add('show');
@@ -5961,72 +6320,18 @@ function loadCDNScript(src, onload) {
             }).filter(Boolean);
         }
 
-        async function compressImage(dataUrl, maxSizeMB = 1) {
-            return new Promise((resolve) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    ctx.drawImage(img, 0, 0);
-
-                    let quality = 0.9;
-                    let compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-
-                    while (compressedDataUrl.length > maxSizeMB * 1024 * 1024 && quality > 0.1) {
-                        quality -= 0.1;
-                        compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        // Use shared helper compressImage if available; otherwise fallback
+        if (typeof compressImage === 'undefined') {
+            async function compressImage(dataUrl, qualityOrMaxSize = undefined, maxSizeKB = undefined) {
+                if (typeof window !== 'undefined' && typeof window.compressImage === 'function') {
+                    if (typeof qualityOrMaxSize === 'number' && qualityOrMaxSize > 10) {
+                        const kb = Math.floor(qualityOrMaxSize * 1024);
+                        return window.compressImage(dataUrl, undefined, kb);
                     }
-                    resolve(compressedDataUrl);
-                };
-                img.onerror = () => resolve(dataUrl);
-                img.src = dataUrl;
-            });
-        }
-
-        function compressImage(dataUrl, quality = 0.7, maxSizeKB = 150) {
-            return new Promise((resolve) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-
-                    let width = img.width;
-                    let height = img.height;
-                    const MAX_WIDTH = 1024;
-                    const MAX_HEIGHT = 1024;
-
-                    if (width > height) {
-                        if (width > MAX_WIDTH) {
-                            height *= MAX_WIDTH / width;
-                            width = MAX_WIDTH;
-                        }
-                    } else {
-                        if (height > MAX_HEIGHT) {
-                            width *= MAX_HEIGHT / height;
-                            height = MAX_HEIGHT;
-                        }
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    ctx.drawImage(img, 0, 0, width, height);
-
-                    let compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-
-
-                    const head = 'data:image/jpeg;base64,';
-                    const imageSizeKB = Math.round((compressedDataUrl.length - head.length) * 3 / 4 / 1024);
-
-                    if (imageSizeKB > maxSizeKB) {
-                        console.log(`Image too large (${imageSizeKB}KB), further compression needed.`);
-                    }
-
-                    resolve(compressedDataUrl);
-                };
-                img.onerror = () => resolve(dataUrl);
-                img.src = dataUrl;
-            });
+                    return window.compressImage(dataUrl, qualityOrMaxSize, maxSizeKB);
+                }
+                return Promise.resolve(dataUrl);
+            }
         }
 
         function showConfirmModal(text, onConfirm, title = "Confirm Action") {
@@ -6170,8 +6475,10 @@ function loadCDNScript(src, onload) {
             }
 
             document.querySelector('#testCardView .flashcard').classList.remove('is-flipped');
-            document.getElementById('testQuestion').innerHTML = card.question;
-            document.getElementById('testAnswer').innerHTML = card.answer;
+            const tqEl = document.getElementById('testQuestion');
+            const taEl = document.getElementById('testAnswer');
+            if (tqEl) tqEl.textContent = card.question || '';
+            if (taEl) taEl.textContent = card.answer || '';
             document.getElementById('testAnswerContent').classList.add('hidden');
             document.getElementById('testOptions').classList.add('hidden');
             document.getElementById('testAnswerInput').classList.add('hidden');
@@ -6402,11 +6709,15 @@ function loadCDNScript(src, onload) {
 
             const sessionList = document.getElementById('analyticsSessionList');
             if (sessions.length > 0) {
-                sessionList.innerHTML = sessions.map(s => {
+                sessionList.innerHTML = '';
+                sessions.forEach(s => {
                     const date = new Date(s.date).toLocaleString();
                     const duration = `${Math.round(s.duration / 60)}m`;
-                    return `<div class="deck-card-item">${date}: Studied "${s.deckName}" for ${duration}</div>`;
-                }).join('');
+                    const div = document.createElement('div');
+                    div.className = 'deck-card-item';
+                    div.textContent = `${date}: Studied "${s.deckName}" for ${duration}`;
+                    sessionList.appendChild(div);
+                });
             } else {
                 sessionList.innerHTML = '<p style="color: var(--secondary-text); text-align: center;">No study sessions recorded yet.</p>';
             }
@@ -6423,7 +6734,8 @@ function loadCDNScript(src, onload) {
                 chartInstances[canvasId].destroy();
                 chartInstances[canvasId] = null;
             }
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
             chartInstances[canvasId] = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -6447,7 +6759,8 @@ function loadCDNScript(src, onload) {
         function renderAnalyticsDeckBreakdownChart(deckData) {
             const canvasId = 'analyticsDeckBreakdownChart';
             if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
 
             if (deckData.labels.length === 0) {
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -7542,7 +7855,8 @@ function loadCDNScript(src, onload) {
             }
         }
 
-        function renderAiGeneratedCards(cardsData) {
+        if (typeof window.renderAiGeneratedCards === 'undefined') {
+            window.renderAiGeneratedCards = function(cardsData) {
             const listContainer = document.getElementById('flashcard-list');
 
             // Handle both array (legacy) and object with deckName/deckNotes
@@ -7576,24 +7890,24 @@ function loadCDNScript(src, onload) {
 
                 listContainer.innerHTML = cards.map((card, index) => {
                     if (card._isSequence) {
-                        const stepsHtml = (card.steps || []).map(s => `<li>${s}</li>`).join('');
+                        const stepsHtml = (card.steps || []).map(s => `<li>${escapeHtml(String(s || ''))}</li>`).join('');
                         return `
                             <div class="generated-sequence" data-index="${index}">
                                 <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-                                    <div style="font-weight:700; font-size:1.05rem;">${card.title || 'Sequence'}</div>
+                                    <div style="font-weight:700; font-size:1.05rem;">${escapeHtml(String(card.title || 'Sequence'))}</div>
                                     <div class="generated-card-actions">
                                         <button class="generated-card-action-btn delete" title="Delete Sequence" onclick="deleteGeneratedCard(${index})">&times;</button>
                                     </div>
                                 </div>
-                                ${card.description ? `<div style="color:var(--secondary-text); margin-top:6px;">${card.description}</div>` : ''}
+                                ${card.description ? `<div style="color:var(--secondary-text); margin-top:6px;">${escapeHtml(String(card.description))}</div>` : ''}
                                 <ol style="margin-top:8px; padding-left:18px; color:var(--text-color);">${stepsHtml}</ol>
                             </div>
                         `;
                     } else {
                         return `
                             <div class="generated-card" data-index="${index}">
-                                <div class="question">${card.question}</div>
-                                <div class="answer">${card.answer}</div>
+                                <div class="question">${escapeHtml(String(card.question || ''))}</div>
+                                <div class="answer">${escapeHtml(String(card.answer || ''))}</div>
                                 <div class="generated-card-actions">
                                     <button class="generated-card-action-btn delete" title="Delete Card" onclick="deleteGeneratedCard(${index})">&times;</button>
                                 </div>
@@ -7606,13 +7920,16 @@ function loadCDNScript(src, onload) {
             const heading = document.getElementById('flashcard-count');
             const isSequence = cards.length > 0 && cards[0]._isSequence;
             heading.textContent = isSequence ? `Generated Sequences (${cards.length})` : `Generated Flashcards (${cards.length})`;
+            };
         }
 
-        function deleteGeneratedCard(index) {
+        if (typeof window.deleteGeneratedCard === 'undefined') {
+            window.deleteGeneratedCard = function(index) {
             const listContainer = document.getElementById('flashcard-list');
             const cards = JSON.parse(listContainer.dataset.cards);
             cards.splice(index, 1);
-            renderAiGeneratedCards(cards);
+            if (typeof window.renderAiGeneratedCards === 'function') window.renderAiGeneratedCards(cards);
+        }
         }
 
         async function saveAiGeneratedDeck() {
@@ -7820,11 +8137,18 @@ function loadCDNScript(src, onload) {
 
         async function showInsightsView() {
 
-            const setupInsights = async () => {
+                const setupInsights = async () => {
                 const deckSelect = document.getElementById('insightsDeckSelect');
-                deckSelect.innerHTML = '<option value="">-- Select a Deck --</option>';
+                deckSelect.innerHTML = '';
+                const placeholderOption = document.createElement('option');
+                placeholderOption.value = '';
+                placeholderOption.textContent = '-- Select a Deck --';
+                deckSelect.appendChild(placeholderOption);
                 Object.values(decks).forEach(deck => {
-                    deckSelect.innerHTML += `<option value="${deck.id}">${deck.name}</option>`;
+                    const option = document.createElement('option');
+                    option.value = String(deck.id);
+                    option.textContent = String(deck.name);
+                    deckSelect.appendChild(option);
                 });
 
                 const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
@@ -7896,7 +8220,8 @@ function loadCDNScript(src, onload) {
             const canvasId = 'forgettingCurveChart';
             const cardDetailP = document.getElementById('cardDetailForCurve');
             if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
 
             if (!cardState || !cardState.stability || !deckId) {
                 cardDetailP.textContent = 'Select a card from the list to see its predicted curve.';
@@ -7956,7 +8281,8 @@ function loadCDNScript(src, onload) {
                 else counts.mastered++;
             });
 
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const ctx = getCanvasContextSafe(canvasId);
+            if (!ctx) return;
             chartInstances[canvasId] = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
@@ -8238,7 +8564,8 @@ function loadCDNScript(src, onload) {
 
             const masteryCanvasId = 'planMasteryChart';
             if (chartInstances[masteryCanvasId]) chartInstances[masteryCanvasId].destroy();
-            const ctxMastery = document.getElementById(masteryCanvasId).getContext('2d');
+            const ctxMastery = getCanvasContextSafe(masteryCanvasId);
+            if (!ctxMastery) return;
             chartInstances[masteryCanvasId] = new Chart(ctxMastery, {
                 type: 'doughnut',
                 data: {
@@ -8274,7 +8601,8 @@ function loadCDNScript(src, onload) {
 
             const deckCanvasId = 'planDeckProgressChart';
             if (chartInstances[deckCanvasId]) chartInstances[deckCanvasId].destroy();
-            const ctxDeck = document.getElementById(deckCanvasId).getContext('2d');
+            const ctxDeck = getCanvasContextSafe(deckCanvasId);
+            if (!ctxDeck) return;
             chartInstances[deckCanvasId] = new Chart(ctxDeck, {
                 type: 'bar',
                 data: {
@@ -8795,12 +9123,15 @@ function loadCDNScript(src, onload) {
             }
         }
 
-        async function generateFullDataExport() {
+        if (typeof window.generateFullDataExport === 'undefined') {
+            window.generateFullDataExport = async function(evt) {
             // 1. Notify user it started
-            const btn = event.target.closest('button');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<span class="spinner" style="width:16px; height:16px; border-width:2px;"></span> Collecting...';
-            btn.disabled = true;
+            const btn = evt?.target?.closest('button');
+            const originalText = btn?.innerHTML || '';
+            if (btn) {
+                btn.innerHTML = '<span class="spinner" style="width:16px; height:16px; border-width:2px;"></span> Collecting...';
+                btn.disabled = true;
+            }
 
             try {
                 showToast("Gathering all application data...", "info");
@@ -8874,10 +9205,12 @@ function loadCDNScript(src, onload) {
                 console.error("Export failed:", error);
                 showToast("Failed to export data. See console.", "error");
             } finally {
-                // Restore button
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+                if (btn) {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
             }
+            };
         }
 
         async function resetSpecificDeck(deckId) {

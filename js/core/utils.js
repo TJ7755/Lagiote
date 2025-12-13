@@ -1,25 +1,30 @@
 export function levenshteinDistance(s1, s2) {
-    s1 = (s1 || '').toLowerCase();
-    s2 = (s2 || '').toLowerCase();
+    const a = (s1 || '').toLowerCase();
+    const b = (s2 || '').toLowerCase();
+    const aLen = a.length;
+    const bLen = b.length;
+    if (aLen === 0) return bLen;
+    if (bLen === 0) return aLen;
 
-    const costs = [];
-    for (let i = 0; i <= s1.length; i++) {
-        let lastValue = i;
-        for (let j = 0; j <= s2.length; j++) {
-            if (i === 0) {
-                costs[j] = j;
-            } else if (j > 0) {
-                let newValue = costs[j - 1];
-                if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-                    newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-                }
-                costs[j - 1] = lastValue;
-                lastValue = newValue;
-            }
+    let previous = new Uint16Array(bLen + 1);
+    let current = new Uint16Array(bLen + 1);
+
+    for (let j = 0; j <= bLen; j++) previous[j] = j;
+
+    for (let i = 0; i < aLen; i++) {
+        current[0] = i + 1;
+        const aCode = a.charCodeAt(i);
+        for (let j = 0; j < bLen; j++) {
+            const cost = aCode === b.charCodeAt(j) ? 0 : 1;
+            const deletion = previous[j + 1] + 1;
+            const insertion = current[j] + 1;
+            const substitution = previous[j] + cost;
+            current[j + 1] = Math.min(deletion, insertion, substitution);
         }
-        if (i > 0) costs[s2.length] = lastValue;
+        [previous, current] = [current, previous];
     }
-    return costs[s2.length];
+
+    return previous[bLen];
 }
 
 export function shuffleArray(array) {
@@ -36,7 +41,12 @@ export function compressImage(dataUrl, quality = 0.7, maxSizeKB = 150) {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+            const ctx = canvas.getContext && canvas.getContext('2d') || null;
+            if (!ctx) {
+                // Could not get a 2D context - fallback to original dataUrl
+                resolve(dataUrl);
+                return;
+            }
 
             let width = img.width;
             let height = img.height;
@@ -73,25 +83,42 @@ export function compressImage(dataUrl, quality = 0.7, maxSizeKB = 150) {
     });
 }
 
+export function getCanvasContext(canvas) {
+    if (!canvas) return null;
+    try {
+        return (canvas.getContext && canvas.getContext('2d')) || null;
+    } catch (e) {
+        console.warn('getCanvasContext: failed to get context', e);
+        return null;
+    }
+}
+
+// Also attach to window for non-module scripts that don't import this module
+if (typeof window !== 'undefined') {
+    window.getCanvasContext = getCanvasContext;
+    window.compressImage = compressImage;
+}
+
 export function getQueryParam(param, search = window.location.search) {
     const params = new URLSearchParams(search || '');
     return params.get(param);
 }
 
 export function calculateIQS(logData, userBaseline = { latency: 1500, fluency: 10 }) {
-    const recallLatency = (typeof logData.recallLatency === 'number') ? logData.recallLatency : userBaseline.latency;
-    const answerFluency = (typeof logData.answerFluency === 'number') ? logData.answerFluency : 0;
-    const totalCorrections = (typeof logData.totalCorrections === 'number') ? logData.totalCorrections : 0;
-    const attemptCount = (typeof logData.attemptCount === 'number' && logData.attemptCount > 0) ? logData.attemptCount : 1;
-    const v_latency = 1 - (Math.min(recallLatency / userBaseline.latency, 2) / 2);
-    const v_fluency = Math.min(answerFluency / userBaseline.fluency, 1.5) / 1.5;
-    const v_corrections = 1 / (1 + totalCorrections);
-    const v_attempts = 1 / attemptCount;
-    const W_latency = 0.15;
-    const W_fluency = 0.15;
-    const W_corrections = 0.40;
-    const W_attempts = 0.30;
-    const iqs = (W_latency * v_latency) + (W_fluency * v_fluency) + (W_corrections * v_corrections) + (W_attempts * v_attempts);
+    const baselineLatency = Math.max(300, userBaseline.latency || 1500);
+    const baselineFluency = Math.max(1, userBaseline.fluency || 10);
 
-    return isNaN(iqs) ? 0.5 : Math.max(0, Math.min(1, iqs));
+    const recallLatency = typeof logData.recallLatency === 'number' ? logData.recallLatency : baselineLatency;
+    const answerFluency = typeof logData.answerFluency === 'number' ? logData.answerFluency : baselineFluency / 2;
+    const totalCorrections = typeof logData.totalCorrections === 'number' ? logData.totalCorrections : 0;
+    const attemptCount = typeof logData.attemptCount === 'number' && logData.attemptCount > 0 ? logData.attemptCount : 1;
+
+    const latencyScore = Math.exp(-Math.max(0, recallLatency) / (baselineLatency * 1.5));
+    const fluencyScore = Math.min(1, answerFluency / baselineFluency);
+    const correctionScore = 1 / (1 + totalCorrections * 0.7);
+    const attemptScore = 1 / (1 + (attemptCount - 1) * 0.6);
+
+    const iqs = (latencyScore * 0.45) + (fluencyScore * 0.35) + (correctionScore * 0.1) + (attemptScore * 0.1);
+    const bounded = Math.max(0, Math.min(1, iqs));
+    return Number.isFinite(bounded) ? bounded : 0.5;
 }
