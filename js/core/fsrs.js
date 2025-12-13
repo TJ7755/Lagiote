@@ -63,6 +63,73 @@ export class FSRSAlgorithm {
         return prepared;
     }
 
+    convertSm2ToFsrs(sm2Data) {
+        if (!sm2Data || typeof sm2Data !== 'object') return null;
+
+        const now = new Date();
+
+        const intervalRaw =
+            sm2Data.interval ??
+            sm2Data.scheduled_days ??
+            sm2Data.scheduledDays ??
+            sm2Data.I;
+
+        const repsRaw =
+            sm2Data.repetition ??
+            sm2Data.repetitions ??
+            sm2Data.reps ??
+            sm2Data.n ??
+            0;
+
+        const efRaw =
+            sm2Data.easinessFactor ??
+            sm2Data.easeFactor ??
+            sm2Data.ef ??
+            sm2Data.ease ??
+            sm2Data.EF;
+
+        const lastRaw =
+            sm2Data.lastReview ??
+            sm2Data.lastReviewed ??
+            sm2Data.last_review ??
+            sm2Data.lastReviewDate;
+
+        const dueRaw =
+            sm2Data.due ??
+            sm2Data.nextReview ??
+            sm2Data.nextDue ??
+            sm2Data.nextReviewDate;
+
+        const intervalDays = Number.isFinite(Number(intervalRaw)) ? Math.max(0, Number(intervalRaw)) : 0;
+        const reps = Number.isFinite(Number(repsRaw)) ? Math.max(0, Math.floor(Number(repsRaw))) : 0;
+
+        const ef = Number.isFinite(Number(efRaw)) ? Number(efRaw) : 2.5;
+
+        const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+        const diff = clamp(10 - ((ef - 1.3) * (9 / (2.8 - 1.3))), 1, 10);
+
+        const lastReview = lastRaw ? new Date(lastRaw) : now;
+        const due = dueRaw
+            ? new Date(dueRaw)
+            : new Date(lastReview.getTime() + intervalDays * 86400000);
+
+        const state = reps > 0 ? (this.State?.Review ?? 2) : (this.State?.New ?? 0);
+
+        return {
+            state,
+            stability: Math.max(0.1, intervalDays || 0.1),
+            difficulty: diff,
+            reps,
+            lapses: Number.isFinite(Number(sm2Data.lapses)) ? Math.max(0, Math.floor(Number(sm2Data.lapses))) : 0,
+            elapsed_days: intervalDays,
+            scheduled_days: intervalDays,
+            due,
+            last_review: lastReview
+        };
+    }
+
+
+
     async repeat(card, now = new Date()) {
         await this.init();
         const preparedCard = this.prepareCard(card);

@@ -742,15 +742,24 @@ function isCardMasteredForLearn(knowledgeState, deck, now = new Date()) {
 
 async function prepareFsrsCard(card) {
     const fsrsEngine = await getFsrsEngine();
+
     if (card?.fsrs) {
         return fsrsEngine.prepareCard(card.fsrs);
     }
+
     if (card?.sm2Data) {
-        const migrated = fsrsEngine.convertSm2ToFsrs(card.sm2Data);
-        if (migrated) return migrated;
+        const migrated = (typeof fsrsEngine.convertSm2ToFsrs === 'function')
+            ? fsrsEngine.convertSm2ToFsrs(card.sm2Data)
+            : null;
+
+        if (migrated) {
+            return fsrsEngine.prepareCard(migrated);
+        }
     }
-    return fsrsEngine.prepareCard();
+
+    return fsrsEngine.prepareCard(card || null);
 }
+
 
 function mapQualityToFsrsRating(quality) {
     const ratings = fsrsRatings || { Again: 0, Hard: 1, Good: 2, Easy: 3 };
