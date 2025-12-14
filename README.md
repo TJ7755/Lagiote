@@ -1,74 +1,333 @@
 # Lagiote Revise
 
-Lagiote Revise is an offline-capable flashcard application designed to help you master any subject through intelligent study modes and AI-powered features.
+Lagiote Revise is an **offline-first flashcard + study system** that runs as:
+- a **desktop app** (Electron), and
+- a **web app** (static site + serverless functions)
 
-## Access
+It mixes “classic” spaced repetition (FSRS) with a more opinionated “Learn mode” engine (“Cortex”) that scores what to show next using **expected retention gain per unit time**, plus session/user signals.
 
-You can access Lagiote Revise in two ways:
-- **Web**: Visit [lagiote-revise.netlify.app](https://lagiote-revise.netlify.app)
-- **Desktop**: Download the latest release from the [GitHub Releases](https://github.com/TJ7755/Lagiote/releases/) page.
+If you want a toy app, this repo is not that. If you want an app that tries to take learning seriously while still working on a train with no signal, welcome.
 
-## Features
+---
 
-- **Offline Capability**: Study anywhere, anytime, without an internet connection.
-- **AI-Powered Deck Generation**: Create comprehensive flashcard decks from a simple topic or text using AI.
-- **Smart Study Modes**: 4 different modes of learning.
-- **Cross-Platform**: Available as a web app and a desktop application.
+## Table of contents
 
-## Algorithms
+- Core goals
+- What you get
+- How it works
+  - Runtime variants: Web vs Electron
+  - Data model & persistence
+  - Scheduling & scoring
+  - Study modes
+  - AI generation pipeline
+  - Authentication
+  - Sync
+  - Analytics & telemetry
+  - Auto-updates (Electron)
+- Project structure (coming soon)
+- Build & run
+  - Desktop (Electron)
+  - Web
+- Environment variables
+- Security & privacy notes
+- Debugging
+- Licence
 
-Lagiote Revise employs distinct algorithms for different purposes:
+---
 
-## Learn Mode
-Learn Mode uses a queue-based progression system designed to efficiently move cards from "New" to "Mastered".
-**Prioritisation**: Cards are prioritised based on their current mastery score. If an exam date is set, the algorithm also calculates projected retention to prioritise cards you are most likely to forget before the exam.
-**Spaced Repetition**: This is different from other flashcard apps. It uses spaced repetition in a new, innovative, way. When the user inputs an exam date, the algorithm uses an adapted version of SM-2 algorithm to work out predicted retention on the day of the exam provided.
-**Mastery Tracking**: Cards are considered mastered when their mastery score exceeds a specific threshold (typically 90%), ensuring you focus on what you don't know.
+## Core goals
 
-## Review Mode
-Review Mode is a simple flashcard-based learning mode.
-**Binary Sorting**: Cards are sorted into two piles: "Still Learning" and "Correct".
-**Immediate Feedback**: You get immediate feedback on your answers.
-**Round-Based**: You continue reviewing the "Still Learning" pile in subsequent rounds until all cards are answered correctly.
+1. Offline-first: the app is usable without internet; online only unlocks AI/sync.
+2. Low-friction studying: minimal setup to get into a study session.
+3. Better-than-Leitner scheduling: FSRS plus a learn system that can prioritise by exam date and expected gain.
+4. Same app, two shells: Electron and web share behaviour; only backend bridges differ.
 
-## Practice Test Mode
-Practice Test Mode simulates a real exam environment. You will have many different options
-**No Immediate Feedback**: Unlike other modes, you won't see if you are correct or incorrect immediately after answering.
-**Assessment**: This mode is ideal for accessing exam rediness.
+---
 
-## Sequence Mode
-Sequence mode is a new learning mode. This learn mode helps with learning sequences - like the periodic table, or the order of the US presidents.
-**Chunked learning**: All the flashcards are chunked into groups of 5.
-**Forwards-chaining and Backwards-chaining**: The algorithm first shows the card in the normal order, and then backwards to reinforce learning.
+## What you get
 
-## Development
+### Deck types
+- Flashcard decks (Q → A)
+- Sequence decks (ordered steps)
+- Vocab decks (language-biased question selection)
 
-To set up the project locally:
+### Study question types
+- Type (free response with typing metrics)
+- Multiple choice (optionally AI-generated distractors)
+- Cloze
+- Plain flashcard reveal
 
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/TJ7755/Lagiote-revise.git
-    ```
-2.  **Install dependencies**:
-    ```bash
-    npm install
-    ```
-3.  **Start the application**:
-    ```bash
-    npm start
-    ```
+### Storage
+- Decks and learning state stored locally in IndexedDB.
+- All study interactions stored as interaction logs.
 
-## Environment
+### AI (optional)
+- Deck generation from documents or text
+- Distractor generation
+- Autocomplete helpers
 
-Copy `.env.example` to `.env.local` and fill in the values for your setup. The Electron main process loads `.env.local` in development and the file is packaged as an extra resource for desktop builds. Typical keys:
+---
 
-- `PROXY_URL`
-- `ELECTRON_AUTH0_DOMAIN`, `ELECTRON_AUTH0_CLIENT_ID`, `ELECTRON_AUTH0_AUDIENCE`, `ELECTRON_AUTH0_REDIRECT_URI`
-- `GEMINI_API_KEY`
-- `DATABASE_URL`
+## How it works
 
-Keep `.env.local` out of version control.
+### Runtime variants: Web vs Electron
+
+Web and Electron share the UI but differ in backend plumbing.
+
+Web:
+- AI via serverless functions
+- Auth via Auth0 SPA redirect
+- No auto-update
+
+Electron:
+- AI via IPC to main process
+- Auth via dedicated login window and local callback server
+- Auto-updates via electron-updater
+
+Electron exposes a constrained API to the renderer via contextBridge.
+
+---
+
+## Data model & persistence
+
+IndexedDB with migration-tolerant schema.
+
+### Stores
+- decks
+- userKnowledgeState
+- interactionLogs
+- appData
+- analyticsQueue
+- examPlans
+- concepts
+
+### Knowledge state (conceptual)
+Each record includes:
+- identity fields
+- serialised FSRS state
+- derived scheduling fields
+- Cortex inference metadata
+- lightweight recall history
+
+Numeric fields and timestamps are normalised defensively.
+
+---
+
+## Scheduling & scoring
+
+### FSRS
+Used for:
+- stability and difficulty
+- retrievability estimation
+- rating transitions
+
+Uses ts-fsrs with per-card serialised state.
+
+### Cortex
+Wraps FSRS with:
+- inference from interaction signals
+- expected retention gain computation
+- time cost estimation
+- optional neural gating
+
+Expected gain is computed by simulating FSRS transitions and measuring improvement at a target horizon (often exam date).
+
+Typing behaviour, latency, corrections, and hesitation feed into inference.
+
+---
+
+## Study modes
+
+### Learn mode
+- Builds an active learning pool
+- Filters mastered/safe cards
+- Sorts by projected retention
+- Respects exam date and limits
+- Biases question types by deck context
+
+### Review mode
+- Spaced repetition focus
+- Retry loop for incorrect cards
+
+### Practice test / Exam mode
+- Stricter correctness
+- Heavier weighting on typed answers
+
+### Sequence mode
+- Ordered-step decks
+- Reordering and recall-based practice
+
+---
+
+## AI generation pipeline
+
+Optional and online-only.
+
+### Input sources
+- Uploaded documents
+- Pasted text
+
+### Payload schema (conceptual)
+{
+  documents: [...],
+  cardType: auto | flashcard | sequence | vocab,
+  cardCount: auto | number,
+  language: auto | language label
+}
+
+### Output normalisation
+The UI:
+- accepts messy model output
+- normalises legacy array responses
+- supports cards or sequences
+- preserves metadata when present
+
+### Where it runs
+Web:
+- Netlify serverless function returns JSON
+
+Electron:
+- Renderer calls window.electronAPI.generateDeck(payload)
+- IPC to main process
+
+### Distractor generation
+- Uses cached distractors when available
+- Otherwise generates online and caches results
+- Pre-generation phase batches distractors to reduce UI stalls
+
+---
+
+## Authentication
+
+### Web
+- Auth0 SPA redirect flow
+- Config from meta tags
+- Tokens stored in web storage
+
+### Electron
+- Dedicated login window
+- Local callback server
+- Token exchange in main process
+- Renderer receives { user, token } via IPC
+
+### Guest mode
+- Persistent (localStorage) or session-only
+- No auth required
+
+---
+
+## Sync
+
+Sync reconciles:
+- decks
+- knowledge states
+- exam plans
+- settings
+
+Rules:
+- Newest lastModified wins
+- Decks reloaded post-sync
+- Knowledge states normalised before persistence
+
+---
+
+## Analytics & telemetry
+
+Two layers:
+- Interaction logs (per-study event)
+- Aggregated analytics blobs in appData
+
+analyticsQueue stores failed flush payloads for retry.
+Flush-on-unload behaviour is used where possible.
+
+---
+
+## Auto-updates (Electron)
+
+Uses:
+- electron-forge
+- electron-updater
+- GitHub publisher (often prereleases)
+
+Renderer can:
+- request update checks
+- receive status events
+- trigger quit-and-install
+
+---
+
+## Build & run
+
+### Desktop (Electron)
+
+Prereqs:
+- Node.js (LTS)
+- npm
+
+Install:
+npm install
+
+Run:
+npm run start
+
+Package:
+npm run make
+
+---
+
+## Web
+
+Static frontend plus serverless functions.
+Offline works without functions; AI does not.
+
+Functions expected at:
+ /.netlify/functions/...
+
+---
+
+## Environment variables
+
+Electron:
+- loaded from .env.local
+- packaged as extra resources
+
+Common:
+- ELECTRON_AUTH0_DOMAIN
+- ELECTRON_AUTH0_CLIENT_ID
+- ELECTRON_AUTH0_AUDIENCE
+
+AI:
+- provider keys required
+- do not commit real keys unless you enjoy pain
+
+Use .env.example for documentation.
+
+---
+
+## Security & privacy notes
+
+- Offline-first: data lives locally in IndexedDB
+- Auth tokens stored in web storage; XSS is catastrophic
+- AI requires sending content to external models
+- Electron bridge limits renderer access
+
+Privacy-first users should use guest mode and disable AI.
+
+---
+
+## Debugging
+
+Enable dev logging to inspect:
+- FSRS computations
+- Cortex scoring
+- Sync decisions
+- AI normalisation output
+
+Common failures:
+- IndexedDB key-path errors
+- AI response shape drift
+- Web vs Electron divergence at IPC / API boundaries
 
 ## License
 
-This project is licensed under the GPL-3.0 License; see the [LICENSE](LICENSE) file for details. GPL-3.0 requires derivative works to remain GPL-licensed.
+This repo is licensed under GPL-3.0. For more, see [LICENSE](LICENSE) for more details.
