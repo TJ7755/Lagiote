@@ -2,6 +2,10 @@
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
 
 const isElectron = typeof window.electronAPI !== 'undefined';
+const authApi = window.authSession || (window.lagiote && window.lagiote.authSession) || null;
+const learnModeAdapterFactory = window.createLearnModeAdapter || null;
+const reviewModeAdapterFactory = window.createReviewModeAdapter || null;
+const sequenceModeAdapterFactory = window.createSequenceModeAdapter || null;
 let toastQueue = [];
 let currentEditingPlanId = null;
 let dailyPriorityQueue = [];
@@ -63,6 +67,69 @@ let studyState = {
     pendingMCQToken: 0,
     pendingMCQCardId: null
 };
+
+function getStoredSessionRaw() {
+    if (authApi && typeof authApi.getStoredSessionRaw === 'function') {
+        return authApi.getStoredSessionRaw();
+    }
+    return localStorage.getItem('auth0Session');
+}
+
+function getStoredSession() {
+    if (authApi && typeof authApi.getStoredSession === 'function') {
+        return authApi.getStoredSession();
+    }
+    const raw = getStoredSessionRaw();
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+}
+
+function getAuthTokenFromSession(session) {
+    if (authApi && typeof authApi.getAccessToken === 'function') {
+        return authApi.getAccessToken(session);
+    }
+    if (!session || typeof session !== 'object') return null;
+    return session.accessToken || session.token || session.access_token || session.id_token || session.idToken || null;
+}
+
+function saveAuthSession(session) {
+    if (authApi && typeof authApi.saveSession === 'function') {
+        authApi.saveSession(session);
+        return;
+    }
+    localStorage.setItem('auth0Session', JSON.stringify(session));
+}
+
+function clearAuthSession() {
+    if (authApi && typeof authApi.clearSession === 'function') {
+        authApi.clearSession();
+        return;
+    }
+    localStorage.removeItem('auth0Session');
+}
+
+function getGuestIdFromSession() {
+    if (authApi && typeof authApi.getOrCreateGuestID === 'function') {
+        return authApi.getOrCreateGuestID();
+    }
+    let guestId = localStorage.getItem('guestID');
+    if (!guestId) {
+        guestId = crypto.randomUUID();
+        localStorage.setItem('guestID', guestId);
+    }
+    return guestId;
+}
+
+function isGuestModeEnabled() {
+    if (authApi && typeof authApi.isGuestMode === 'function') {
+        return authApi.isGuestMode();
+    }
+    return localStorage.getItem('guestMode') === 'true' || sessionStorage.getItem('guestMode') === 'true';
+}
 
 function fallbackCoerceFsrsNumber(value, fallback = 0) {
     const coerced = Number(value);
@@ -549,14 +616,10 @@ class AnalyticsManager {
             'Content-Type': 'application/json'
         };
 
-        const savedSession = localStorage.getItem('auth0Session');
-        if (savedSession) {
-            try {
-                const session = JSON.parse(savedSession);
-                headers['Authorization'] = `Bearer ${session.access_token}`;
-            } catch (e) {
-                console.error('Failed to parse auth session for analytics');
-            }
+        const session = getStoredSession();
+        const token = getAuthTokenFromSession(session);
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
         } else {
             // Guest user
             const guestId = localStorage.getItem('guestId') || `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -1027,70 +1090,14 @@ window.onload = async function () {
     // Handle Auth0 callback on web (if code/state in URL)
     if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
         console.log('Detected Auth0 callback in web environment');
-        try {
-            console.log('Starting Auth0 callback processing...');
-
-            // Load Auth0 SDK if not already loaded
-            if (!window.auth0) {
-                console.log('Loading Auth0 SDK...');
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
-                    script.onload = () => {
-                        console.log('Auth0 SDK loaded successfully');
-                        resolve();
-                    };
-                    script.onerror = (err) => {
-                        console.error('Failed to load Auth0 SDK:', err);
-                        reject(err);
-                    };
-                    document.head.appendChild(script);
-                });
+        if (authApi && typeof authApi.handleWebRedirect === 'function') {
+            try {
+                await authApi.handleWebRedirect({ loadScript: window.loadCDNScript, save: saveAuthSession });
+            } catch (error) {
+                console.error('Auth callback error:', error);
+                console.error('Error stack:', error.stack);
+                alert('Sign in failed: ' + error.message + '. Please check the console for details.');
             }
-
-            const auth0Domain = 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-            const auth0ClientId = 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-            console.log('Creating Auth0 client...');
-            const auth0Client = await auth0.createAuth0Client({
-                domain: auth0Domain,
-                clientId: auth0ClientId,
-                authorizationParams: {
-                    redirect_uri: window.location.origin + '/',
-                    audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
-                    scope: 'openid profile email'
-                }
-            });
-
-            console.log('Handling redirect callback...');
-            await auth0Client.handleRedirectCallback();
-
-            console.log('Getting user info...');
-            const user = await auth0Client.getUser();
-            console.log('User:', user);
-
-            console.log('Getting token...');
-            const token = await auth0Client.getTokenSilently();
-            console.log('Token obtained');
-
-            // Store auth session
-            const authResult = {
-                user: user,
-                access_token: token,
-                id_token: token
-            };
-            localStorage.setItem('auth0Session', JSON.stringify(authResult));
-            console.log('Auth session saved to localStorage');
-
-            // Clean up URL
-            window.history.replaceState({}, document.title, '/');
-            console.log('URL cleaned');
-
-            console.log('Web Auth0 login successful:', user.email);
-        } catch (error) {
-            console.error('Auth callback error:', error);
-            console.error('Error stack:', error.stack);
-            alert('Sign in failed: ' + error.message + '. Please check the console for details.');
         }
     }
 
@@ -1105,8 +1112,8 @@ window.onload = async function () {
         runSmartCoachChecks('dashboardLoad');
     };
 
-    const isRememberedGuest = localStorage.getItem('guestMode') === 'true';
-    const isSessionGuest = sessionStorage.getItem('guestMode') === 'true';
+    const isRememberedGuest = isGuestModeEnabled();
+    const isSessionGuest = isRememberedGuest;
 
     if (isRememberedGuest || isSessionGuest) {
         console.log('Continuing as guest.');
@@ -1121,17 +1128,16 @@ window.onload = async function () {
     }
 
     // Check for existing Auth0 session
-    const savedSession = localStorage.getItem('auth0Session');
+    const savedSession = getStoredSession();
     if (savedSession) {
         try {
-            const session = JSON.parse(savedSession);
             console.log('Found saved session, loading user data...');
-            await updateUIAfterLogin(session.user);
+            await updateUIAfterLogin(savedSession.user);
             // loadUserDataAndSync is called inside updateUIAfterLogin, no need to call again
             return;
         } catch (e) {
             console.error('Invalid session data:', e);
-            localStorage.removeItem('auth0Session');
+            clearAuthSession();
         }
     }
 
@@ -1139,6 +1145,11 @@ window.onload = async function () {
     console.log('No active session. Continuing as guest.');
     await handleOfflineOrGuest();
 };
+
+registerPracticeTestModeAdapter();
+registerLearnModeAdapter();
+registerReviewModeAdapter();
+registerSequenceModeAdapter();
 
 function handleGuestToUserTransition() {
     console.log('handleGuestToUserTransition called; migration not implemented yet.');
@@ -2280,156 +2291,78 @@ function setupEventListeners() {
     const authSignupBtn = document.getElementById('authSignupBtn');
     const authLoginBtn = document.getElementById('authLoginBtn');
 
+    const runAuthFlow = async (screenHint) => {
+        if (authApi && typeof authApi.startAuthFlow === 'function') {
+            const result = await authApi.startAuthFlow({ screenHint, loadScript: window.loadCDNScript });
+            if (result && result.user) {
+                saveAuthSession(result);
+                await updateUIAfterLogin(result.user);
+            }
+            return;
+        }
+
+        if (window.electronAPI && window.electronAPI.openLoginWindow) {
+            const authResult = await window.electronAPI.openLoginWindow();
+            if (authResult && authResult.user) {
+                saveAuthSession(authResult);
+                await updateUIAfterLogin(authResult.user);
+            }
+            return;
+        }
+
+        const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
+        const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+
+        if (!window.auth0) {
+            showToast('Loading authentication...', 'info');
+            await loadCDNScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
+        }
+
+        const auth0Client = await auth0.createAuth0Client({
+            domain: auth0Domain,
+            clientId: auth0ClientId,
+            authorizationParams: {
+                redirect_uri: window.location.origin + '/',
+                audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
+                scope: 'openid profile email',
+                ...(screenHint ? { screen_hint: screenHint } : {})
+            }
+        });
+
+        await auth0Client.loginWithRedirect();
+    };
+
     authSignupBtn?.addEventListener('click', async () => {
         console.log('Opening Auth0 signup window...');
 
-        if (window.electronAPI && window.electronAPI.openLoginWindow) {
-            try {
-                // Auth0 login window handles both signup and login
-                const authResult = await window.electronAPI.openLoginWindow();
-                if (authResult && authResult.user) {
-                    console.log('Signup/Login successful:', authResult.user);
-                    // Save session
-                    localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                    // Update UI - this will transition to dashboard
-                    await updateUIAfterLogin(authResult.user);
-
-                }
-            } catch (error) {
-                console.error('Signup error:', error);
-                const errorMessage = error.message || JSON.stringify(error);
-                showToast(`Signup failed: ${errorMessage}`, 'error');
-            }
-        } else {
-            // Web environment
-            try {
-                const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-                const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-                if (!window.auth0) {
-                    showToast('Loading authentication...', 'info');
-                    await loadCDNScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
-                }
-
-                const auth0Client = await auth0.createAuth0Client({
-                    domain: auth0Domain,
-                    clientId: auth0ClientId,
-                    authorizationParams: {
-                        redirect_uri: window.location.origin + '/',
-                        audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
-                        scope: 'openid profile email',
-                        screen_hint: 'signup'
-                    }
-                });
-
-                await auth0Client.loginWithRedirect();
-            } catch (error) {
-                console.error('Web auth error:', error);
-                showToast('Authentication failed. Please try again.', 'error');
-            }
+        try {
+            await runAuthFlow('signup');
+        } catch (error) {
+            console.error('Signup error:', error);
+            const errorMessage = error.message || JSON.stringify(error);
+            showToast(`Signup failed: ${errorMessage}`, 'error');
         }
     });
     authLoginBtn?.addEventListener('click', async () => {
         console.log('Opening Auth0 login window...');
-
-        if (window.electronAPI && window.electronAPI.openLoginWindow) {
-            try {
-                const authResult = await window.electronAPI.openLoginWindow();
-                if (authResult && authResult.user) {
-                    console.log('Login successful:', authResult.user);
-                    // Save session
-                    localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                    // Update UI - this will transition to dashboard
-                    await updateUIAfterLogin(authResult.user);
-
-                }
-            } catch (error) {
-                console.error('Login error:', error);
-                const errorMessage = error.message || JSON.stringify(error);
-                showToast(`Login failed: ${errorMessage}`, 'error');
-            }
-        } else {
-            // Web environment
-            try {
-                const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-                const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-                if (!window.auth0) {
-                    showToast('Loading authentication...', 'info');
-                    await loadCDNScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
-                }
-
-                const auth0Client = await auth0.createAuth0Client({
-                    domain: auth0Domain,
-                    clientId: auth0ClientId,
-                    authorizationParams: {
-                        redirect_uri: window.location.origin + '/',
-                        audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
-                        scope: 'openid profile email'
-                    }
-                });
-
-                await auth0Client.loginWithRedirect();
-            } catch (error) {
-                console.error('Web auth error:', error);
-                showToast('Authentication failed. Please try again.', 'error');
-            }
+        try {
+            await runAuthFlow();
+        } catch (error) {
+            console.error('Login error:', error);
+            const errorMessage = error.message || JSON.stringify(error);
+            showToast(`Login failed: ${errorMessage}`, 'error');
         }
     });
     // Guest Signup Button in Header
     document.getElementById('guestSignupBtn')?.addEventListener('click', async () => {
         console.log('Opening Auth0 signup window from header...');
 
-        // Check if we're in Electron or web
-        if (window.electronAPI && window.electronAPI.openLoginWindow) {
-            // Electron environment - use Electron auth window
-            try {
-                const authResult = await window.electronAPI.openLoginWindow();
-                if (authResult && authResult.user) {
-                    console.log('Signup/Login successful:', authResult.user);
-                    localStorage.setItem('auth0Session', JSON.stringify(authResult));
-                    // Update UI - this will transition to dashboard
-                    await updateUIAfterLogin(authResult.user);
-
-                }
-            } catch (error) {
-                console.error('Signup error:', error);
-                const errorMessage = error.message || JSON.stringify(error);
-                showToast(`Signup failed: ${errorMessage}`, 'error');
-            }
-        } else {
-            // Web environment - use Auth0 web SDK
-            try {
-                // Load Auth0 config from environment or meta tags
-                const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-                const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-
-                if (!window.auth0) {
-                    showToast('Loading authentication...', 'info');
-                    // Dynamically load Auth0 SDK
-                    await new Promise((resolve, reject) => {
-                        const script = document.createElement('script');
-                        script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
-                        script.onload = resolve;
-                        script.onerror = reject;
-                        document.head.appendChild(script);
-                    });
-                }
-                const auth0Client = await auth0.createAuth0Client({
-                    domain: auth0Domain,
-                    clientId: auth0ClientId,
-                    authorizationParams: {
-                        redirect_uri: window.location.origin + '/',
-                        audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
-                        scope: 'openid profile email'
-                    }
-                });
-
-                await auth0Client.loginWithRedirect();
-            } catch (error) {
-                console.error('Web auth error:', error);
-                showToast('Authentication failed. Please try again.', 'error');
-            }
+        try {
+            await runAuthFlow('signup');
+        } catch (error) {
+            console.error('Signup error:', error);
+            const errorMessage = error.message || JSON.stringify(error);
+            showToast(`Signup failed: ${errorMessage}`, 'error');
         }
     });
 
@@ -2725,7 +2658,7 @@ function setupEventListeners() {
         // Ctrl/Cmd + S: Sync
         if (isMeta && e.key === 's') {
             e.preventDefault();
-            if (isOnline && localStorage.getItem('auth0Session')) {
+            if (isOnline && getStoredSession()) {
                 loadUserDataAndSync();
             }
             console.log('[Shortcut] Sync triggered');
@@ -3882,11 +3815,8 @@ async function deleteCardFromDetail(deckId, cardIndex) {
         try {
             deck.cards.splice(cardIndex, 1);
             await saveDataToDB('decks', deck);
-            if (isOnline) {
-                const auth0Session = localStorage.getItem('auth0Session');
-                if (auth0Session) {
-                    await loadUserDataAndSync();
-                }
+            if (isOnline && getStoredSession()) {
+                await loadUserDataAndSync();
             }
             showDeckDetail(deckId);
             updateDashboard();
@@ -4071,8 +4001,7 @@ function deleteDeck(deckId) {
             showToast(`Deck "${deckName}" deleted.`, 'success');
 
             // Sync if online and authenticated (check auth0Session instead of userToken)
-            const auth0Session = localStorage.getItem('auth0Session');
-            if (isOnline && auth0Session) {
+            if (isOnline && getStoredSession()) {
                 console.log('Syncing after deck deletion');
                 await loadUserDataAndSync();
             }
@@ -4760,20 +4689,7 @@ function configureStudy(mode, deckId) {
     currentDeckId = deckId || currentViewingDeckId;
     if (!currentDeckId) return;
 
-    if (mode === 'learn') {
-        const deck = decks[currentDeckId];
-        // If exam date is not set, or user holds Shift (power user feature?), open modal
-        // For now, just check if exam date is set.
-        if (!deck.settings || !deck.settings.examDate) {
-            openLearnModeSetupModal();
-        } else {
-            startLearnMode(currentDeckId);
-        }
-    } else if (mode === 'review') {
-        startReviewMode(currentDeckId);
-    } else if (mode === 'spaced') {
-        startSpacedLearning(currentDeckId);
-    }
+    startMode(mode, currentDeckId);
 }
 
 async function startLearnMode(deckId) {
@@ -6376,7 +6292,7 @@ async function logout() {
         });
 
         // Clear local storage first
-        localStorage.removeItem('auth0Session');
+        clearAuthSession();
 
         // Update UI
         document.getElementById('userProfileMenu').classList.add('hidden');
@@ -6394,7 +6310,7 @@ async function logout() {
     } catch (error) {
         console.error('Logout error:', error);
         // Fallback: just clear session and reload
-        localStorage.removeItem('auth0Session');
+        clearAuthSession();
         location.reload();
     }
 }
@@ -7983,7 +7899,7 @@ function closePracticeTestModal() {
     document.getElementById('practiceTestModal').classList.remove('show');
 }
 
-function startPracticeTest() {
+function startPracticeTestInternal() {
     const deckId = practiceTestState.deckId;
     testAccentModule?.refresh();
     const deck = decks[deckId];
@@ -8022,6 +7938,34 @@ function startPracticeTest() {
     document.getElementById('testProgressView').classList.remove('hidden');
     document.getElementById('testCardView').classList.add('hidden');
     document.getElementById('testCompleteView').classList.add('hidden');
+}
+
+function startPracticeTest() {
+    const adapter = window.modeRegistry?.get && window.modeRegistry.get('practice-test');
+    if (adapter && typeof adapter.start === 'function') {
+        return adapter.start();
+    }
+    return startPracticeTestInternal();
+}
+
+function startMode(mode, deckId) {
+    const adapter = window.modeRegistry?.get && window.modeRegistry.get(mode);
+    if (adapter && typeof adapter.start === 'function') {
+        return adapter.start(deckId);
+    }
+
+    const fallback = {
+        'learn': startLearnMode,
+        'review': startReviewMode,
+        'sequence': startSequenceSessionInternal,
+        'practice-test': startPracticeTestInternal,
+        'spaced': startSpacedLearning
+    };
+
+    const fn = fallback[mode];
+    if (typeof fn === 'function') {
+        return fn(deckId);
+    }
 }
 
 function updateTestProgress() {
@@ -8237,6 +8181,78 @@ function restartTest() {
 
 function endTest() {
     transitionView('dashboard', false, null, false);
+}
+
+function registerPracticeTestModeAdapter() {
+    const adapter = {
+        init: openPracticeTestModal,
+        start: startPracticeTestInternal,
+        showNext: showNextTestQuestion,
+        markCorrect: markTestCorrect,
+        markIncorrect: markTestIncorrect,
+        finish: finishTest,
+        teardown: endTest,
+        getState: () => ({ ...practiceTestState })
+    };
+
+    window.practiceTestController = adapter;
+    if (window.modeRegistry && typeof window.modeRegistry.register === 'function') {
+        window.modeRegistry.register('practice-test', adapter);
+    }
+}
+
+function registerLearnModeAdapter() {
+    const factory = learnModeAdapterFactory || (window.lagiote && window.lagiote.createLearnModeAdapter);
+    if (!factory) return;
+    const adapter = factory({
+        startLearnMode,
+        showNextCard,
+        markAnswerCorrect,
+        markAnswerIncorrect,
+        endSession,
+        getStudyState: () => ({ ...studyState })
+    });
+    if (!adapter) return;
+    window.learnModeController = adapter;
+    if (window.modeRegistry && typeof window.modeRegistry.register === 'function') {
+        window.modeRegistry.register('learn', adapter);
+    }
+}
+
+function registerReviewModeAdapter() {
+    const factory = reviewModeAdapterFactory || (window.lagiote && window.lagiote.createReviewModeAdapter);
+    if (!factory) return;
+    const adapter = factory({
+        startReviewMode,
+        showNextCard,
+        markAnswerCorrect,
+        markAnswerIncorrect,
+        endSession,
+        getStudyState: () => ({ ...studyState })
+    });
+    if (!adapter) return;
+    window.reviewModeController = adapter;
+    if (window.modeRegistry && typeof window.modeRegistry.register === 'function') {
+        window.modeRegistry.register('review', adapter);
+    }
+}
+
+function registerSequenceModeAdapter() {
+    const factory = sequenceModeAdapterFactory || (window.lagiote && window.lagiote.createSequenceModeAdapter);
+    if (!factory) return;
+    const adapter = factory({
+        startSequenceSession: startSequenceSessionInternal,
+        showNextCard,
+        markAnswerCorrect,
+        markAnswerIncorrect,
+        endSession,
+        getStudyState: () => ({ ...studyState })
+    });
+    if (!adapter) return;
+    window.sequenceModeController = adapter;
+    if (window.modeRegistry && typeof window.modeRegistry.register === 'function') {
+        window.modeRegistry.register('sequence', adapter);
+    }
 }
 
 async function updateStreak() {
@@ -8660,7 +8676,7 @@ async function processDeckContent(deck) {
     console.log("Deck content processed:", deck);
 }
 
-async function startSequenceSession(deckId) {
+async function startSequenceSessionInternal(deckId) {
     currentMode = 'sequence';
     currentDeckId = deckId;
     const deck = decks[deckId];
@@ -8735,6 +8751,10 @@ async function startSequenceSession(deckId) {
     } else {
         moveToNextSequencePhase();
     }
+}
+
+async function startSequenceSession(deckId) {
+    return startMode('sequence', deckId);
 }
 
 function selectOptimalQuestionType(card, deckOverride = null, modeOverride = currentMode) {
@@ -8856,7 +8876,7 @@ async function generateAndDisplayMCQ(correctCard) {
 
                 if (response.status === 401) {
                     console.warn("[MCQ] Token expired, attempting to refresh");
-                    if (localStorage.getItem('auth0Session')) {
+                    if (getStoredSession()) {
                         await loadUserDataAndSync();
                     }
                     throw new Error("Token expired, please try again");
@@ -9394,7 +9414,12 @@ async function processAllDocuments() {
             language: selectedLanguage
         };
 
-        if (isElectron) {
+        const adapterGenerateDeck = typeof window.generateDeckAdapter === 'function' ? window.generateDeckAdapter : null;
+
+        if (adapterGenerateDeck) {
+            console.log('[AI Generation] Using platform adapter');
+            apiPromise = adapterGenerateDeck(payload);
+        } else if (isElectron) {
             console.log('[AI Generation] Using Electron IPC');
             apiPromise = window.electronAPI.generateDeck(payload);
         } else {
@@ -10481,12 +10506,7 @@ async function clearLocalData() {
 }
 
 function getOrCreateGuestID() {
-    let guestId = localStorage.getItem('guestID');
-    if (!guestId) {
-        guestId = crypto.randomUUID();
-        localStorage.setItem('guestID', guestId);
-    }
-    return guestId;
+    return getGuestIdFromSession();
 }
 
 async function loadUserDataAndSync() {
@@ -10497,7 +10517,7 @@ async function loadUserDataAndSync() {
     }
 
     // Check for Auth0 session OR Guest Mode
-    const savedSession = localStorage.getItem('auth0Session');
+    const savedSession = getStoredSession();
     const isGuest = !savedSession;
 
     if (isGuest) {
@@ -10536,16 +10556,10 @@ async function loadUserDataAndSync() {
         let guestId = null;
 
         if (savedSession) {
-            try {
-                const session = JSON.parse(savedSession);
-                // Fix: Support both Electron auth (accessToken/token) and web auth (access_token/id_token)
-                token = session.accessToken || session.token || session.access_token || session.id_token;
-                console.log('Auth session found for sync. Token present:', !!token);
-                if (!token) {
-                    console.warn('Session structure:', Object.keys(session));
-                }
-            } catch (e) {
-                console.error('Error parsing auth session for sync:', e);
+            token = getAuthTokenFromSession(savedSession);
+            console.log('Auth session found for sync. Token present:', !!token);
+            if (!token && savedSession && typeof savedSession === 'object') {
+                console.warn('Session structure:', Object.keys(savedSession));
             }
         } else {
             guestId = getOrCreateGuestID();

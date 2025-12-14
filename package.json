@@ -12,7 +12,12 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "make": "electron-forge make"
+    "make": "electron-forge make",
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "preview:web": "vite preview",
+    "dev:electron": "VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "smoke:web": "npm run build:web && node tests/smoke.build.mjs"
   },
   "config": {},
   "keywords": [],
@@ -27,7 +32,8 @@
     "@electron-forge/plugin-fuses": "^7.10.2",
     "@electron-forge/publisher-github": "^7.10.2",
     "@electron/fuses": "^1.8.0",
-    "electron": "^38.1.2"
+    "electron": "^38.1.2",
+    "vite": "^7.2.7"
   },
   "dependencies": {
     "@auth0/auth0-spa-js": "^2.9.1",

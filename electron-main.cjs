@@ -70,6 +70,34 @@ const NETLIFY_FUNCTION_URL = `${PROXY_URL}/api/generate`;
 const DISTRACTOR_FUNCTION_URL = `${PROXY_URL}/api/distractors`;
 const AUTOCOMPLETE_FUNCTION_URL = `${PROXY_URL}/api/autocomplete`;
 
+function resolveRendererTargets() {
+  const targets = [];
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL;
+  if (devServerUrl) {
+    targets.push({ type: 'url', value: devServerUrl });
+  }
+
+  const distIndex = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(distIndex)) {
+    targets.push({ type: 'file', value: distIndex });
+  }
+
+  targets.push({ type: 'file', value: path.join(__dirname, 'index.html') });
+  return targets;
+}
+
+function loadRendererFromTargets(win, targets, index = 0) {
+  if (!win || !Array.isArray(targets) || !targets.length) return;
+  const clampedIndex = Math.min(Math.max(index, 0), targets.length - 1);
+  const target = targets[clampedIndex];
+  win.__rendererTargetIndex = clampedIndex;
+  if (target.type === 'url') {
+    win.loadURL(target.value);
+  } else {
+    win.loadFile(target.value);
+  }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -84,14 +112,17 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(__dirname, 'index.html'));
+  const rendererTargets = resolveRendererTargets();
+  loadRendererFromTargets(win, rendererTargets, 0);
 
-  win.webContents.on('did-fail-load', (_, errorCode, errorDesc) => {
-    console.error(`Failed to load page: ${errorCode} - ${errorDesc}`);
-    setTimeout(() => {
-      console.log('Retrying page load...');
-      win.loadFile(path.join(__dirname, 'index.html'));
-    }, 2000);
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDesc, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    const currentIndex = typeof win.__rendererTargetIndex === 'number' ? win.__rendererTargetIndex : 0;
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < rendererTargets.length) {
+      console.warn(`Renderer load failed (${errorCode}: ${errorDesc}) for ${validatedURL || 'unknown URL'}. Falling back to next target.`);
+      loadRendererFromTargets(win, rendererTargets, nextIndex);
+    }
   });
 
   win.webContents.on('did-finish-load', () => {

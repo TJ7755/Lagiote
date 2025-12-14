@@ -16,85 +16,10 @@ The accents in the manual editor are a bit off.
     <title>Lagiote Revise</title>
 
 
-    <script>
-
-        if (navigator.onLine) {
-            /*
-            const gtagScript1 = document.createElement('script');
-            gtagScript1.async = true;
-            gtagScript1.src = 'https://www.googletagmanager.com/gtag/js?id=G-LRMNQBEFVD';
-            gtagScript1.onerror = () => console.warn('Failed to load Google Analytics 1');
-            document.head.appendChild(gtagScript1);
-            */
-
-            const gtagScript2 = document.createElement('script');
-            gtagScript2.async = true;
-            gtagScript2.src = 'https://www.googletagmanager.com/gtag/js?id=G-86DQ5HTDV9';
-            gtagScript2.onerror = () => console.warn('Failed to load Google Analytics 2');
-            document.head.appendChild(gtagScript2);
-        }
-    </script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag() { dataLayer.push(arguments); }
-        gtag('js', new Date());
-        gtag('config', 'G-86DQ5HTDV9');
-    </script>
-    <script>
-        (function () {
-            const applyTheme = (isDark) => {
-                const target = document.documentElement;
-                if (isDark) {
-                    target.classList.add('dark-mode');
-                    if (document.body) document.body.classList.add('dark-mode');
-                } else {
-                    target.classList.remove('dark-mode');
-                    if (document.body) document.body.classList.remove('dark-mode');
-                }
-            };
-
-            const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-            applyTheme(systemDark);
-        })();
-    </script>
+    <script type="module" src="./src/platform/web/index-boot.js"></script>
     <script src="./assets/js/pdf.min.js"></script>
     <script src="./assets/js/mammoth.browser.min.js"></script>
     <script src="./assets/js/chart.js"></script>
-
-    <script>
-        function loadCDNScript(src, onload) {
-            if (!navigator.onLine) {
-                console.warn('Offline: Skipping CDN script', src);
-                if (onload) onload();
-                return;
-            }
-            const script = document.createElement('script');
-            script.src = src;
-            script.onerror = () => {
-                console.warn('Failed to load CDN script:', src);
-                if (onload) onload();
-            };
-            if (onload && !src.includes('module')) {
-                script.onload = onload;
-            }
-            document.head.appendChild(script);
-        }
-
-
-        loadCDNScript('https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js', () => {
-            console.log('Sortable.js loaded or skipped');
-        });
-
-
-        if (navigator.onLine) {
-            const transformersScript = document.createElement('script');
-            transformersScript.type = 'module';
-            transformersScript.src = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-            transformersScript.onerror = () => console.warn('Failed to load Transformers library');
-            document.head.appendChild(transformersScript);
-        }
-    </script>
     <script src="./assets/js/sequence-test.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
