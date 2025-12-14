@@ -149,4 +149,4 @@ dist
 AGENTS.md
 tests/cortex.test.mjs
 tests/smoke.build.mjs
-.env.local
+.env.example

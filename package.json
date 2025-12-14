@@ -9,7 +9,7 @@
     "url": "git+https://github.com/TJ7755/Lagiote-revise.git"
   },
   "author": "TJ7755",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "scripts": {
     "start": "electron .",
     "make": "electron-forge make",
