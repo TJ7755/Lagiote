@@ -1,6 +1,8 @@
 # Environment variables
 .env
 .env.*
+*.example
+!.env.example
 
 # OS generated files
 .DS_Store
@@ -142,11 +144,9 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
-*.example
+
+# Local-only files kept out of version control
 AGENTS.md
-GEMINI.md
-repo.md
-BUGS_FIXED.md
-List of Bugs.md
-/tests
-check-syntax.js
+tests/cortex.test.mjs
+tests/smoke.build.mjs
+.env.local

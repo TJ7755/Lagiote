@@ -58,6 +58,17 @@ To set up the project locally:
     npm start
     ```
 
+## Environment
+
+Copy `.env.example` to `.env.local` and fill in the values for your setup. The Electron main process loads `.env.local` in development and the file is packaged as an extra resource for desktop builds. Typical keys:
+
+- `PROXY_URL`
+- `ELECTRON_AUTH0_DOMAIN`, `ELECTRON_AUTH0_CLIENT_ID`, `ELECTRON_AUTH0_AUDIENCE`, `ELECTRON_AUTH0_REDIRECT_URI`
+- `GEMINI_API_KEY`
+- `DATABASE_URL`
+
+Keep `.env.local` out of version control.
+
 ## License
 
 This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
