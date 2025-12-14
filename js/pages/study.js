@@ -1,5 +1,6 @@
 import { initDB, getDataFromDB, getDataByIndex, saveDataToDB, DEFAULT_USER_ID } from '../core/db.js';
 import { getQueryParam, calculateIQS } from '../core/utils.js';
+import { ensureDeckAccentMetadata } from '../core/accent-utils.js';
 import { FSRSAlgorithm } from '../core/fsrs.js';
 import Cortex from '../core/cortex.js';
 import keyboardManager from '../core/keyboard.js';
@@ -206,9 +207,17 @@ async function markAnswer(explicitCorrectness) {
 
     const knowledge = ensureKnowledgeForCard(card);
     
+    const context = {
+        deck: studyState.deck,
+        sessionState: {
+            sessionMeanLatency: studyState.sessionMetrics.meanLatency,
+            cardMetrics: new Map()
+        }
+    };
+
     try {
         // Pass explicit feedback to Cortex for inference
-        const updatedState = await Cortex.processReview(card, knowledge, metrics, explicitCorrectness);
+        const updatedState = await Cortex.processReview(card, knowledge, metrics, explicitCorrectness, undefined, context);
         
         // Update local map
         studyState.knowledgeMap.set(card.id, updatedState);
@@ -483,6 +492,7 @@ async function init() {
     
     // Load existing cards
     studyState.cards = deck.cards || [];
+    ensureDeckAccentMetadata(deck);
     
     await loadKnowledge(deckId);
     

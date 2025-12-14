@@ -14,7 +14,7 @@ const os = require('os');
 const auth0Domain = process.env.ELECTRON_AUTH0_DOMAIN;
 const clientId = process.env.ELECTRON_AUTH0_CLIENT_ID;
 const audience = process.env.ELECTRON_AUTH0_AUDIENCE;
-const redirectUri = 'http://localhost/callback';
+let redirectUri = process.env.ELECTRON_AUTH0_REDIRECT_URI || null;
 
 // Storage for tokens (using file-based storage with encryption)
 const tokenStoragePath = path.join(os.homedir(), '.lagiote-auth');
@@ -38,6 +38,18 @@ function generatePKCE() {
 // Store PKCE verifier temporarily (for the duration of the auth flow)
 let currentPKCE = null;
 
+function setRedirectUri(uri) {
+    redirectUri = uri;
+    console.log('[Auth] Redirect URI configured:', redirectUri);
+}
+
+function getRedirectUri() {
+    if (!redirectUri) {
+        throw new Error('Redirect URI not configured. Start the callback server before requesting authentication.');
+    }
+    return redirectUri;
+}
+
 /**
  * Get the Auth0 authentication URL
  * @returns {string} The Auth0 authorize URL with PKCE
@@ -57,7 +69,7 @@ function getAuthenticationURL() {
         client_id: clientId,
         code_challenge: currentPKCE.challenge,
         code_challenge_method: 'S256',
-        redirect_uri: redirectUri
+        redirect_uri: getRedirectUri()
     });
 
     if (audience) {
@@ -66,7 +78,9 @@ function getAuthenticationURL() {
 
     console.log('[Auth] Configured audience:', audience || 'None');
 
-    return `https://${auth0Domain}/authorize?${authParams.toString()}`;
+    const authUrl = `https://${auth0Domain}/authorize?${authParams.toString()}`;
+    console.log('[Auth] Final redirect URI:', getRedirectUri());
+    return authUrl;
 }
 
 /**
@@ -92,7 +106,7 @@ async function loadTokens(callbackURL) {
             client_id: clientId,
             code: query.code,
             code_verifier: currentPKCE.verifier,
-            redirect_uri: redirectUri
+            redirect_uri: getRedirectUri()
         };
 
         const options = {
@@ -264,5 +278,7 @@ module.exports = {
     getProfile,
     loadTokens,
     logout,
-    refreshTokens
+    refreshTokens,
+    setRedirectUri,
+    getRedirectUri
 };

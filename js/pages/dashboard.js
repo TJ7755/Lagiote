@@ -51,6 +51,7 @@ let studyState = {
     sequenceActiveChunkOverride: null,
     sequenceQuestionStartTime: null,
     sequenceTimerInterval: null,
+    preGenerationCountdownInterval: null,
     sequenceForwardQueue: [],
     weakestLinkIteration: 0,
     maxWeakestLinkIterations: 3,
@@ -58,9 +59,82 @@ let studyState = {
     preGeneratedDistractors: new Map(),
     examDate: null,
     targetRetention: 0.8,
-    cortexDebugEnabled: false
+    cortexDebugEnabled: false,
+    pendingMCQToken: 0,
+    pendingMCQCardId: null
 };
-const DEFAULT_DECK_SETTINGS = { learnMode: 'flashcard', reviewOrder: 'random', cardsPerRound: 10, maxBuckets: 4, caseSensitive: false, punctuation: false, retypeIncorrect: true, feedbackStyle: 'simple', forgivingAutomarking: true };
+
+function fallbackCoerceFsrsNumber(value, fallback = 0) {
+    const coerced = Number(value);
+    return Number.isFinite(coerced) ? coerced : fallback;
+}
+
+function fallbackParseFsrsDate(value) {
+    if (!value) return null;
+    const candidate = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(candidate.getTime()) ? null : candidate;
+}
+
+function fallbackNormalizeFsrsState(fsrs) {
+    if (!fsrs || typeof fsrs !== 'object') return null;
+    return {
+        state: fallbackCoerceFsrsNumber(fsrs.state),
+        stability: fallbackCoerceFsrsNumber(fsrs.stability),
+        difficulty: fallbackCoerceFsrsNumber(fsrs.difficulty),
+        reps: fallbackCoerceFsrsNumber(fsrs.reps),
+        lapses: fallbackCoerceFsrsNumber(fsrs.lapses),
+        due: fallbackParseFsrsDate(fsrs.due),
+        last_review: fallbackParseFsrsDate(fsrs.last_review)
+    };
+}
+
+function fallbackIsFsrsReviewedState(fsrs) {
+    if (!fsrs || typeof fsrs !== 'object') return false;
+    const stability = fallbackCoerceFsrsNumber(fsrs.stability);
+    const reps = fallbackCoerceFsrsNumber(fsrs.reps);
+    const lastReview = fallbackParseFsrsDate(fsrs.last_review);
+    return stability > 0 && reps > 0 && Boolean(lastReview);
+}
+
+function fallbackIsKnowledgeStateReviewed(state) {
+    if (!state) return false;
+    return fallbackIsFsrsReviewedState(state.fsrs);
+}
+
+const fallbackKnowledgeStateUtils = {
+    coerceFsrsNumber: fallbackCoerceFsrsNumber,
+    parseFsrsDate: fallbackParseFsrsDate,
+    normalizeFsrsState: fallbackNormalizeFsrsState,
+    isFsrsReviewedState: fallbackIsFsrsReviewedState,
+    isKnowledgeStateReviewed: fallbackIsKnowledgeStateReviewed
+};
+
+let cachedKnowledgeStateUtils = null;
+function getKnowledgeStateUtils() {
+    const globalUtils = (typeof window !== 'undefined' && window.lagiote && window.lagiote.knowledgeStateUtils)
+        ? window.lagiote.knowledgeStateUtils
+        : null;
+    if (globalUtils) {
+        cachedKnowledgeStateUtils = globalUtils;
+        return globalUtils;
+    }
+    if (!cachedKnowledgeStateUtils) {
+        cachedKnowledgeStateUtils = fallbackKnowledgeStateUtils;
+    }
+    return cachedKnowledgeStateUtils;
+}
+const DEFAULT_DECK_SETTINGS = {
+    learnMode: 'flashcard',
+    reviewOrder: 'random',
+    cardsPerRound: 10,
+    maxBuckets: 4,
+    caseSensitive: false,
+    punctuation: false,
+    retypeIncorrect: true,
+    learnHorizonDays: 0,
+    feedbackStyle: 'simple',
+    forgivingAutomarking: true
+};
 const CURRENT_ANALYSIS_VERSION = 2;
 const smartCoachMessages = {
     greetings: [
@@ -137,6 +211,29 @@ function isElementVisible(element) {
     if (!element) return false;
     if (keyboardManager?.isVisible) return keyboardManager.isVisible(element);
     return element.offsetParent !== null && !element.classList.contains('hidden');
+}
+
+function idbRequestToPromise(request) {
+    return new Promise((resolve, reject) => {
+        if (!request) {
+            reject(new Error('IndexedDB request missing'));
+            return;
+        }
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+    });
+}
+
+function transactionCompletePromise(transaction) {
+    return new Promise((resolve, reject) => {
+        if (!transaction) {
+            reject(new Error('IndexedDB transaction missing'));
+            return;
+        }
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction error'));
+        transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
+    });
 }
 
 function syncDeckSelectionHighlight() {
@@ -395,11 +492,13 @@ class AnalyticsManager {
             const store = transaction.objectStore('analyticsQueue');
 
             // Store the entire queue
-            await store.put({
+            const request = store.put({
                 id: 'pending_events',
                 events: this.eventQueue,
                 lastUpdated: new Date().toISOString()
             });
+            await idbRequestToPromise(request);
+            await transactionCompletePromise(transaction);
         } catch (error) {
             console.error('Failed to persist analytics queue:', error);
         }
@@ -468,32 +567,27 @@ class AnalyticsManager {
         }
 
         try {
+            const payload = JSON.stringify({ events: eventsToSend });
             const fetchOptions = {
                 method: 'POST',
                 headers: headers,
-                body: JSON.stringify({ events: eventsToSend })
+                body: payload
             };
-
             if (sync) {
-                // Use sendBeacon for synchronous unload
-                const blob = new Blob([JSON.stringify({ events: eventsToSend })], { type: 'application/json' });
-                navigator.sendBeacon(endpoint, blob);
-            } else {
-                const response = await fetch(endpoint, fetchOptions);
+                fetchOptions.keepalive = true;
+            }
 
-                if (!response.ok) {
-                    console.warn(`Analytics batch failed: ${response.status}`);
-                    if (response.status === 401) {
-                        console.error("Analytics authentication failed. Logging out.");
-                        logout();
-                    } else {
-                        // Re-queue events on other failures
-                        this.eventQueue.unshift(...eventsToSend);
-                    }
-                } else {
-                    // Clear persisted queue on success
-                    await this.clearPersistedQueue();
+            const response = await fetch(endpoint, fetchOptions);
+            if (!response.ok) {
+                console.warn(`Analytics batch failed: ${response.status}`);
+                if (!sync && response.status === 401) {
+                    console.error("Analytics authentication failed. Logging out.");
+                    logout();
                 }
+                this.eventQueue.unshift(...eventsToSend);
+                await this.persistQueue();
+            } else {
+                await this.clearPersistedQueue();
             }
 
             this.lastFlushTime = new Date();
@@ -511,7 +605,9 @@ class AnalyticsManager {
         try {
             const transaction = db.transaction(['analyticsQueue'], 'readwrite');
             const store = transaction.objectStore('analyticsQueue');
-            await store.delete('pending_events');
+            const request = store.delete('pending_events');
+            await idbRequestToPromise(request);
+            await transactionCompletePromise(transaction);
         } catch (error) {
             console.error('Failed to clear persisted analytics queue:', error);
         }
@@ -692,52 +788,33 @@ function getActiveCard() {
     return studyState.roundCards ? studyState.roundCards[studyState.currentCardIndex] : null;
 }
 
-function getLearnTargetDate(deck, now = new Date()) {
-    // 1. Priority: Exam Date (No 14-day clamp, strict cramming target)
-    const examDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : null;
-    if (examDate && !isNaN(examDate.getTime()) && examDate > now) {
-        return examDate;
-    }
+function isCardMasteredForLearn(knowledgeState, deck, targetDate) {
+    if (!knowledgeState || !knowledgeState.fsrs || !targetDate) return false;
 
-    // 2. Priority: User Configured Horizon
-    const learnHorizonDays = Number(deck?.settings?.learnHorizonDays || 0);
-    if (learnHorizonDays > 0) {
-        const target = new Date(now);
-        target.setTime(target.getTime() + learnHorizonDays * 24 * 60 * 60 * 1000);
-        return target;
-    }
-
-    // 3. Default: 3 Days (Short-term focus)
-    const target = new Date(now);
-    target.setTime(target.getTime() + 3 * 24 * 60 * 60 * 1000);
-    return target;
-}
-
-function isCardMasteredForLearn(knowledgeState, deck, now = new Date()) {
-    if (!knowledgeState || !knowledgeState.fsrs) return false;
-
-    // 1. Calculate P_exam (Retention at target date)
-    const targetDate = getLearnTargetDate(deck, now);
-    // Ensure calculateRetentionAtDate is available (it is defined later in this file)
-    const retention = typeof calculateRetentionAtDate === 'function' 
-        ? calculateRetentionAtDate(knowledgeState, targetDate) 
+    const retention = typeof calculateRetentionAtDate === 'function'
+        ? calculateRetentionAtDate(knowledgeState, targetDate)
         : 0;
-    
     if (typeof retention !== 'number') return false;
 
-    // 2. Get Uncertainty (Sigma)
-    // Default to high uncertainty (0.3) if no evidence exists, forcing more reviews.
     const sigma = typeof knowledgeState.evidenceSigma === 'number' ? knowledgeState.evidenceSigma : 0.3;
-
-    // 3. Mastery Threshold
-    const targetRetention = deck?.settings?.targetRetention || 0.9;
-    
-    // 4. Mastery Condition: Lower Confidence Bound >= Target
-    // We want to be 84% confident (1 sigma) that the true retention is above target.
-    // Condition: Estimated_R - (1.0 * Sigma) >= Target_R
-    const k = 1.0; // Confidence margin
-    
+    const targetRetention = deck?.settings?.targetRetention ?? 0.9;
+    const k = 1.0;
     return (retention - (k * sigma)) >= targetRetention;
+}
+
+function logLearnTargetSource(deck, now, targetDate) {
+    if (!studyState.cortexDebugEnabled || !deck || !targetDate) return;
+    const deckId = deck.id || deck.name || 'unknown';
+    const examDate = deck.settings?.examDate ? new Date(deck.settings.examDate) : null;
+    if (examDate && !isNaN(examDate.getTime()) && examDate > now) {
+        console.log(`[LearnTarget] deck=${deckId} using examDate ${examDate.toISOString()} -> target ${targetDate.toISOString()}`);
+        return;
+    }
+
+    const horizon = Number(deck.settings?.learnHorizonDays ?? 0);
+    if (horizon > 0) {
+        console.log(`[LearnTarget] deck=${deckId} using learnHorizonDays=${horizon} -> ${targetDate.toISOString()}`);
+    }
 }
 
 async function prepareFsrsCard(card) {
@@ -761,8 +838,8 @@ async function prepareFsrsCard(card) {
 }
 
 
-function mapQualityToFsrsRating(quality) {
-    const ratings = fsrsRatings || { Again: 0, Hard: 1, Good: 2, Easy: 3 };
+function mapQualityToFsrsRating(quality, ratingsOverride = null) {
+    const ratings = ratingsOverride || fsrsRatings || { Again: 0, Hard: 1, Good: 2, Easy: 3 };
     if (quality <= 1) return ratings.Again;
     if (quality === 2) return ratings.Hard;
     if (quality === 3) return ratings.Good;
@@ -770,71 +847,157 @@ function mapQualityToFsrsRating(quality) {
     return ratings.Good;
 }
 
-function createDefaultKnowledgeState(card) {
+function createDefaultKnowledgeState(card = {}, overrides = {}) {
     const nowISO = new Date().toISOString();
-    return {
-        userID: 'default_user',
-        cardID: card.id,
-        masteryScore: 0.5,
-        consecutiveCorrect: 0,
-        stability: 1.0,
-        lastReviewed: nowISO,
-        recallHistory: [],
-        fsrs: card.fsrs || null,
-        lastModified: nowISO
+    const cardIdentifier = overrides.cardID || card.cardID || card.cardId || card.id;
+    if (!cardIdentifier) return null;
+    const record = {
+        userID: overrides.userID || card.userID || 'default_user',
+        cardID: cardIdentifier,
+        deckID: overrides.deckID || card.deckID || card.deckId || card.deck || currentDeckId || null,
+        masteryScore: overrides.masteryScore ?? 0.5,
+        consecutiveCorrect: overrides.consecutiveCorrect ?? 0,
+        stability: overrides.stability ?? card.stability ?? 1.0,
+        lastReviewed: overrides.lastReviewed || card.lastReviewed || nowISO,
+        recallHistory: Array.isArray(overrides.recallHistory)
+            ? overrides.recallHistory
+            : (Array.isArray(card.recallHistory) ? card.recallHistory : []),
+        fsrs: overrides.fsrs || card.fsrs || null,
+        lastModified: overrides.lastModified || nowISO,
+        createdAt: overrides.createdAt || nowISO,
+        updatedAt: overrides.updatedAt || nowISO
     };
+    return prepareKnowledgeRecord(record);
 }
 
-async function applyFsrsReviewUpdate(card, deckId, wasCorrect, interactionLog, iqs = 0.5) {
+async function applyFsrsReviewUpdate(card, deckId, explicitFeedback, interactionLog = {}, iqs = 0.5, options = {}) {
     const deck = decks[deckId];
-    const cardInDeck = deck?.cards.find(c => c.id === card.id) || card;
+    const cardInDeck = deck?.cards?.find(c => c.id === card.id) || card;
     const cortex = await getCortexEngine();
-    
-    // Ensure we have the current knowledge state
-    const state = await getOrCreateKnowledgeState('default_user', card.id, deckId || card.deckId || card.deck);
-    
-    // Map interactionLog to Cortex metrics
+    const fsrsEngine = await getFsrsEngine();
+    const resolvedDeckId = deckId || card.deckId || card.deck || cardInDeck?.deckId || deck?.id || null;
+    const state = await getOrCreateKnowledgeState('default_user', card.id, resolvedDeckId);
+    const questionType = options.questionType || interactionLog?.questionType || 'Flashcard';
+
+    const totalCorrections = (typeof interactionLog?.totalCorrections === 'number')
+        ? interactionLog.totalCorrections
+        : ((typeof interactionLog?.backspaceCount === 'number' ? interactionLog.backspaceCount : 0)
+            + (typeof interactionLog?.deleteCount === 'number' ? interactionLog.deleteCount : 0));
+
     const metrics = {
-        recallLatency: interactionLog?.recallLatency,
-        answerFluency: interactionLog?.answerFluency,
-        totalCorrections: interactionLog?.totalCorrections,
-        attemptCount: interactionLog?.attemptCount,
-        backspaceRate: (interactionLog?.backspaceCount || 0) / 10, // heuristic
-        timeToFirstAction: interactionLog?.timeToFirstKeystroke || interactionLog?.recallLatency,
-        focusLossCount: 0 // Not tracked in interactionLog currently?
+        recallLatency: Number.isFinite(interactionLog?.recallLatency) ? interactionLog.recallLatency : null,
+        answerFluency: Number.isFinite(interactionLog?.answerFluency) ? interactionLog.answerFluency : null,
+        totalCorrections,
+        attemptCount: (typeof interactionLog?.attemptCount === 'number' && interactionLog.attemptCount > 0)
+            ? interactionLog.attemptCount
+            : 1,
+        backspaceRate: typeof interactionLog?.backspaceCount === 'number'
+            ? Math.min(1, Math.max(0, interactionLog.backspaceCount / Math.max(1, interactionLog?.answerLength || 10)))
+            : 0,
+        timeToFirstAction: typeof interactionLog?.timeToFirstKeystroke === 'number'
+            ? interactionLog.timeToFirstKeystroke
+            : (Number.isFinite(interactionLog?.recallLatency) ? interactionLog.recallLatency : null),
+        focusLossCount: typeof interactionLog?.focusLossCount === 'number' ? interactionLog.focusLossCount : 0,
+        questionType,
+        iqs: typeof iqs === 'number' ? iqs : null
     };
 
-    // Delegate to Cortex
-    // This handles Inference -> Rating -> FSRS Update -> Uncertainty
+    const context = {
+        deck,
+        sessionState: studyState.sessionState
+    };
+
     let updatedState;
     try {
-        updatedState = await cortex.processReview(card, state, metrics, wasCorrect);
+        if (typeof options.explicitFsrsRating === 'number') {
+            updatedState = await cortex.processReviewWithRating(
+                card,
+                state,
+                options.explicitFsrsRating,
+                options.nowOverride || null,
+                { metrics },
+                context
+            );
+        } else {
+            updatedState = await cortex.processReview(card, state, metrics, explicitFeedback, getFsrsBaseline(), context);
+        }
     } catch (err) {
-        console.error("Cortex review failed", err);
-        // Fallback or re-throw?
-        return { state }; 
+        console.error('Cortex review failed', err);
+        const fallbackSnapshot = serializeFsrsCard(state.fsrs || state);
+        if (cardInDeck) cardInDeck.fsrs = fallbackSnapshot;
+        card.fsrs = fallbackSnapshot;
+        return {
+            fsrsSnapshot: fallbackSnapshot,
+            rating: null,
+            state,
+            reviewTime: new Date(),
+            questionType
+        };
     }
 
-    const fsrsSnapshot = serializeFsrsCard(updatedState.fsrs);
-    const reviewTimeRaw = updatedState.lastReviewed || new Date();
-    const reviewTime = new Date(reviewTimeRaw);
+    const resolvedFsrsState = updatedState?.fsrs || state.fsrs || updatedState;
+    const fsrsSnapshot = serializeFsrsCard(resolvedFsrsState);
+    const ratingValue = typeof updatedState?.rating === 'number'
+        ? updatedState.rating
+        : (typeof updatedState?.lastRating === 'number' ? updatedState.lastRating : null);
+    const ratings = fsrsEngine.getRatings();
+    const ratingLabel = ratingValue !== null
+        ? Object.keys(ratings).find(key => ratings[key] === ratingValue) || null
+        : null;
+    const masteryScoreRaw = fsrsEngine.calculateRetrievability(resolvedFsrsState, new Date());
+    const masteryScore = Math.max(0, Math.min(1, masteryScoreRaw));
+    const prevConsecutive = Number.isFinite(state?.consecutiveCorrect) ? state.consecutiveCorrect : 0;
+    const consecutiveCorrect = ratingLabel === 'Again' ? 0 : prevConsecutive + 1;
+    const stability = typeof updatedState?.stability === 'number'
+        ? updatedState.stability
+        : (resolvedFsrsState?.stability ?? state?.stability ?? 0);
+    const userId = 'default_user';
+    const knowledgeId = `${userId}:${card.id}`;
+    const lastReviewedIso = updatedState?.lastReviewed
+        || (resolvedFsrsState?.last_review ? new Date(resolvedFsrsState.last_review).toISOString() : new Date().toISOString());
+
+    const normalizedRecord = prepareKnowledgeRecord({
+        ...updatedState,
+        id: knowledgeId,
+        userID: userId,
+        cardID: card.id,
+        deckID: resolvedDeckId,
+        fsrs: fsrsSnapshot,
+        masteryScore,
+        consecutiveCorrect,
+        stability,
+        lastReviewed: lastReviewedIso,
+        questionType,
+        lastModified: new Date().toISOString()
+    });
+
+    let persistedState = null;
+    if (normalizedRecord) {
+        persistedState = await upsertKnowledgeState(normalizedRecord);
+    }
+    const finalState = persistedState || normalizedRecord || {
+        ...state,
+        fsrs: fsrsSnapshot,
+        lastReviewed: lastReviewedIso,
+        stability,
+        masteryScore,
+        consecutiveCorrect
+    };
+
+    if (!studyState.knowledgeStates) studyState.knowledgeStates = new Map();
+    studyState.knowledgeStates.set(card.id, finalState);
 
     if (cardInDeck) cardInDeck.fsrs = fsrsSnapshot;
     card.fsrs = fsrsSnapshot;
 
-    // Persist to DB
-    studyState.knowledgeStates.set(card.id, updatedState);
-    await upsertKnowledgeState(updatedState);
+    const reviewTime = new Date(lastReviewedIso);
 
-    // Return format expected by caller
-    // The caller expects { fsrsSnapshot, rating, state, reviewTime }
-    // Cortex doesn't return 'rating' explicitly in the state, but we can infer it or just mock it.
-    // The legacy code used rating to update evidenceM2, but Cortex now handles sigma directly.
-    return { 
-        fsrsSnapshot, 
-        rating: 0, // Placeholder, as Cortex handles the probabilistic rating internally
-        state: updatedState, 
-        reviewTime 
+    return {
+        fsrsSnapshot,
+        rating: ratingValue,
+        state: finalState,
+        reviewTime,
+        questionType
     };
 }
 
@@ -934,10 +1097,10 @@ window.onload = async function () {
     const handleOfflineOrGuest = async () => {
         console.log('Entering offline/guest mode.');
         await loadSavedData();
+        initializeAccentModules();
         setupEventListeners();
-        document.getElementById('appHeader').classList.remove('hidden');
         document.getElementById('loggedInView').classList.remove('hidden');
-        showView('dashboard', true);
+        transitionView('dashboard', true, null, false);
         updateOnlineStatusUI();
         runSmartCoachChecks('dashboardLoad');
     };
@@ -982,31 +1145,244 @@ function handleGuestToUserTransition() {
 }
 
 const DB_NAME = 'LagioteDB';
-const DB_VERSION = 10;
+const DB_VERSION = 12;
+const STORE_KEY_REQUIREMENTS = {
+    decks: 'id',
+    appData: 'key',
+    examPlans: 'id',
+    analyticsQueue: 'id',
+    concepts: 'conceptID',
+    userKnowledgeState: 'id'
+};
+
+function toIdString(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed || null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+    }
+    return null;
+}
+
+function extractIdFromValue(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'object') {
+        const nested = value.id ?? value._id ?? value.cardID ?? value.cardId ?? value.deckID ?? value.deckId;
+        if (nested !== undefined && nested !== null) {
+            return extractIdFromValue(nested);
+        }
+        if (typeof value.toString === 'function') {
+            const asString = value.toString();
+            if (asString && asString !== '[object Object]') {
+                return toIdString(asString);
+            }
+        }
+        return null;
+    }
+    return toIdString(value);
+}
+
+function splitCompositeKnowledgeId(rawId) {
+    if (typeof rawId !== 'string' || !rawId.includes(':')) {
+        return { userPart: null, cardPart: null };
+    }
+    const [userPart, ...rest] = rawId.split(':');
+    return {
+        userPart: userPart || null,
+        cardPart: rest.length ? (rest.join(':') || null) : null
+    };
+}
+
+function deriveUserIdentifier(data, compositeUserPart) {
+    const candidates = [
+        data?.userID,
+        data?.userId,
+        data?.user_id,
+        data?.user,
+        data?.ownerId,
+        data?.ownerID,
+        data?.owner,
+        data?.uid,
+        data?.profileId,
+        compositeUserPart
+    ];
+    for (const candidate of candidates) {
+        const normalized = extractIdFromValue(candidate);
+        if (normalized) return normalized;
+    }
+    if (data?.user && typeof data.user === 'object') {
+        const nested = extractIdFromValue(data.user);
+        if (nested) return nested;
+    }
+    return 'default_user';
+}
+
+function deriveCardIdentifier(data, compositeCardPart, rawId) {
+    const candidates = [
+        data?.cardID,
+        data?.cardId,
+        data?.card_id,
+        data?.cardKey,
+        data?.cardUUID,
+        data?.cardRef,
+        data?.card,
+        data?.knowledgeCardId,
+        data?.knowledgeCardID,
+        data?.knowledgeID,
+        data?.knowledgeId,
+        compositeCardPart
+    ];
+    for (const candidate of candidates) {
+        const normalized = extractIdFromValue(candidate);
+        if (normalized) return normalized;
+    }
+    if (typeof rawId === 'string' && rawId && !rawId.includes(':')) {
+        const fallback = extractIdFromValue(rawId);
+        if (fallback) return fallback;
+    }
+    return null;
+}
+
+function deriveDeckIdentifier(data) {
+    const candidates = [
+        data?.deckID,
+        data?.deckId,
+        data?.deck_id,
+        data?.deck,
+        data?.collectionId
+    ];
+    for (const candidate of candidates) {
+        const normalized = extractIdFromValue(candidate);
+        if (normalized) return normalized;
+    }
+    if (data?.deck && typeof data.deck === 'object') {
+        return extractIdFromValue(data.deck);
+    }
+    return null;
+}
+
+function ensureIsoString(value, fallback = null) {
+    if (!value) return fallback || null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return fallback || null;
+    }
+    return date.toISOString();
+}
+
+function resolveFsrsSource(data) {
+    if (data?.fsrs) return data.fsrs;
+    if (typeof data?.state === 'number' || typeof data?.stability === 'number' || typeof data?.difficulty === 'number') {
+        const {
+            state,
+            stability,
+            difficulty,
+            reps,
+            lapses,
+            elapsed_days,
+            scheduled_days,
+            due,
+            last_review
+        } = data;
+        const inferredDue = data?.due || data?.nextReview || data?.nextDue || due;
+        const inferredLast = last_review || data?.lastReviewed || data?.lastReview;
+        return {
+            state,
+            stability,
+            difficulty,
+            reps,
+            lapses,
+            elapsed_days,
+            scheduled_days,
+            due: inferredDue,
+            last_review: inferredLast
+        };
+    }
+    return null;
+}
+
+function normalizeDeckRecord(deck) {
+    if (!deck) return null;
+    const deckId = extractIdFromValue(deck.id ?? deck.deckId ?? deck.deckID ?? deck._id);
+    if (!deckId) return null;
+    return { ...deck, id: deckId };
+}
+
+function normalizeExamPlanRecord(plan) {
+    if (!plan) return null;
+    const planId = extractIdFromValue(plan.id ?? plan.planId ?? plan.planID ?? plan._id);
+    if (!planId) return null;
+    return { ...plan, id: planId };
+}
+
+function logSyncSkip(entity, reason, payload) {
+    console.warn(`[SYNC] Skipping ${entity}: ${reason}`, payload);
+}
 
 function prepareKnowledgeRecord(data) {
-    if (!data) throw new Error('No knowledge record provided');
-    const userID = data.userID || data.userId || 'default_user';
-    const cardID = data.cardID || data.cardId || data.id;
-    const deckID = data.deckID || data.deckId || data.deck || currentDeckId || null;
-    const id = data.id && data.id.includes(':') ? data.id : `${userID}:${cardID}`;
-    const fsrsSnapshot = data.fsrs ? serializeFsrsCard(data.fsrs) : null;
-    const stability = typeof data.stability === 'number'
-        ? data.stability
-        : (typeof fsrsSnapshot?.stability === 'number' ? fsrsSnapshot.stability : null);
-    const lastReviewedRaw = data.lastReviewed || data.last_review || fsrsSnapshot?.last_review || null;
-    const lastReviewed = lastReviewedRaw ? new Date(lastReviewedRaw).toISOString() : null;
+    if (!data) return null;
+    const nowISO = new Date().toISOString();
+    const rawId = data.id || data._id || null;
+    const composite = splitCompositeKnowledgeId(rawId);
+    const userID = deriveUserIdentifier(data, composite.userPart);
+    const cardID = deriveCardIdentifier(data, composite.cardPart, rawId);
+    if (!cardID) return null;
+    const deckID = deriveDeckIdentifier(data) || data.deckID || data.deckId || data.deck || currentDeckId || null;
+    const fsrsSource = resolveFsrsSource(data);
+    const fsrsSnapshot = fsrsSource ? serializeFsrsCard(fsrsSource) : null;
+    const knowledgeStateUtils = getKnowledgeStateUtils();
+    const reviewed = knowledgeStateUtils.isFsrsReviewedState(fsrsSnapshot);
+    if (!reviewed && fsrsSnapshot?.last_review) {
+        fsrsSnapshot.last_review = null;
+    }
+    const stabilityFromData = Number.isFinite(Number(data.stability)) ? Number(data.stability) : null;
+    const stabilityFromFsrs = Number.isFinite(Number(fsrsSnapshot?.stability)) ? Number(fsrsSnapshot.stability) : null;
+    const lastReviewedCandidate = data.lastReviewed || data.last_review || data.lastReview || fsrsSnapshot?.last_review;
+    const lastReviewed = reviewed ? ensureIsoString(lastReviewedCandidate, null) : null;
+    const lastModified = ensureIsoString(data.lastModified || data.updatedAt, nowISO);
+    const createdAt = ensureIsoString(data.createdAt, lastModified) || lastModified;
+    const updatedAt = ensureIsoString(data.updatedAt, lastModified) || lastModified;
+
     return {
         ...data,
-        id,
+        id: `${userID}:${cardID}`,
         userID,
         deckID,
         cardID,
         fsrs: fsrsSnapshot,
-        stability,
+        stability: stabilityFromData ?? stabilityFromFsrs ?? 0,
         lastReviewed,
-        lastModified: data.lastModified || new Date().toISOString()
+        createdAt,
+        updatedAt,
+        lastModified
     };
+}
+
+function shouldPersistNormalizedState(original, normalized) {
+    if (!original || !normalized) return true;
+    const utils = getKnowledgeStateUtils();
+    const originalFsrs = original.fsrs || {};
+    const normalizedFsrs = normalized.fsrs || {};
+    const numericFields = ['state', 'stability', 'difficulty', 'reps', 'lapses'];
+    for (const field of numericFields) {
+        if (utils.coerceFsrsNumber(originalFsrs[field]) !== utils.coerceFsrsNumber(normalizedFsrs[field])) {
+            return true;
+        }
+    }
+    const originalLastReviewIso = ensureIsoString(
+        originalFsrs.last_review || original.lastReviewed || original.last_review || original.lastReview,
+        ''
+    );
+    const normalizedLastReviewIso = ensureIsoString(
+        normalizedFsrs.last_review || normalized.lastReviewed || normalized.last_review || normalized.lastReview,
+        ''
+    );
+    if (originalLastReviewIso !== normalizedLastReviewIso) return true;
+    if ((original.lastReviewed || '') !== (normalized.lastReviewed || '')) return true;
+    return false;
 }
 
 function ensureKnowledgeIndexes(store) {
@@ -1048,6 +1424,11 @@ function migrateStores(transaction, oldVersion) {
         }
     }
 
+    if (!db.objectStoreNames.contains('cortexTrainingData')) {
+        const trainingStore = db.createObjectStore('cortexTrainingData', { keyPath: 'id', autoIncrement: true });
+        trainingStore.createIndex('by_timestamp', 'timestamp', { unique: false });
+    }
+
     if (db.objectStoreNames.contains('userKnowledgeState')) {
         const existingStore = transaction.objectStore('userKnowledgeState');
         const needsRebuild = existingStore.keyPath !== 'id';
@@ -1058,7 +1439,14 @@ function migrateStores(transaction, oldVersion) {
                 db.deleteObjectStore('userKnowledgeState');
                 const knowledgeStore = db.createObjectStore('userKnowledgeState', { keyPath: 'id' });
                 ensureKnowledgeIndexes(knowledgeStore);
-                existing.forEach(record => knowledgeStore.put(prepareKnowledgeRecord(record)));
+                existing.forEach(record => {
+                    const normalizedRecord = prepareKnowledgeRecord(record);
+                    if (normalizedRecord) {
+                        knowledgeStore.put(normalizedRecord);
+                    } else {
+                        console.warn('[DB] Skipped invalid knowledge record during migration', record);
+                    }
+                });
             };
             capture.onerror = () => {
                 db.deleteObjectStore('userKnowledgeState');
@@ -1386,7 +1774,6 @@ function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
             lastReviewed: knowledgeState?.lastReviewed ? new Date(knowledgeState.lastReviewed).toLocaleDateString() : 'Never',
             order: card.order || Infinity
         };
-        console.log('[Test 3] Final calculated stat object:', stat);
     });
 
     if (cardStats.length === 0) {
@@ -1728,6 +2115,15 @@ const resolveKnowledgeKey = (key) => {
 
 async function saveDataToDB(storeName, data) {
     const payload = storeName === 'userKnowledgeState' ? prepareKnowledgeRecord(data) : data;
+    if (!payload) {
+        console.warn(`[DB] Skipping invalid payload for ${storeName}`, data);
+        return;
+    }
+    const requiredKey = STORE_KEY_REQUIREMENTS[storeName];
+    if (requiredKey && (payload[requiredKey] === undefined || payload[requiredKey] === null || payload[requiredKey] === '')) {
+        console.warn(`[DB] Skipping ${storeName} write with missing ${requiredKey}`, payload);
+        return;
+    }
     return new Promise((resolve, reject) => {
         try {
             const transaction = db.transaction([storeName], 'readwrite');
@@ -1811,6 +2207,10 @@ async function clearStoreInDB(storeName) {
 
 async function upsertKnowledgeState(record) {
     const normalized = prepareKnowledgeRecord(record);
+    if (!normalized) {
+        console.warn('[DB] Skipping invalid knowledge state payload', record);
+        return null;
+    }
     await saveDataToDB('userKnowledgeState', normalized);
     return normalized;
 }
@@ -2043,11 +2443,7 @@ function setupEventListeners() {
             sessionStorage.setItem('guestMode', 'true');
         }
 
-        const appHeader = document.getElementById('appHeader');
-        if (appHeader) {
-            appHeader.classList.remove('hidden');
-        }
-        showView('dashboard');
+        transitionView('dashboard', false, null, false);
         const loggedInEl = document.getElementById('loggedInView');
         if (loggedInEl) {
             loggedInEl.classList.remove('hidden');
@@ -2101,8 +2497,6 @@ function setupEventListeners() {
     safeAddListener('instructionsBtn', 'click', () => {
         const m = document.getElementById('instructionsModal'); if (m) m.classList.add('show');
     });
-    safeAddListener('accentToggleBtn', 'click', toggleAccentButtons);
-    safeAddListener('testAccentToggleBtn', 'click', toggleTestAccentButtons);
     safeAddListener('switchStudyModeBtn', 'click', toggleStudyMode);
     safeAddListener('editStudyCardBtn', 'click', editCurrentStudyCard);
     const writeInputEl = document.getElementById('writeAnswerInput');
@@ -2118,32 +2512,6 @@ function setupEventListeners() {
                 return;
             }
             autoCheckAnswer();
-        }
-    });
-    document.addEventListener('keydown', function (event) {
-        const practiceTestView = document.getElementById('practiceTestView');
-        if (practiceTestView.classList.contains('hidden')) {
-            return;
-        }
-
-        if (event.key === 'Enter' || event.key === 'ArrowUp') {
-            const nextBtn = document.getElementById('testNextBtn');
-            const checkBtn = document.getElementById('testCheckAnswerBtn');
-            const showAnswerBtn = document.getElementById('testShowAnswerBtn');
-            if (!nextBtn.classList.contains('hidden')) {
-                event.preventDefault();
-                nextBtn.click();
-            }
-            else if (!checkBtn.classList.contains('hidden')) {
-                if (event.target === document.getElementById('testAnswerInput')) {
-                    event.preventDefault();
-                }
-                checkBtn.click();
-            }
-            else if (!showAnswerBtn.classList.contains('hidden')) {
-                event.preventDefault();
-                showAnswerBtn.click();
-            }
         }
     });
     document.addEventListener('visibilitychange', () => {
@@ -2190,33 +2558,37 @@ function setupEventListeners() {
             }
         }
     });
-    document.addEventListener('keydown', function (event) {
+    document.addEventListener('keydown', handlePracticeTestShortcut);
+
+    function handlePracticeTestShortcut(event) {
+        if (event.key !== 'Enter' && event.key !== 'ArrowUp') return;
         const practiceTestView = document.getElementById('practiceTestView');
-        if (!practiceTestView || practiceTestView.classList.contains('hidden')) {
+        if (!practiceTestView || practiceTestView.classList.contains('hidden')) return;
+
+        const nextBtn = document.getElementById('testNextBtn');
+        if (nextBtn && !nextBtn.classList.contains('hidden')) {
+            event.preventDefault();
+            nextBtn.click();
             return;
         }
 
-        if (event.key === 'Enter' || event.key === 'ArrowUp') {
-            const nextBtn = document.getElementById('testNextBtn');
-            const checkBtn = document.getElementById('testCheckAnswerBtn');
-            const showAnswerBtn = document.getElementById('testShowAnswerBtn');
-            if (!nextBtn?.classList?.contains('hidden')) {
+        const checkBtn = document.getElementById('testCheckAnswerBtn');
+        if (checkBtn && !checkBtn.classList.contains('hidden')) {
+            const answerInput = document.getElementById('testAnswerInput');
+            if (event.target === answerInput) {
                 event.preventDefault();
-                nextBtn.click();
             }
-            else if (!checkBtn?.classList?.contains('hidden')) {
-                const answerInput = document.getElementById('testAnswerInput');
-                if (event.target === answerInput) {
-                    event.preventDefault();
-                }
-                checkBtn.click();
-            }
-            else if (!showAnswerBtn.classList.contains('hidden')) {
-                event.preventDefault();
-                showAnswerBtn.click();
-            }
+            checkBtn.click();
+            return;
         }
-    });
+
+        const showAnswerBtn = document.getElementById('testShowAnswerBtn');
+        if (showAnswerBtn && !showAnswerBtn.classList.contains('hidden')) {
+            event.preventDefault();
+            showAnswerBtn.click();
+        }
+    }
+
     bind('testInstructionsBtn', 'click', () => {
         showToast("Practice test instructions would appear here", "info");
     });
@@ -2637,17 +3009,56 @@ async function runSmartCoachChecks(context, data = {}) {
     }
 }
 
-function showView(viewId, isInitial = false, callback = null) {
+function updateHeaderForView(viewId) {
+    const header = document.getElementById('appHeader');
+    if (!header) return;
+
+    const isDashboard = viewId === 'dashboard';
+    const isAuthView = viewId === 'authView';
+
+    header.classList.toggle('hidden', isAuthView);
+
+    const searchBarElem = document.querySelector('.search-bar');
+    if (searchBarElem) {
+        searchBarElem.classList.toggle('hidden', !isDashboard);
+    }
+
+    const headerSettingsBtn = document.getElementById('headerSettingsBtn');
+    if (headerSettingsBtn) {
+        headerSettingsBtn.classList.toggle('hidden', !isDashboard);
+    }
+
+    const headerBackBtn = document.getElementById('headerBackBtn');
+    if (headerBackBtn) {
+        headerBackBtn.classList.toggle('hidden', isDashboard || viewHistory.length === 0);
+    }
+
+    const headerHomeBtn = document.getElementById('headerHomeBtn');
+    if (headerHomeBtn) {
+        headerHomeBtn.classList.toggle('hidden', isDashboard);
+    }
+}
+
+function navigateTo(viewId, { recordHistory = true, clearHistory = false, isInitial = false, callback = null } = {}) {
     const nextView = document.getElementById(viewId);
     if (!nextView) {
         console.error('View not found:', viewId);
         return;
     }
 
+    if (clearHistory) {
+        viewHistory = [];
+    }
+
+    if (!isInitial && recordHistory && !clearHistory && activeView && activeView !== viewId && viewId !== 'dashboard' && viewHistory[viewHistory.length - 1] !== activeView) {
+        viewHistory.push(activeView);
+    }
+
     if (isInitial) {
         nextView.classList.remove('hidden');
         nextView.classList.add('is-visible');
         activeView = viewId;
+        updateHeaderForView(viewId);
         if (callback) callback();
         return;
     }
@@ -2667,76 +3078,81 @@ function showView(viewId, isInitial = false, callback = null) {
     nextView.classList.add('is-visible');
 
     activeView = viewId;
+    updateHeaderForView(viewId);
     window.scrollTo(0, 0);
 
     if (callback) callback();
 }
 
-function transitionView(viewId, isInitial = false, callback = null) {
-    const appHeader = document.getElementById('appHeader');
-    if (viewId !== 'authView') {
-        appHeader.classList.remove('hidden');
+function transitionView(viewId, isInitial = false, callback = null, recordHistory = true) {
+    navigateTo(viewId, { isInitial, callback, recordHistory });
+}
+
+const transitionTimeouts = new WeakMap();
+
+function resetSubViewAnimation(element) {
+    if (!element) return;
+    const timer = transitionTimeouts.get(element);
+    if (timer) {
+        clearTimeout(timer);
+        transitionTimeouts.delete(element);
     }
-    if (!isInitial && activeView !== viewId && viewId !== 'dashboard') {
-        if (viewHistory[viewHistory.length - 1] !== activeView) {
-            viewHistory.push(activeView);
-        }
-    }
-
-    const currentView = document.getElementById(activeView);
-    const nextView = document.getElementById(viewId);
-
-    const isDashboard = viewId === 'dashboard';
-    const searchBarElem = document.querySelector('.search-bar');
-    if (searchBarElem && searchBarElem.style) searchBarElem.style.display = isDashboard ? 'flex' : 'none';
-    const headerSettingsBtn = document.getElementById('headerSettingsBtn');
-    if (headerSettingsBtn && headerSettingsBtn.style) headerSettingsBtn.style.display = isDashboard ? 'flex' : 'none';
-    const headerBackBtn = document.getElementById('headerBackBtn');
-    if (headerBackBtn) headerBackBtn.classList.toggle('hidden', viewHistory.length === 0 || isDashboard);
-    const headerHomeBtn = document.getElementById('headerHomeBtn');
-    if (headerHomeBtn) headerHomeBtn.classList.toggle('hidden', isDashboard);
-
-    document.getElementById('headerHomeBtn').classList.toggle('hidden', isDashboard);
-
-    if (isInitial) {
-        if (currentView) currentView.classList.remove('fade-in', 'fade-out', 'animating');
-        nextView.classList.add('fade-in', 'animating');
-        activeView = viewId;
-        if (callback) callback();
-        return;
-    }
-
-    if (currentView) {
-        currentView.classList.add('fade-out', 'animating');
-        currentView.classList.remove('fade-in');
-
-        setTimeout(() => {
-            currentView.style.display = 'none';
-            currentView.classList.remove('fade-out', 'animating');
-            nextView.style.display = 'block';
-            nextView.classList.add('fade-in', 'animating');
-            activeView = viewId;
-            window.scrollTo(0, 0);
-            if (callback) callback();
-        }, 400);
-    }
+    element.classList.remove('sub-view-fade-out', 'sub-view-fade-in', 'animating');
 }
 
 function transitionSubView(currentElem, nextElem) {
+    resetSubViewAnimation(currentElem);
+    resetSubViewAnimation(nextElem);
+
     if (currentElem && !currentElem.classList.contains('hidden')) {
         currentElem.classList.add('sub-view-fade-out', 'animating');
-        setTimeout(() => {
+        const hideTimer = setTimeout(() => {
             currentElem.classList.add('hidden');
             currentElem.classList.remove('sub-view-fade-out', 'animating');
-            if (nextElem) {
-                nextElem.classList.remove('hidden');
-                nextElem.classList.add('sub-view-fade-in', 'animating');
-            }
+            transitionTimeouts.delete(currentElem);
         }, 400);
-    } else if (nextElem) {
+        transitionTimeouts.set(currentElem, hideTimer);
+    }
+
+    if (nextElem) {
         nextElem.classList.remove('hidden');
         nextElem.classList.add('sub-view-fade-in', 'animating');
+        const showTimer = setTimeout(() => {
+            nextElem.classList.remove('sub-view-fade-in', 'animating');
+            transitionTimeouts.delete(nextElem);
+        }, 400);
+        transitionTimeouts.set(nextElem, showTimer);
     }
+}
+
+function hidePreGenerationViewImmediately() {
+    const preGenerationView = document.getElementById('preGenerationView');
+    if (preGenerationView) {
+        resetSubViewAnimation(preGenerationView);
+        preGenerationView.classList.add('hidden');
+    }
+    if (studyState.preGenerationCountdownInterval) {
+        clearInterval(studyState.preGenerationCountdownInterval);
+        studyState.preGenerationCountdownInterval = null;
+    }
+}
+
+function resetStudySubViews() {
+    ['progressView', 'cardView', 'completeView', 'preGenerationView'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.classList.contains('hidden')) {
+            el.classList.add('hidden');
+        }
+    });
+    hidePreGenerationViewImmediately();
+    ['cardQuestion', 'cardAnswer', 'mcqQuestion'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+    });
+    const mcqOptions = document.getElementById('mcqOptions');
+    if (mcqOptions) mcqOptions.innerHTML = '';
+    studyState.pendingMCQToken = 0;
+    studyState.pendingMCQCardId = null;
 }
 
 function goBack() {
@@ -2753,14 +3169,14 @@ function goBack() {
 function continueGoBack() {
     const previousView = viewHistory.pop();
     if (previousView) {
-        transitionView(previousView);
+        transitionView(previousView, false, null, false);
     } else {
-        backToDashboard(true);
+        transitionView('dashboard', false, () => resetDashboardState(true), false);
     }
 }
 
 function showEditor() {
-    showView('editorView');
+    transitionView('editorView');
     editorInitialise();
 
     const container = document.getElementById('flashcardsContainer');
@@ -2789,10 +3205,10 @@ async function showSettings() {
     document.getElementById('enableInStudyEditing').checked = settings?.enableInStudyEditing || false;
     document.getElementById('toggleExamPlanBanner').checked = !settings?.hideExamPlanBanner;
     document.getElementById('enableToastsToggle').checked = (settings?.enableToasts !== false);
-    showView('settingsView');
+    transitionView('settingsView');
 }
 
-async function backToDashboard(isFromLogo = false) {
+async function backToDashboard(isFromLogo = false, skipEndSession = false) {
     if (activeView === 'editorView' && !isEditorClean()) {
         showConfirmModal(
             'You have unsaved changes. Are you sure you want to leave?',
@@ -2800,33 +3216,32 @@ async function backToDashboard(isFromLogo = false) {
 
                 if (isFromLogo) {
 
-                    if (currentDeckId && currentMode) endSession();
+                    if (!skipEndSession && currentDeckId && currentMode) endSession();
 
-                    window.location.reload();
+                    transitionView('dashboard', false, () => resetDashboardState(true), false);
                     return;
                 }
-                transitionView('dashboard');
-                if (currentDeckId && currentMode) endSession();
-                resetDashboardState(true);
+                transitionView('dashboard', false, () => resetDashboardState(true), false);
+                if (!skipEndSession && currentDeckId && currentMode) endSession();
             }
         );
         return;
     }
 
     if (activeView !== 'dashboard') {
-        if (currentDeckId && currentMode) await endSession();
+        if (!skipEndSession && currentDeckId && currentMode) await endSession();
         if (isFromLogo) {
 
-            if (currentDeckId && currentMode) await endSession();
-            window.location.reload();
+            if (!skipEndSession && currentDeckId && currentMode) await endSession();
+            transitionView('dashboard', false, () => resetDashboardState(true), false);
             return;
         } else {
-            showView('dashboard', false, () => resetDashboardState(isFromLogo));
+            transitionView('dashboard', false, () => resetDashboardState(isFromLogo), false);
         }
     } else {
         if (isFromLogo) {
 
-            window.location.reload();
+            transitionView('dashboard', false, () => resetDashboardState(true), false);
             return;
         } else {
             resetDashboardState(isFromLogo);
@@ -2846,15 +3261,12 @@ function resetDashboardState(clearHistory = false) {
         viewHistory = [];
     }
 
-    document.getElementById('headerBackBtn').classList.toggle('hidden', viewHistory.length === 0);
+    updateHeaderForView('dashboard');
 }
 
 async function loadSavedData() {
     const settings = await getDataFromDB('appData', 'userSettings');
     globalSettings = settings || {};
-    if (globalSettings.showAccents === undefined) {
-        globalSettings.showAccents = true;
-    }
     globalSettings.newCardsPerDay = globalSettings.newCardsPerDay || 20;
 
     if (globalSettings.username) {
@@ -2898,6 +3310,9 @@ async function loadSavedData() {
             await saveDataToDB('decks', deck);
         }
         decks[deck.id] = deck;
+        if (window.AccentUtils?.ensureDeckAccentMetadata) {
+            window.AccentUtils.ensureDeckAccentMetadata(deck);
+        }
     }
 
     await updateUserBaseline();
@@ -3282,7 +3697,7 @@ function showDeckDetail(deckId, cardElement) {
     }
 
     currentViewingDeckId = deckId;
-    showView('dashboard');
+    transitionView('dashboard', false, null, false);
 
     document.getElementById('deckDetailTitle').textContent = deck.name;
     const categoryElement = document.getElementById('deckDetailCategory');
@@ -3385,7 +3800,6 @@ function showDeckDetail(deckId, cardElement) {
     document.querySelector('.create-section').classList.add('hidden');
     document.getElementById('deckDetailView').classList.remove('hidden');
 
-    document.getElementById('headerBackBtn').classList.remove('hidden');
 }
 
 function editCard(deckId, cardIndex, from) {
@@ -3561,7 +3975,7 @@ async function createNewDeck(name, category, cards, notes = '', typeHint = 'Gene
     }));
 
     const tempDeck = { name, category, cards: normalizedCards, notes, typeHint };
-    showToast("Analysing new deck contentâ€¦", "info", 2000);
+        showToast("Analysing new deck content...", "info", 2000);
     await processDeckContent(tempDeck);
 
     const fsrsEngine = await getFsrsEngine();
@@ -3594,18 +4008,19 @@ async function createNewDeck(name, category, cards, notes = '', typeHint = 'Gene
         const cardId = card.id || crypto.randomUUID();
         card.id = cardId;
 
-        const knowledgeRecord = prepareKnowledgeRecord({
+        const knowledgeRecord = createDefaultKnowledgeState(card, {
             userID: 'default_user',
             deckID: deckId,
-            cardID: cardId,
-            masteryScore: 0.5,
             stability: 1.0,
             lastReviewed: new Date().toISOString(),
-            recallHistory: [],
             fsrs: card.fsrs || null
         });
 
-        stateStore.put(knowledgeRecord);
+        if (knowledgeRecord) {
+            stateStore.put(knowledgeRecord);
+        } else {
+            console.warn('[DB] Skipped new card knowledge state due to missing identifiers', card);
+        }
     });
     await new Promise(resolve => transaction.oncomplete = resolve);
     await saveDataToDB('decks', newDeck);
@@ -3618,7 +4033,7 @@ async function createNewDeck(name, category, cards, notes = '', typeHint = 'Gene
 function editDeck(deckId) {
     const deck = decks[deckId];
     if (!deck) return;
-    showView('editorView');
+    transitionView('editorView');
     document.getElementById('deckTitle').value = deck.name;
     document.getElementById('deckCategory').value = deck.category;
     document.getElementById('deckNotes').value = deck.notes || '';
@@ -4061,18 +4476,19 @@ async function editorSaveDeck() {
                         const cardId = card.id || crypto.randomUUID();
                         card.id = cardId;
 
-                        const knowledgeRecord = prepareKnowledgeRecord({
+                        const knowledgeRecord = createDefaultKnowledgeState(card, {
                             userID: 'default_user',
                             deckID: currentDeckId || null,
-                            cardID: cardId,
-                            masteryScore: 0.5,
                             stability: 1.0,
                             lastReviewed: new Date().toISOString(),
-                            recallHistory: [],
                             fsrs: card.fsrs || null
                         });
 
-                        stateStore.put(knowledgeRecord);
+                        if (knowledgeRecord) {
+                            stateStore.put(knowledgeRecord);
+                        } else {
+                            console.warn('[DB] Skipped imported card knowledge state due to missing identifiers', card);
+                        }
                         card.isNew = false;
                     });
                 });
@@ -4365,6 +4781,8 @@ async function startLearnMode(deckId) {
     currentDeckId = deckId;
     const deck = decks[deckId];
 
+    studyAccentModule?.refresh();
+
     // Ensure defaults
     deck.settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
     studyState.settings = deck.settings;
@@ -4426,8 +4844,10 @@ async function startLearnMode(deckId) {
         }
     }
 
+    const cortex = await getCortexEngine();
     const now = new Date();
-    const targetDate = getLearnTargetDate(deck, now);
+    const targetDate = cortex.buildTargetDate(deck, now);
+    logLearnTargetSource(deck, now, targetDate);
     const candidates = deck.cards.map(card => {
         const state = knowledgeMap.get(card.id);
         const retention = calculateRetentionAtDate(state, targetDate);
@@ -4435,7 +4855,7 @@ async function startLearnMode(deckId) {
     }).filter(entry => {
         const retention = entry.projectedRetention;
         if (retention >= 0.9) return false;
-        return !isCardMasteredForLearn(entry.knowledgeState, deck, now);
+        return !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate);
     });
     candidates.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
     const learnModeMaxCards = deck.settings.learnModeMaxCards ? parseInt(deck.settings.learnModeMaxCards) : 40;
@@ -4454,7 +4874,8 @@ async function startLearnMode(deckId) {
 
     assignQuestionTypesToCards(activeLearningPool, deckId);
 
-    showView('studyMode');
+    transitionView('studyMode');
+    resetStudySubViews();
     document.getElementById('studyTitle').textContent = 'Learning Session';
     document.getElementById('studySubtitle').textContent = deck.name;
 
@@ -4468,22 +4889,42 @@ async function startLearnMode(deckId) {
     setupSessionProgressBar();
     updateSessionProgress();
 
-    transitionSubView(document.getElementById('progressView'), document.getElementById('preGenerationView'));
+    const progressView = document.getElementById('progressView');
+    progressView.classList.remove('hidden');
+    const preGenerationView = document.getElementById('preGenerationView');
+    const cardView = document.getElementById('cardView');
+    const cardsRequiringGeneration = activeLearningPool.filter(card => card.questionTypeToShow === 'MultipleChoice' && isOnline);
+    let transitionSource = progressView;
 
-    const updateProgressUI = (completed, total) => {
-        const percent = total > 0 ? (completed / total) * 100 : 100;
-        document.getElementById('preGenerationProgress').style.width = `${percent}%`;
-        document.getElementById('preGenerationProgressText').textContent = `Generating smart questions... ${completed}/${total}`;
-    };
+    if (cardsRequiringGeneration.length > 0) {
+        transitionSubView(progressView, preGenerationView);
 
-    await preGenerateAdaptiveQuestions(activeLearningPool, updateProgressUI);
+        const updateProgressUI = (completed, total) => {
+            const percent = total > 0 ? (completed / total) * 100 : 100;
+            document.getElementById('preGenerationProgress').style.width = `${percent}%`;
+            document.getElementById('preGenerationProgressText').textContent = `Generating smart questions... ${completed}/${total}`;
+        };
 
-    const cortex = await getCortexEngine();
+        try {
+            await preGenerateAdaptiveQuestions(activeLearningPool, updateProgressUI);
+            transitionSource = preGenerationView;
+        } catch (error) {
+            console.error('Pre-generation error:', error);
+            showToast('Preparing smart questions failed. Continuing without them.', 'warning');
+            transitionSource = preGenerationView;
+        } finally {
+            hidePreGenerationViewImmediately();
+        }
+    } else {
+        hidePreGenerationViewImmediately();
+        transitionSource = progressView;
+    }
+
     studyState.currentCard = await cortex.pickNextCard(activeLearningPool, studyState.sessionState, deck, studyState.knowledgeStates);
     studyState.currentCardIndex = 0;
     studyState.startTime = new Date();
 
-    transitionSubView(document.getElementById('preGenerationView'), document.getElementById('cardView'));
+    transitionSubView(transitionSource, cardView);
     if (studyState.currentCard) {
         showNextCard();
     } else {
@@ -4559,9 +5000,7 @@ async function updateSessionProgress() {
 }
 
 async function startSpacedLearning(deckId) {
-    document.getElementById('progressView').classList.add('hidden');
-    document.getElementById('cardView').classList.add('hidden');
-    document.getElementById('completeView').classList.add('hidden');
+    resetStudySubViews();
     currentMode = 'spaced';
     currentDeckId = deckId;
     resetSessionState();
@@ -4587,12 +5026,15 @@ async function startSpacedLearning(deckId) {
     studyState.currentCardIndex = 0;
     studyState.startTime = new Date();
 
-    showView('studyMode');
+    transitionView('studyMode');
     document.getElementById('studyTitle').textContent = 'Spaced Learning';
     document.getElementById('studySubtitle').textContent = deck.name;
+    const progressView = document.getElementById('progressView');
+    const cardView = document.getElementById('cardView');
+    progressView.classList.remove('hidden');
 
     if (studyState.roundCards.length > 0) {
-        transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
+        transitionSubView(progressView, cardView);
         showNextCard();
     } else {
         showProgress();
@@ -4638,11 +5080,14 @@ async function startReviewMode(deckId) {
 
     studyState.roundCards = [...studyState.stillLearning];
 
-    showView('studyMode');
+    transitionView('studyMode');
+    resetStudySubViews();
     document.getElementById('studyTitle').textContent = 'Review Mode';
     document.getElementById('studySubtitle').textContent = deck.name;
-
-    transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
+    const progressView = document.getElementById('progressView');
+    const cardView = document.getElementById('cardView');
+    progressView.classList.remove('hidden');
+    transitionSubView(progressView, cardView);
     showNextCard();
 }
 
@@ -4722,15 +5167,15 @@ async function updateLearnProgress() {
     let masteredCount = 0;
     let totalRetentionScore = 0;
 
-    const examDate = deck.settings?.examDate ? new Date(deck.settings.examDate) : null;
-    const targetRetention = deck.settings?.targetRetention || 0.85;
-    const targetDate = examDate || new Date();
-    const masteredThreshold = examDate ? targetRetention : 0.9;
+    const now = new Date();
+    const cortex = await getCortexEngine();
+    const targetDate = cortex.buildTargetDate(deck, now);
+    logLearnTargetSource(deck, now, targetDate);
 
     allCards.forEach(card => {
         const state = knowledgeMap.get(card.id);
         const retention = calculateRetentionAtDate(state, targetDate);
-        if (state && isCardMasteredForLearn(state, deck, new Date())) {
+        if (state && isCardMasteredForLearn(state, deck, targetDate)) {
             masteredCount++;
         }
         totalRetentionScore += retention;
@@ -4932,8 +5377,10 @@ async function continueStudy() {
                 knowledgeMap.set(card.id, state);
             }
         }
+        const cortex = await getCortexEngine();
         const now = new Date();
-        const targetDate = getLearnTargetDate(deck, now);
+        const targetDate = cortex.buildTargetDate(deck, now);
+        logLearnTargetSource(deck, now, targetDate);
         const learnModeMaxCards = deck.settings.learnModeMaxCards ? parseInt(deck.settings.learnModeMaxCards) : 40;
         const maxCards = Number.isFinite(learnModeMaxCards) ? learnModeMaxCards : 40;
 
@@ -4943,7 +5390,7 @@ async function continueStudy() {
             return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
         }).filter(entry => {
             if (entry.projectedRetention >= 0.9) return false;
-            return !isCardMasteredForLearn(entry.knowledgeState, deck, now);
+            return !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate);
         });
         nonMasteredCards.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
 
@@ -4991,7 +5438,11 @@ async function continueStudy() {
         } else {
             sortedCards = shuffleArray(prioritized).concat(shuffleArray(others));
         }
-        studyState.roundCards = sortedCards;
+        const roundLimit = studyState.settings?.cardsPerRound
+            || decks[currentDeckId]?.settings?.cardsPerRound
+            || DEFAULT_DECK_SETTINGS.cardsPerRound
+            || 10;
+        studyState.roundCards = sortedCards.slice(0, roundLimit);
     } else if (currentMode === 'exam') {
         const examDate = studyState.examDate ? new Date(studyState.examDate) : null;
         const knowledgeStates = studyState.knowledgeStates?.size
@@ -5012,11 +5463,13 @@ async function continueStudy() {
         needsReview.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
         dailyPriorityQueue = needsReview;
 
-        let roundSize = 7;
+        const defaultRoundSize = DEFAULT_DECK_SETTINGS.cardsPerRound || 10;
+        let roundSize = defaultRoundSize;
         if (dailyPriorityQueue.length > 0) {
             const firstCardDeckId = dailyPriorityQueue[0].deckId;
-            if (decks[firstCardDeckId] && decks[firstCardDeckId].settings) {
-                roundSize = decks[firstCardDeckId].settings.cardsPerRound || 7;
+            const deckRoundSetting = Number(decks[firstCardDeckId]?.settings?.cardsPerRound);
+            if (Number.isFinite(deckRoundSetting) && deckRoundSetting > 0) {
+                roundSize = deckRoundSetting;
             }
         }
         studyState.roundCards = dailyPriorityQueue.splice(0, roundSize);
@@ -5027,13 +5480,18 @@ async function continueStudy() {
 
     assignQuestionTypesToCards(cardsForSession, currentMode === 'learn' ? currentDeckId : null);
 
-    if (cardsForSession.length > 0) {
+        if (cardsForSession.length > 0) {
         const cardsRequiringGeneration = cardsForSession.filter(
             card => card.questionTypeToShow === 'MultipleChoice' && isOnline
         );
 
+        const progressView = document.getElementById('progressView');
+        const preGenerationView = document.getElementById('preGenerationView');
+        const cardView = document.getElementById('cardView');
+        let transitionSource = progressView;
+
         if (cardsRequiringGeneration.length > 0) {
-            transitionSubView(document.getElementById('progressView'), document.getElementById('preGenerationView'));
+            transitionSubView(progressView, preGenerationView);
 
             const updateProgressUI = (completed, total) => {
                 const percent = total > 0 ? (completed / total) * 100 : 100;
@@ -5042,12 +5500,10 @@ async function continueStudy() {
             };
 
             await preGenerateAdaptiveQuestions(cardsForSession, updateProgressUI);
-
-            transitionSubView(document.getElementById('preGenerationView'), document.getElementById('cardView'));
-
+            transitionSource = preGenerationView;
         } else {
-
-            transitionSubView(document.getElementById('progressView'), document.getElementById('cardView'));
+            hidePreGenerationViewImmediately();
+            transitionSource = progressView;
         }
 
         if (currentMode === 'learn') {
@@ -5055,6 +5511,7 @@ async function continueStudy() {
             const deck = decks[currentDeckId];
             studyState.currentCard = await cortex.pickNextCard(studyState.activeLearningPool, studyState.sessionState, deck, studyState.knowledgeStates);
         }
+        transitionSubView(transitionSource, cardView);
         if (currentMode !== 'learn' || studyState.currentCard) {
             showNextCard();
         } else {
@@ -5084,6 +5541,7 @@ function assignQuestionTypesToCards(cards, deckId = null, modeOverride = current
 }
 
 async function showNextCard() {
+    hidePreGenerationViewImmediately();
     if (currentMode === 'learn' && !studyState.currentCard) {
         showComplete();
         return;
@@ -5544,8 +6002,6 @@ async function showNextCard() {
         studyState.isRetypingIncorrect = false;
         const questionType = card.questionTypeToShow || selectOptimalQuestionType(card, decks[currentDeckId], 'learn');
         card.questionTypeToShow = questionType;
-        document.getElementById('accentToggleBtn').classList.add('hidden');
-        document.getElementById('accentButtonsContainer').classList.add('hidden');
 
         switch (questionType) {
             case 'MultipleChoice':
@@ -5574,7 +6030,6 @@ async function showNextCard() {
                 document.getElementById('checkAnswerBtn').classList.remove('hidden');
                 document.getElementById('dontKnowBtn').classList.remove('hidden');
 
-                document.getElementById('accentToggleBtn').classList.remove('hidden');
                 updateAccentButtonsVisibility();
 
                 startInteractionLog(card.id);
@@ -5589,7 +6044,6 @@ async function showNextCard() {
                 document.getElementById('checkAnswerBtn').classList.remove('hidden');
                 document.getElementById('dontKnowBtn').classList.remove('hidden');
 
-                document.getElementById('accentToggleBtn').classList.remove('hidden');
                 updateAccentButtonsVisibility();
 
                 startInteractionLog(card.id);
@@ -5636,8 +6090,6 @@ async function showNextCard() {
     const card = studyState.roundCards[studyState.currentCardIndex];
     const questionType = card.questionTypeToShow;
 
-    document.getElementById('accentToggleBtn').classList.add('hidden');
-    document.getElementById('accentButtonsContainer').classList.add('hidden');
 
     switch (questionType) {
         case 'MultipleChoice':
@@ -5669,7 +6121,6 @@ async function showNextCard() {
             document.getElementById('checkAnswerBtn').classList.remove('hidden');
             document.getElementById('dontKnowBtn').classList.remove('hidden');
 
-            document.getElementById('accentToggleBtn').classList.remove('hidden');
             updateAccentButtonsVisibility();
 
             startInteractionLog(card.id);
@@ -5684,7 +6135,6 @@ async function showNextCard() {
             document.getElementById('checkAnswerBtn').classList.remove('hidden');
             document.getElementById('dontKnowBtn').classList.remove('hidden');
 
-            document.getElementById('accentToggleBtn').classList.remove('hidden');
             updateAccentButtonsVisibility();
 
             startInteractionLog(card.id);
@@ -6173,67 +6623,18 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
         attemptCount: lastLog.attemptCount || 1
     }, userBaseline);
 
-    let fsrsSnapshot = null;
-    let fsrsMeta = null;
-    let newStability = null;
-    let updatedKnowledgeState = null;
-    const implicitBaseline = getFsrsBaseline();
-    let implicitRating = deriveImplicitFsrsRating(
-        {
-            ...lastLog,
-            recallLatency: lastLog.recallLatency,
-            answerFluency: lastLog.answerFluency,
-            totalCorrections: lastLog.totalCorrections
-        },
+    const fsrsResult = await applyFsrsReviewUpdate(
+        cardInDeck || card,
+        deckIdForThisCard,
         correct,
-        implicitBaseline
+        { ...lastLog, questionType },
+        iqs,
+        { questionType }
     );
-
-    if (currentMode === 'learn' || currentMode === 'exam') {
-        const fsrsResult = await applyFsrsReviewUpdate(
-            cardInDeck || card,
-            deckIdForThisCard,
-            correct,
-            { ...lastLog, questionType },
-            iqs
-        );
-        fsrsSnapshot = fsrsResult?.fsrsSnapshot || null;
-        implicitRating = fsrsResult?.rating ?? implicitRating;
-        newStability = fsrsResult?.state?.stability ?? null;
-        updatedKnowledgeState = fsrsResult?.state || null;
-        fsrsMeta = fsrsResult?.reviewTime
-            ? { rating: implicitRating, review: fsrsResult.reviewTime }
-            : null;
-    } else {
-        const fsrsEngine = await getFsrsEngine();
-        const preparedFsrsCard = await prepareFsrsCard(cardInDeck || card);
-        const ratings = fsrsRatings || fsrsEngine.getRatings();
-        let repeatResult = null;
-        let scheduled = null;
-        try {
-            if (fsrsEngine?.isAvailable) {
-                repeatResult = await fsrsEngine.repeat(preparedFsrsCard, new Date());
-                scheduled = repeatResult?.[implicitRating] || repeatResult?.[ratings.Good];
-            } else {
-                throw new Error('FSRS engine unavailable');
-            }
-        } catch (err) {
-            console.warn('FSRS repeat failed or unavailable — applying fallback schedule:', err);
-            // Fallback: use prepared card as 'scheduled' immediate result
-            scheduled = { card: { ...preparedFsrsCard, last_review: new Date() }, log: { review: new Date().toISOString() } };
-        }
-        const updatedCardState = scheduled?.card || preparedFsrsCard;
-        fsrsSnapshot = serializeFsrsCard(updatedCardState);
-
-        if (cardInDeck) cardInDeck.fsrs = fsrsSnapshot;
-
-        newStability = updatedCardState?.stability ?? null;
-        fsrsMeta = scheduled?.log
-            ? { rating: implicitRating, review: scheduled.log.review }
-            : { rating: implicitRating, review: new Date() };
-
-        updatedKnowledgeState = await updateKnowledgeState(card, correct, iqs, questionType, newStability, fsrsSnapshot, fsrsMeta);
-    }
+    const fsrsSnapshot = fsrsResult?.fsrsSnapshot || null;
+    const implicitRating = fsrsResult?.rating ?? null;
+    const newStability = fsrsResult?.state?.stability ?? null;
+    const updatedKnowledgeState = fsrsResult?.state || null;
 
     if (analyticsManager) {
         analyticsManager.trackSystemMetric('fsrs_review', implicitRating, {
@@ -6362,8 +6763,11 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
         const updatedState = updatedKnowledgeState || knowledgeMap.get(card.id);
         if (updatedState) knowledgeMap.set(card.id, updatedState);
         const nowTime = new Date();
+        const cortex = await getCortexEngine();
+        const targetDate = cortex.buildTargetDate(deck, nowTime);
+        logLearnTargetSource(deck, nowTime, targetDate);
         const activePool = Array.isArray(studyState.activeLearningPool) ? studyState.activeLearningPool : [];
-        const filteredPool = activePool.filter(c => !isCardMasteredForLearn(knowledgeMap.get(c.id), deck, nowTime));
+        const filteredPool = activePool.filter(c => !isCardMasteredForLearn(knowledgeMap.get(c.id), deck, targetDate));
         studyState.activeLearningPool = filteredPool;
         studyState.sessionCardIds = filteredPool.map(c => c.id);
         if (filteredPool.length === 0) {
@@ -6373,7 +6777,6 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
             return;
         }
 
-        const cortex = await getCortexEngine();
         studyState.currentCard = await cortex.pickNextCard(filteredPool, studyState.sessionState, deck, knowledgeMap);
         if (!studyState.currentCard) {
             await updateSessionProgress();
@@ -6489,44 +6892,31 @@ async function markSpaced(quality) {
     const card = studyState.roundCards[studyState.currentCardIndex];
     const cardInDeck = decks[currentDeckId].cards.find(c => c.id === card.id);
     if (cardInDeck) {
-        const fsrsEngine = await getFsrsEngine();
+        await getFsrsEngine();
         const fsrsRating = mapQualityToFsrsRating(quality);
-        const ratings = fsrsRatings || fsrsEngine.getRatings();
-        let updatedCardState = null;
-        try {
-            if (fsrsEngine?.isAvailable) {
-                updatedCardState = await fsrsEngine.reviewCard(cardInDeck.fsrs, fsrsRating);
-            } else {
-                console.warn('FSRS engine unavailable - applying minimal spaced update');
-                const prepared = fsrsEngine.prepareCard(cardInDeck.fsrs || cardInDeck);
-                prepared.last_review = new Date();
-                updatedCardState = prepared;
-            }
-        } catch (err) {
-            console.warn('FSRS review failed in markSpaced, using fallback:', err);
-            const prepared = fsrsEngine.prepareCard(cardInDeck.fsrs || cardInDeck);
-            prepared.last_review = new Date();
-            updatedCardState = prepared;
-        }
-        const fsrsSnapshot = serializeFsrsCard(updatedCardState);
-        const reviewTime = updatedCardState?.last_review ? new Date(updatedCardState.last_review) : new Date();
+        const fsrsResult = await applyFsrsReviewUpdate(
+            cardInDeck,
+            currentDeckId,
+            quality >= 3,
+            {
+                recallLatency: null,
+                answerFluency: null,
+                totalCorrections: 0,
+                attemptCount: 1,
+                questionType: 'Spaced'
+            },
+            0.5,
+            { explicitFsrsRating: fsrsRating, questionType: 'Spaced' }
+        );
+        const fsrsSnapshot = fsrsResult?.fsrsSnapshot || cardInDeck.fsrs;
         cardInDeck.fsrs = fsrsSnapshot;
-
         await saveDataToDB('decks', decks[currentDeckId]);
-        await updateKnowledgeState(cardInDeck, fsrsRating !== ratings.Again, 0.5, 'Spaced', updatedCardState?.stability ?? null, fsrsSnapshot, {
-            rating: fsrsRating,
-            review: reviewTime
-        });
-        const refreshedState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
-        if (refreshedState) {
-            studyState.knowledgeStates?.set(card.id, refreshedState);
-        }
 
         if (analyticsManager) {
-            analyticsManager.trackSystemMetric('fsrs_review', fsrsRating, {
+            analyticsManager.trackSystemMetric('fsrs_review', fsrsResult?.rating ?? fsrsRating, {
                 deckId: currentDeckId,
                 due: fsrsSnapshot?.due || null,
-                stability: updatedCardState?.stability || null,
+                stability: fsrsResult?.state?.stability || null,
                 questionType: 'Spaced'
             }, 'info');
         }
@@ -6587,126 +6977,200 @@ function markIncorrect(isAutomated = false) {
     }, 200);
 }
 
-function insertAccent(char, targetId) {
-    const textarea = document.getElementById(targetId);
-    if (!textarea) {
-        console.error(`[Accents] Target textarea #${targetId} not found`);
-        return;
+let studyAccentModule = null;
+let testAccentModule = null;
+
+function insertCharacterAtCursor(input, char) {
+    if (!input || input.disabled) return;
+    const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+    const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+    input.value = input.value.substring(0, start) + char + input.value.substring(end);
+    const newPos = start + char.length;
+    if (typeof input.setSelectionRange === 'function') {
+        input.setSelectionRange(newPos, newPos);
     }
-
-    // Check if hidden
-    if (textarea.classList.contains('hidden') || textarea.style.display === 'none') {
-        console.warn(`[Accents] Target textarea #${targetId} is hidden. Cannot insert.`);
-        return;
-    }
-
-    console.log(`[Accents] Inserting ${char} into ${targetId}`);
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-
-    textarea.value = textarea.value.substring(0, start) + char + textarea.value.substring(end);
-
-    // Move cursor after the inserted character
-    textarea.selectionStart = textarea.selectionEnd = start + 1;
-    textarea.focus();
+    input.focus();
+    input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-
-async function toggleAccentButtons() {
-    console.log('[Accents] Toggle button clicked. Current state:', globalSettings.showAccents);
-
-    globalSettings.showAccents = !globalSettings.showAccents;
-
-    await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
-
-    console.log('[Accents] New state saved:', globalSettings.showAccents);
-    updateAccentButtonsVisibility();
-}
-
-
-function updateAccentButtonsVisibility() {
-    const container = document.getElementById('accentButtonsContainer');
-    if (!container) {
-        console.error('[Accents] Container #accentButtonsContainer not found in DOM');
+function AccentModule(config) {
+    this.config = config;
+    this.moduleEl = document.getElementById(config.moduleId);
+    this.toggleBtn = document.getElementById(config.toggleId);
+    this.buttonsContainer = document.getElementById(config.buttonsId);
+    this.inputEl = document.getElementById(config.inputId);
+    this.getDeck = config.getDeck;
+    this.priorityBase = null;
+    this.isExpanded = false;
+    this.lastDeckId = null;
+    this.lastRenderedHtml = '';
+    this.isReady = Boolean(this.moduleEl && this.toggleBtn && this.buttonsContainer && this.inputEl && this.getDeck);
+    if (!this.isReady) {
         return;
     }
+    this.buttonsContainer.setAttribute('aria-label', config.ariaLabel || 'Accent characters');
+    this.toggleBtn.setAttribute('aria-controls', config.buttonsId);
+    this.toggleBtn.setAttribute('aria-expanded', 'false');
+    this.toggleBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        this.toggle();
+    });
+    this.buttonsContainer.addEventListener('click', (event) => this.handleAccentClick(event));
+    this.inputEl.addEventListener('input', () => this.handleInputChange());
+    const observer = new MutationObserver(() => {
+        const shouldShow = !this.inputEl.classList.contains('hidden');
+        this.updateVisibility(shouldShow);
+    });
+    observer.observe(this.inputEl, { attributes: true, attributeFilter: ['class'] });
+    this.updateVisibility(!this.inputEl.classList.contains('hidden'));
+}
 
-    if (globalSettings.showAccents) {
-        console.log('[Accents] Showing buttons...');
-        if (container.innerHTML.trim() === '') {
-            populateAccentButtons();
+AccentModule.prototype.getAccentUtils = function () {
+    return window.AccentUtils;
+};
+
+AccentModule.prototype.handleAccentClick = function (event) {
+    const button = event.target.closest('button[data-accent]');
+    if (!button) return;
+    event.preventDefault();
+    insertCharacterAtCursor(this.inputEl, button.dataset.accent || '');
+};
+
+AccentModule.prototype.handleInputChange = function () {
+    const accentUtils = this.getAccentUtils();
+    if (!accentUtils) return;
+    const start = typeof this.inputEl.selectionStart === 'number' ? this.inputEl.selectionStart : 0;
+    if (start <= 0) {
+        if (this.priorityBase) {
+            this.priorityBase = null;
+            this.renderButtonsForCurrentDeck();
         }
-        container.classList.remove('hidden');
-
-        container.style.display = 'flex';
-    } else {
-        console.log('[Accents] Hiding buttons...');
-        container.classList.add('hidden');
-        container.style.display = 'none';
+        return;
     }
-}
-
-
-
-function populateAccentButtons() {
-    const accents = ['à', 'á', 'â', 'ä', 'æ', 'ã', 'å', 'ā',
-        'è', 'é', 'ê', 'ë',
-        'ì', 'í', 'î', 'ï',
-        'ò', 'ó', 'ô', 'ö', 'õ', 'ø',
-        'ù', 'ú', 'û', 'ü',
-        'ç', 'ñ', 'ß',
-        'ý', 'ÿ'];
-    const container = document.getElementById('accentButtonsContainer');
-    if (!container) return;
-
-    console.log('[Accents] Populating button HTML');
-
-    container.innerHTML = accents.map(char =>
-        `<button type="button" 
-                        class="accent-btn" 
-                        style="background: var(--button-secondary-bg); border: 1px solid var(--border-color); color: var(--button-secondary-text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 1.1rem; min-width: 32px;"
-                        onmousedown="event.preventDefault(); insertAccent('${char}', 'writeAnswerInput')">
-                    ${char}
-                </button>`
-    ).join('');
-}
-
-async function toggleTestAccentButtons() {
-    globalSettings.showAccents = !globalSettings.showAccents;
-    await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
-    updateTestAccentButtonsVisibility();
-}
-
-function updateTestAccentButtonsVisibility() {
-    const container = document.getElementById('testAccentButtonsContainer');
-    if (globalSettings.showAccents) {
-        populateTestAccentButtons();
-        container.classList.remove('hidden');
-    } else {
-        container.classList.add('hidden');
+    const char = this.inputEl.value.charAt(start - 1);
+    const baseKey = accentUtils.getAccentBaseKey(char);
+    if (!baseKey) {
+        if (this.priorityBase) {
+            this.priorityBase = null;
+            this.renderButtonsForCurrentDeck();
+        }
+        return;
     }
-}
+    if (baseKey !== this.priorityBase) {
+        this.priorityBase = baseKey;
+        this.renderButtonsForCurrentDeck();
+    }
+};
 
-function populateEditorAccentButtons(container, textarea) {
-    if (!container || !textarea) return;
-    const accents = ['Ã ', 'Ã¢', 'Ã©', 'Ã¨', 'Ãª', 'Ã«', 'Ã®', 'Ã¯', 'Ã´', 'Ã¹', 'Ã»', 'Ã¼', 'Ã§', 'Ã±', 'ÃŸ', 'Ã¤', 'Ã¶'];
-    container.innerHTML = accents.map(char =>
-        `<button onclick="insertAccentIntoEditor('${char}', this)" style="background: var(--button-secondary-bg); border: 1px solid var(--border-color); color: var(--button-secondary-text); padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 1rem;">${char}</button>`
-    ).join('');
-    // Show accent buttons by default in editor
-    container.classList.remove('hidden');
-}
+AccentModule.prototype.toggle = function () {
+    const accentUtils = this.getAccentUtils();
+    const deck = this.getDeck?.();
+    const accentData = deck && accentUtils?.ensureDeckAccentMetadata ? accentUtils.ensureDeckAccentMetadata(deck) : null;
+    this.renderButtons(deck, accentData);
+    this.isExpanded = !this.isExpanded;
+    if (this.isExpanded) {
+        this.buttonsContainer.classList.remove('hidden');
+    } else {
+        this.buttonsContainer.classList.add('hidden');
+    }
+    this.toggleBtn.setAttribute('aria-expanded', String(this.isExpanded));
+};
 
-function insertAccentIntoEditor(char, button) {
-    const container = button.parentElement;
-    const textarea = container.previousElementSibling;
-    if (!textarea || !textarea.classList.contains('question-input') && !textarea.classList.contains('solution-input')) return;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    textarea.value = textarea.value.substring(0, start) + char + textarea.value.substring(end);
-    textarea.selectionStart = textarea.selectionEnd = start + 1;
-    textarea.focus();
+AccentModule.prototype.collapse = function () {
+    this.isExpanded = false;
+    this.buttonsContainer.classList.add('hidden');
+    this.toggleBtn.setAttribute('aria-expanded', 'false');
+};
+
+AccentModule.prototype.getOrderedAccentList = function (list, baseMap) {
+    if (!this.priorityBase || !baseMap) return list;
+    const prioritized = baseMap[this.priorityBase] || [];
+    if (!prioritized.length) return list;
+    const rest = list.filter((char) => !prioritized.includes(char));
+    return [...prioritized, ...rest];
+};
+
+AccentModule.prototype.renderButtons = function (deck, accentData) {
+    const accents = accentData?.accents || [];
+    if (!accents.length) {
+        this.buttonsContainer.innerHTML = '';
+        this.lastRenderedHtml = '';
+        return;
+    }
+    const ordered = this.getOrderedAccentList(accents, accentData.baseMap || {});
+    const html = ordered.map((char) => `<button type="button" class="deck-accent-button" data-accent="${char}" aria-label="Insert ${char}">${char}</button>`).join('');
+    if (html === this.lastRenderedHtml) {
+        return;
+    }
+    this.buttonsContainer.innerHTML = html;
+    this.lastRenderedHtml = html;
+    if (!this.isExpanded) {
+        this.buttonsContainer.classList.add('hidden');
+    }
+};
+
+AccentModule.prototype.renderButtonsForCurrentDeck = function () {
+    const accentUtils = this.getAccentUtils();
+    const deck = this.getDeck?.();
+    const accentData = deck && accentUtils?.ensureDeckAccentMetadata ? accentUtils.ensureDeckAccentMetadata(deck) : { accents: [], baseMap: {} };
+    this.renderButtons(deck, accentData);
+};
+
+AccentModule.prototype.updateVisibility = function (shouldShow) {
+    const accentUtils = this.getAccentUtils();
+    const deck = this.getDeck?.();
+    const accentData = deck && accentUtils?.ensureDeckAccentMetadata ? accentUtils.ensureDeckAccentMetadata(deck) : { accents: [], baseMap: {} };
+    const hasAccents = Array.isArray(accentData.accents) && accentData.accents.length > 0;
+    const displayModule = shouldShow && hasAccents;
+    this.moduleEl.classList.toggle('hidden', !displayModule);
+    if (!displayModule) {
+        this.collapse();
+        this.buttonsContainer.innerHTML = '';
+        this.lastRenderedHtml = '';
+        this.priorityBase = null;
+        this.lastDeckId = null;
+        return;
+    }
+    if (deck && deck.id && deck.id !== this.lastDeckId) {
+        this.priorityBase = null;
+    }
+    this.lastDeckId = deck?.id || null;
+    this.renderButtons(deck, accentData);
+};
+
+AccentModule.prototype.refresh = function () {
+    this.lastDeckId = null;
+    this.updateVisibility(!this.inputEl.classList.contains('hidden'));
+};
+
+function initializeAccentModules() {
+    if (typeof window === 'undefined' || !window.AccentUtils) return;
+    if (!studyAccentModule || !studyAccentModule.isReady) {
+        const module = new AccentModule({
+            moduleId: 'deckAccentModule',
+            toggleId: 'deckAccentToggle',
+            buttonsId: 'deckAccentButtons',
+            inputId: 'writeAnswerInput',
+            ariaLabel: 'Deck accent characters',
+            getDeck: () => decks[currentDeckId]
+        });
+        studyAccentModule = module.isReady ? module : null;
+    } else {
+        studyAccentModule.refresh();
+    }
+    if (!testAccentModule || !testAccentModule.isReady) {
+        const module = new AccentModule({
+            moduleId: 'testAccentModule',
+            toggleId: 'testAccentToggle',
+            buttonsId: 'testAccentButtons',
+            inputId: 'testAnswerInput',
+            ariaLabel: 'Deck accent characters',
+            getDeck: () => decks[practiceTestState.deckId]
+        });
+        testAccentModule = module.isReady ? module : null;
+    } else {
+        testAccentModule.refresh();
+    }
 }
 
 let currentAutocompleteSuggestion = null;
@@ -6929,7 +7393,7 @@ function showComplete() {
 
     document.getElementById('progressView').classList.add('hidden');
     document.getElementById('cardView').classList.add('hidden');
-    document.getElementById('preGenerationView').classList.add('hidden');
+    hidePreGenerationViewImmediately();
 
     const completeView = document.getElementById('completeView');
     completeView.classList.remove('hidden');
@@ -6994,7 +7458,7 @@ async function endSession() {
     if (currentMode === 'exam' && originPlanId) {
         showPlanDetails(originPlanId);
     } else {
-        backToDashboard();
+        backToDashboard(false, true);
     }
 }
 
@@ -7016,15 +7480,19 @@ async function restartStudy() {
 
             const resetPromises = deck.cards.map(card => {
                 return new Promise((resolveCard, rejectCard) => {
-                    const defaultState = {
+                    const defaultState = createDefaultKnowledgeState({ id: card.id, deckID: deck.id }, {
                         userID: 'default_user',
-                        cardID: card.id,
-                        masteryScore: 0.5,
+                        deckID: deck.id,
                         stability: 1.0,
                         lastReviewed: new Date().toISOString(),
-                        recallHistory: [],
                         fsrs: null
-                    };
+                    });
+
+                    if (!defaultState) {
+                        console.warn('[DB] Skipped reset for card due to missing identifiers', card);
+                        resolveCard();
+                        return;
+                    }
 
                     const request = store.put(defaultState);
                     request.onsuccess = resolveCard;
@@ -7161,6 +7629,12 @@ function shuffleArray(array) {
     return newArray;
 }
 
+function parseDeckNumericInput(value, fallback, min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+}
+
 function openDeckSettingsModal(deckId) {
     currentViewingDeckId = deckId;
     const deck = decks[deckId];
@@ -7186,8 +7660,14 @@ function openDeckSettingsModal(deckId) {
 
     toggleExamSettingsVisibility();
 
-    document.getElementById('deckSettingsCardsPerRound').value = settings.cardsPerRound || 10;
-    document.getElementById('deckSettingsLearnHorizon').value = settings.learnHorizonDays || 0;
+    const defaultCardsPerRound = Number.isFinite(settings.cardsPerRound) && settings.cardsPerRound > 0
+        ? settings.cardsPerRound
+        : (DEFAULT_DECK_SETTINGS.cardsPerRound || 10);
+    document.getElementById('deckSettingsCardsPerRound').value = defaultCardsPerRound;
+    const defaultLearnHorizon = Number.isFinite(settings.learnHorizonDays) && settings.learnHorizonDays >= 0
+        ? settings.learnHorizonDays
+        : (typeof DEFAULT_DECK_SETTINGS.learnHorizonDays === 'number' ? DEFAULT_DECK_SETTINGS.learnHorizonDays : 0);
+    document.getElementById('deckSettingsLearnHorizon').value = defaultLearnHorizon;
 
     document.getElementById('adaptiveAutoToggle').checked = settings.adaptiveModes?.auto ?? true;
     document.getElementById('adaptiveMcqToggle').checked = settings.adaptiveModes?.mcq ?? true;
@@ -7223,6 +7703,7 @@ async function saveDeckSettings() {
 }
 
 async function completeSaveDeckSettings(deck) {
+    deck.settings = deck.settings || {};
     const isExamEnabled = document.getElementById('deckSettingsExamModeToggle').checked;
 
     if (isExamEnabled) {
@@ -7234,10 +7715,23 @@ async function completeSaveDeckSettings(deck) {
     }
 
     const retentionInput = document.getElementById('deckSettingsRetention').value;
-    deck.settings.targetRetention = parseInt(retentionInput) / 100;
+    deck.settings.targetRetention = parseInt(retentionInput, 10) / 100;
 
-    deck.settings.cardsPerRound = parseInt(document.getElementById('deckSettingsCardsPerRound').value);
-    deck.settings.learnHorizonDays = parseInt(document.getElementById('deckSettingsLearnHorizon').value) || 0;
+    const safeCardsPerRound = parseDeckNumericInput(
+        document.getElementById('deckSettingsCardsPerRound').value,
+        DEFAULT_DECK_SETTINGS.cardsPerRound || 10,
+        1,
+        200
+    );
+    deck.settings.cardsPerRound = safeCardsPerRound;
+
+    const safeLearnHorizon = parseDeckNumericInput(
+        document.getElementById('deckSettingsLearnHorizon').value,
+        typeof DEFAULT_DECK_SETTINGS.learnHorizonDays === 'number' ? DEFAULT_DECK_SETTINGS.learnHorizonDays : 0,
+        0,
+        365
+    );
+    deck.settings.learnHorizonDays = safeLearnHorizon;
     deck.settings.retypeIncorrect = document.getElementById('retypeIncorrectToggle').checked;
 
     deck.settings.caseSensitive = document.getElementById('caseSensitiveToggle').checked;
@@ -7324,10 +7818,18 @@ async function importData() {
                         const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
                         const store = transaction.objectStore('userKnowledgeState');
                         knowledgeData.forEach(state => {
-                            const newCardId = oldIdToNewIdMap.get(state.cardID);
+                            const newCardId = oldIdToNewIdMap.get(state.cardID || state.cardId);
                             if (newCardId) {
-                                state.cardID = newCardId;
-                                store.put(state);
+                                const normalizedState = prepareKnowledgeRecord({
+                                    ...state,
+                                    cardID: newCardId,
+                                    deckID: newDeckId || state.deckID || state.deckId || null
+                                });
+                                if (normalizedState) {
+                                    store.put(normalizedState);
+                                } else {
+                                    console.warn('[IMPORT] Skipped malformed knowledge state', state);
+                                }
                             }
                         });
 
@@ -7421,6 +7923,22 @@ if (typeof compressImage === 'undefined') {
     }
 }
 
+const CONFIRM_PROCESSING_LABEL = 'Processing...';
+const CONFIRM_DEFAULT_LABEL = (function () {
+    if (typeof document === 'undefined') return 'Confirm';
+    const btn = document.getElementById('confirmActionConfirmBtn');
+    return btn?.textContent?.trim() || 'Confirm';
+})();
+
+function resetConfirmButtonState(button) {
+    if (!button) return;
+    button.disabled = false;
+    button.textContent = CONFIRM_DEFAULT_LABEL;
+    button.removeAttribute('aria-busy');
+    button.removeAttribute('data-busy');
+    button.classList.remove('is-busy', 'busy');
+}
+
 function showConfirmModal(text, onConfirm, title = "Confirm Action") {
     const modal = document.getElementById('confirmActionModal');
     document.getElementById('confirmActionTitle').textContent = title;
@@ -7429,19 +7947,19 @@ function showConfirmModal(text, onConfirm, title = "Confirm Action") {
     const confirmBtn = document.getElementById('confirmActionConfirmBtn');
     const newConfirmBtn = confirmBtn.cloneNode(true);
     confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    resetConfirmButtonState(newConfirmBtn);
 
     newConfirmBtn.addEventListener('click', async () => {
-        // Disable button to prevent multiple clicks
         newConfirmBtn.disabled = true;
-        newConfirmBtn.textContent = 'Processing...';
+        newConfirmBtn.textContent = CONFIRM_PROCESSING_LABEL;
+        newConfirmBtn.setAttribute('aria-busy', 'true');
         try {
             await onConfirm();
             cancelAction();
         } catch (error) {
             console.error('Error in confirm action:', error);
             showToast('An error occurred. Please try again.', 'error');
-            newConfirmBtn.disabled = false;
-            newConfirmBtn.textContent = 'Confirm';
+            resetConfirmButtonState(newConfirmBtn);
         }
     });
 
@@ -7450,10 +7968,12 @@ function showConfirmModal(text, onConfirm, title = "Confirm Action") {
 
 function cancelAction() {
     document.getElementById('confirmActionModal').classList.remove('show');
+    resetConfirmButtonState(document.getElementById('confirmActionConfirmBtn'));
 }
 
 function openPracticeTestModal(deckId) {
     practiceTestState.deckId = deckId;
+    testAccentModule?.refresh();
     document.getElementById('numQuestions').max = decks[deckId].cards.length;
     document.getElementById('numQuestions').value = Math.min(10, decks[deckId].cards.length);
     document.getElementById('practiceTestModal').classList.add('show');
@@ -7465,6 +7985,7 @@ function closePracticeTestModal() {
 
 function startPracticeTest() {
     const deckId = practiceTestState.deckId;
+    testAccentModule?.refresh();
     const deck = decks[deckId];
     const testType = document.getElementById('testType').value;
     const numQuestions = parseInt(document.getElementById('numQuestions').value);
@@ -7494,7 +8015,7 @@ function startPracticeTest() {
 
     closePracticeTestModal();
 
-    showView('practiceTestView');
+    transitionView('practiceTestView');
     document.getElementById('testSubtitle').textContent = deck.name;
 
     updateTestProgress();
@@ -7541,6 +8062,8 @@ function showNextTestQuestion() {
     document.getElementById('testSequenceView').classList.add('hidden');
     document.getElementById('testRegularView').classList.remove('hidden');
 
+    const testAnswerInputEl = document.getElementById('testAnswerInput');
+
     const card = practiceTestState.cards[practiceTestState.currentCardIndex];
     let currentTestType = testType;
     if (testType === 'mixed') {
@@ -7560,8 +8083,9 @@ function showNextTestQuestion() {
     document.getElementById('testCorrectBtn').classList.add('hidden');
     document.getElementById('testIncorrectBtn').classList.add('hidden');
     document.getElementById('testNextBtn').classList.add('hidden');
-    document.getElementById('testAccentToggleBtn').classList.add('hidden');
-    testAnswerInput.classList.remove('correct', 'incorrect');
+    if (testAnswerInputEl) {
+        testAnswerInputEl.classList.remove('correct', 'incorrect');
+    }
     document.getElementById('testCardInfo').textContent =
         `Question ${practiceTestState.currentCardIndex + 1} of ${practiceTestState.numQuestions}`;
 
@@ -7575,8 +8099,6 @@ function showNextTestQuestion() {
         document.getElementById('testCheckAnswerBtn').classList.remove('hidden');
         document.getElementById('testAnswerInput').focus();
 
-        document.getElementById('testAccentToggleBtn').classList.remove('hidden');
-        updateTestAccentButtonsVisibility();
 
     } else {
         document.getElementById('testShowAnswerBtn').classList.remove('hidden');
@@ -7714,7 +8236,7 @@ function restartTest() {
 }
 
 function endTest() {
-    showView('dashboard');
+    transitionView('dashboard', false, null, false);
 }
 
 async function updateStreak() {
@@ -7791,7 +8313,7 @@ async function showAnalyticsView() {
         sessionList.innerHTML = '<p style="color: var(--secondary-text); text-align: center;">No study sessions recorded yet.</p>';
     }
 
-    showView('analyticsView', false, () => {
+    transitionView('analyticsView', false, () => {
         renderAnalyticsActivityChart(activityData);
         renderAnalyticsDeckBreakdownChart(deckData);
     });
@@ -7864,13 +8386,39 @@ function renderAnalyticsDeckBreakdownChart(deckData) {
 
 function checkForUpdates(event) {
     event.preventDefault();
-    console.log('[Updates] Checking for updates');
+    if (window.electronAPI && window.electronAPI.checkForUpdates) {
+        if (!window._updateListenerRegistered) {
+            window._updateListenerRegistered = true;
+            window.electronAPI.onUpdateStatus((payload) => {
+                const ev = payload && payload.event;
+                if (ev === 'checking-for-update') {
+                    showToast('Checking for updates...', 'info');
+                } else if (ev === 'update-available') {
+                    const v = payload.info && payload.info.version ? ` ${payload.info.version}` : '';
+                    showToast(`Update available${v}`, 'info');
+                } else if (ev === 'update-not-available') {
+                    showToast('No updates available', 'info');
+                } else if (ev === 'download-progress') {
+                    const p = payload.progress && payload.progress.percent ? Math.round(payload.progress.percent) : null;
+                    showToast(p !== null ? `Downloading update: ${p}%` : 'Downloading update...', 'info');
+                } else if (ev === 'update-downloaded') {
+                    showToast('Update downloaded. Restart to install.', 'info');
+                    try {
+                        if (confirm('An update is ready. Restart and install now?')) {
+                            window.electronAPI.quitAndInstallUpdate();
+                        }
+                    } catch (e) {}
+                } else if (ev === 'error') {
+                    showToast(`Update error: ${payload && payload.error ? payload.error : 'Unknown error'}`, 'error');
+                }
+            });
+        }
 
-    if (window.electronAPI) {
-        console.log('[Updates] Using Electron auto-update');
-        showToast('Checking for updates...', 'info');
+        window.electronAPI.checkForUpdates().catch(err => {
+            showToast(`Update check failed: ${err && err.message ? err.message : String(err)}`, 'error');
+            window.open('https://github.com/TJ7755/Lagiote-Revise/releases', '_blank');
+        });
     } else {
-        console.log('[Updates] Web environment - opening GitHub releases');
         showToast('Opening updates page...', 'info');
         window.open('https://github.com/TJ7755/Lagiote-Revise/releases', '_blank');
     }
@@ -8009,87 +8557,22 @@ function updateFocusMeter() {
     };
 }
 
-async function updateKnowledgeState(card, wasCorrect, iqs = 0.5, questionType = 'Flashcard', newStability = null, fsrsSnapshot = null, fsrsMeta = null) {
-    if (!db) return;
-    const deckID = card.deckId || card.deckID || card.deck || currentDeckId || null;
-    const knowledgeId = `${'default_user'}:${card.id}`;
-    const baselineState = await getOrCreateKnowledgeState('default_user', card.id, deckID);
-    const nowIso = new Date().toISOString();
-    let state = {
-        ...baselineState,
-        deckID,
-        id: knowledgeId,
-        lastModified: nowIso
-    };
-    state.recallHistory = Array.isArray(state.recallHistory) ? [...state.recallHistory] : [];
-    const prevStability = (typeof state.stability === 'number' && isFinite(state.stability))
-        ? state.stability
-        : 1.0;
-
-    if (fsrsSnapshot) {
-        const snapshot = serializeFsrsCard(fsrsSnapshot);
-        state.fsrs = snapshot;
-        if (newStability === null && typeof snapshot?.stability === 'number') {
-            newStability = snapshot.stability;
-        }
-    }
-
-    let masteryScore = typeof state.masteryScore === 'number' ? state.masteryScore : 0.5;
-    let stability = prevStability;
-    let consecutiveCorrect = state.consecutiveCorrect || 0;
-    const maxStability = 365;
-
-    if (newStability !== null && Number.isFinite(Number(newStability))) {
-        const incoming = Number(newStability);
-        stability = wasCorrect && incoming < prevStability ? prevStability : incoming;
-    } else if (wasCorrect) {
-        const learningGain = 0.18 + (iqs * 0.25);
-        masteryScore += (1 - masteryScore) * learningGain;
-        stability += (0.05 + iqs * 0.4) * Math.max(1, Math.log1p(stability));
-        consecutiveCorrect += 1;
-    } else {
-        const penalty = 0.15 + (1 - iqs) * 0.35;
-        masteryScore -= masteryScore * penalty;
-        stability -= stability * (0.25 + (1 - iqs) * 0.25);
-        consecutiveCorrect = Math.max(0, consecutiveCorrect - 1);
-    }
-
-    stability = Math.min(maxStability, Math.max(0.5, stability));
-    masteryScore = Math.max(0.01, Math.min(0.99, masteryScore));
-
-    const lastReviewed = fsrsMeta?.review ? new Date(fsrsMeta.review).toISOString() : nowIso;
-    state = {
-        ...state,
-        userID: 'default_user',
-        deckID,
-        id: knowledgeId,
-        masteryScore,
-        stability,
-        consecutiveCorrect,
-        lastReviewed,
-        lastModified: nowIso
-    };
-    state.recallHistory = [...state.recallHistory, { date: lastReviewed, wasCorrect, iqs, rating: fsrsMeta?.rating || null }];
-
-    const updatedState = await upsertKnowledgeState(state);
-    if (!studyState.knowledgeStates) studyState.knowledgeStates = new Map();
-    studyState.knowledgeStates.set(card.id, updatedState);
-    return updatedState;
-}
-
 function calculatePRecall(stability, lastReviewedISO) {
-    if (!lastReviewedISO || !stability) return 0.5;
-    return calculateFSRSRetrievability(stability, lastReviewedISO, new Date());
+    const utils = getKnowledgeStateUtils();
+    const stabilityValue = utils.coerceFsrsNumber(stability);
+    if (!lastReviewedISO || !stabilityValue) return 0.5;
+    const reviewedDate = utils.parseFsrsDate(lastReviewedISO);
+    if (!reviewedDate) return 0.5;
+    return calculateFSRSRetrievability(stabilityValue, reviewedDate, new Date());
 }
 
 function calculateRetentionAtDate(state, targetDate) {
     if (!state) return 0;
-    const fsrsState = state.fsrs || null;
-    const stability = typeof fsrsState?.stability === 'number'
-        ? fsrsState.stability
-        : (typeof state.stability === 'number' ? state.stability : 0);
-    const lastReviewedRaw = fsrsState?.last_review || state.lastReviewed || null;
-    const lastReviewed = lastReviewedRaw ? new Date(lastReviewedRaw) : null;
+    const utils = getKnowledgeStateUtils();
+    const fsrsState = state.fsrs || {};
+    const stability = utils.coerceFsrsNumber(fsrsState.stability ?? state.stability);
+    const lastReviewedRaw = fsrsState.last_review || state.lastReviewed || null;
+    const lastReviewed = utils.parseFsrsDate(lastReviewedRaw);
     if (!stability || !lastReviewed) return 0;
     const target = targetDate ? new Date(targetDate) : new Date();
     return calculateFSRSRetrievability(stability, lastReviewed, target);
@@ -8099,151 +8582,6 @@ function calculateExamRetention(state, examDate) {
     if (!state) return 0;
     const target = examDate ? new Date(examDate) : new Date();
     return calculateRetentionAtDate(state, target);
-}
-
-const LEARN_MODE_NN_VERSION = 1;
-const LEARN_MODE_NN_INPUT_SIZE = 9;
-const LEARN_MODE_NN_HIDDEN_SIZE = 16;
-let learnModeNNModel = null;
-let learnModeNNInitialised = false;
-
-function clamp(value, min, max) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return min;
-    return Math.min(Math.max(n, min), max);
-}
-
-function safeNumber(value, fallback) {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-}
-
-function getLearnModeFeaturesForCard(card, knowledgeState, deck, examDate) {
-    const now = new Date();
-    const targetDate = examDate || now;
-    const projectedRetentionRaw = typeof card?.projectedRetention === 'number'
-        ? card.projectedRetention
-        : (examDate ? calculateExamRetention(knowledgeState, targetDate) : calculateRetentionAtDate(knowledgeState, now));
-    const projectedRetention = clamp(projectedRetentionRaw, 0, 1);
-
-    let stability = 0;
-    if (typeof knowledgeState?.fsrs?.stability === 'number') {
-        stability = knowledgeState.fsrs.stability;
-    } else if (typeof knowledgeState?.stability === 'number') {
-        stability = knowledgeState.stability;
-    }
-    const stabilityValue = Math.log10(1 + Math.max(0, stability));
-
-    const daysUntilExam = examDate ? clamp((targetDate.getTime() - now.getTime()) / 86400000, 0, 90) / 90 : 0;
-
-    const lastReviewedRaw = knowledgeState?.lastReviewed || knowledgeState?.fsrs?.last_review || null;
-    let daysSinceLastReview = 0;
-    if (lastReviewedRaw) {
-        const diff = (now.getTime() - new Date(lastReviewedRaw).getTime()) / 86400000;
-        daysSinceLastReview = clamp(diff, 0, 180) / 180;
-    }
-
-    const fsrsReps = clamp(safeNumber(knowledgeState?.fsrs?.reps, 0) / 50, 0, 1);
-    const fsrsLapses = clamp(safeNumber(knowledgeState?.fsrs?.lapses, 0) / 30, 0, 1);
-
-    const masteryScore = clamp(typeof knowledgeState?.masteryScore === 'number' ? knowledgeState.masteryScore : 0.5, 0, 1);
-    const isExamMode = deck?.settings?.examDate && examDate && examDate > now ? 1 : 0;
-    const targetRetention = clamp(deck?.settings?.targetRetention || 0.8, 0, 1);
-
-    const features = [
-        projectedRetention,
-        stabilityValue,
-        daysUntilExam,
-        daysSinceLastReview,
-        fsrsReps,
-        fsrsLapses,
-        masteryScore,
-        isExamMode,
-        targetRetention
-    ];
-
-    return features.map(v => Number.isFinite(v) ? v : 0);
-}
-
-function isValidLearnModeNNModel(model) {
-    if (!model || model.version !== LEARN_MODE_NN_VERSION) return false;
-    if (model.inputSize !== LEARN_MODE_NN_INPUT_SIZE) return false;
-    if (model.hiddenSize !== LEARN_MODE_NN_HIDDEN_SIZE) return false;
-    if (!Array.isArray(model.W1) || model.W1.length !== LEARN_MODE_NN_HIDDEN_SIZE) return false;
-    if (!Array.isArray(model.b1) || model.b1.length !== LEARN_MODE_NN_HIDDEN_SIZE) return false;
-    if (!Array.isArray(model.W2) || model.W2.length !== 1 || !Array.isArray(model.W2[0]) || model.W2[0].length !== LEARN_MODE_NN_HIDDEN_SIZE) return false;
-    if (typeof model.b2 !== 'number') return false;
-    return true;
-}
-
-function createDefaultLearnModeNNModel() {
-    const W1 = [];
-    for (let i = 0; i < LEARN_MODE_NN_HIDDEN_SIZE; i++) {
-        const row = [];
-        for (let j = 0; j < LEARN_MODE_NN_INPUT_SIZE; j++) {
-            row.push((Math.random() * 0.2) - 0.1);
-        }
-        W1.push(row);
-    }
-    const W2Row = [];
-    for (let i = 0; i < LEARN_MODE_NN_HIDDEN_SIZE; i++) {
-        W2Row.push((Math.random() * 0.2) - 0.1);
-    }
-    return {
-        version: LEARN_MODE_NN_VERSION,
-        inputSize: LEARN_MODE_NN_INPUT_SIZE,
-        hiddenSize: LEARN_MODE_NN_HIDDEN_SIZE,
-        W1,
-        b1: new Array(LEARN_MODE_NN_HIDDEN_SIZE).fill(0),
-        W2: [W2Row],
-        b2: 0
-    };
-}
-
-async function loadLearnModeNNModel() {
-    if (learnModeNNInitialised && learnModeNNModel) return learnModeNNModel;
-    let stored = null;
-    try {
-        stored = await getDataFromDB('appData', 'learnModeNNModel');
-    } catch (error) {
-        stored = null;
-    }
-    if (isValidLearnModeNNModel(stored)) {
-        learnModeNNModel = stored;
-    } else {
-        learnModeNNModel = createDefaultLearnModeNNModel();
-    }
-    learnModeNNInitialised = true;
-    return learnModeNNModel;
-}
-
-async function saveLearnModeNNModel(model) {
-    if (!isValidLearnModeNNModel(model)) throw new Error('Invalid learn mode NN model');
-    learnModeNNModel = model;
-    await saveDataToDB('appData', { key: 'learnModeNNModel', ...model });
-}
-
-function runLearnModeNN(features) {
-    if (!learnModeNNModel) return null;
-    const { inputSize, hiddenSize, W1, b1, W2, b2 } = learnModeNNModel;
-    if (!Array.isArray(features) || features.length !== inputSize) return null;
-    if (!Array.isArray(W1) || !Array.isArray(b1) || !Array.isArray(W2)) return null;
-    const hidden = new Array(hiddenSize).fill(0);
-    for (let i = 0; i < hiddenSize; i++) {
-        let sum = 0;
-        const row = W1[i];
-        for (let j = 0; j < inputSize; j++) {
-            sum += (row?.[j] || 0) * features[j];
-        }
-        sum += b1[i] || 0;
-        hidden[i] = sum > 0 ? sum : 0;
-    }
-    let output = b2 || 0;
-    const w2Row = W2[0];
-    for (let i = 0; i < hiddenSize; i++) {
-        output += (w2Row?.[i] || 0) * hidden[i];
-    }
-    return output;
 }
 
 
@@ -8386,11 +8724,10 @@ async function startSequenceSession(deckId) {
         studyState.sequenceForwardQueue = [];
     }
 
-    showView('studyMode');
+    transitionView('studyMode');
+    resetStudySubViews();
     document.getElementById('studyTitle').textContent = 'Sequence Learner';
     document.getElementById('studySubtitle').textContent = deck.name;
-
-    document.getElementById('progressView').classList.add('hidden');
     transitionSubView(null, document.getElementById('cardView'));
 
     if (studyState.sequencePhase) {
@@ -8463,21 +8800,37 @@ function selectOptimalQuestionType(card, deckOverride = null, modeOverride = cur
 
 async function generateAndDisplayMCQ(correctCard) {
     const optionsContainer = document.getElementById('mcqOptions');
-    const deckForThisCard = decks[correctCard.deckId];
+    if (!optionsContainer) return;
+    optionsContainer.innerHTML = '';
+    optionsContainer.classList.remove('hidden');
+    const placeholder = document.createElement('div');
+    placeholder.className = 'mcq-placeholder';
+    placeholder.textContent = 'Generating options...';
+    optionsContainer.appendChild(placeholder);
 
+    studyState.pendingMCQToken = (studyState.pendingMCQToken || 0) + 1;
+    const requestToken = studyState.pendingMCQToken;
+    studyState.pendingMCQCardId = correctCard.id;
+
+    const finalizeOptions = (options) => {
+        if (studyState.pendingMCQToken !== requestToken) return;
+        if (studyState.pendingMCQCardId !== correctCard.id) return;
+        displayMCQButtons(options, correctCard);
+    };
+
+    const deckForThisCard = decks[correctCard.deckId];
     if (!deckForThisCard) {
         console.error("Deck not found for card:", correctCard.id, "DeckID:", correctCard.deckId);
         console.log("Available decks:", Object.keys(decks));
-        // Fallback to simple flashcard if deck is missing (shouldn't happen)
+        optionsContainer.innerHTML = '';
         return;
     }
 
-    // Check if card in study state has cached distractors
     const cardInDeck = deckForThisCard.cards.find(c => c.id === correctCard.id);
     if (cardInDeck?.distractors && cardInDeck.distractors.length >= 3) {
         console.log("[MCQ] Using cached distractors for card:", correctCard.id);
         const finalOptions = shuffleArray([correctCard.answer, ...cardInDeck.distractors]);
-        displayMCQButtons(finalOptions, correctCard);
+        finalizeOptions(finalOptions);
         return;
     }
 
@@ -8523,17 +8876,14 @@ async function generateAndDisplayMCQ(correctCard) {
             }
 
             if (generatedDistractors && generatedDistractors.length >= 3) {
-                // Cache distractors in both the deck and the study state card
                 if (cardInDeck) {
                     cardInDeck.distractors = generatedDistractors;
                     await saveDataToDB('decks', deckForThisCard);
                     console.log("[MCQ] Distractors cached to deck for card:", correctCard.id);
                 }
-                // Also update the study state card
                 correctCard.distractors = generatedDistractors;
-
                 const finalOptions = shuffleArray([correctCard.answer, ...generatedDistractors]);
-                displayMCQButtons(finalOptions, correctCard);
+                finalizeOptions(finalOptions);
                 return;
             } else {
                 console.warn("[MCQ] API returned insufficient distractors:", generatedDistractors?.length || 0);
@@ -8560,7 +8910,7 @@ async function generateAndDisplayMCQ(correctCard) {
         else break;
     }
     const finalOptions = shuffleArray(Array.from(options));
-    displayMCQButtons(finalOptions, correctCard);
+    finalizeOptions(finalOptions);
 }
 
 function displayMCQButtons(options, correctCard) {
@@ -8728,74 +9078,73 @@ async function preGenerateAdaptiveQuestions(roundCards, progressCallback) {
 
     // Start countdown interval
     const countdownInterval = setInterval(updateCountdown, 100);
+    studyState.preGenerationCountdownInterval = countdownInterval;
     updateCountdown(); // Initial update
 
     // Phase 1: Initial preloading with time limit
-    for (let i = 0; i < cardsToGenerate.length; i += BATCH_SIZE) {
-        // Check if we've exceeded time limit
-        if (Date.now() - startTime > MAX_PRELOAD_TIME) {
-            console.log(`Preload time limit reached. Generated ${completedJobs}/${totalJobs} distractors. Remaining will generate in background.`);
-            showToast(`Pre-loaded ${completedJobs} questions. Others loading in background...`, 'info');
+    try {
+        for (let i = 0; i < cardsToGenerate.length; i += BATCH_SIZE) {
+            // Check if we've exceeded time limit
+            if (Date.now() - startTime > MAX_PRELOAD_TIME) {
+                console.log(`Preload time limit reached. Generated ${completedJobs}/${totalJobs} distractors. Remaining will generate in background.`);
+                showToast(`Pre-loaded ${completedJobs} questions. Others loading in background...`, 'info');
 
-            // Clear countdown interval
-            clearInterval(countdownInterval);
-
-            // Phase 2: Continue generation in background while user studies
-            const remainingCards = cardsToGenerate.slice(i);
-            if (remainingCards.length > 0) {
-                // Start background generation (non-blocking)
-                setTimeout(() => {
-                    continueBackgroundGeneration(remainingCards, completedJobs, totalJobs, progressCallback);
-                }, 2000); // Start after 2 seconds to let study session begin
-            }
-            break;
-        }
-
-        const batch = cardsToGenerate.slice(i, i + BATCH_SIZE);
-
-        const batchPromises = batch.map(card => {
-            let apiPromise;
-            const requestBody = {
-                question: card.question,
-                answer: card.answer
-            };
-
-            if (isElectron) {
-                apiPromise = window.electronAPI.generateDistractors(requestBody);
-            } else {
-                apiPromise = fetch('/.netlify/functions/generateDistractors', {
-                    method: 'POST',
-                    body: JSON.stringify(requestBody)
-                })
-                    .then(response => {
-                        if (!response.ok) throw new Error('Server function for distractors failed.');
-                        return response.json();
-                    })
-                    .then(result => result.distractors);
-            }
-
-            return apiPromise.then(distractors => {
-                if (distractors && distractors.length >= 3) {
-                    studyState.preGeneratedDistractors.set(card.id, distractors);
+                const remainingCards = cardsToGenerate.slice(i);
+                if (remainingCards.length > 0) {
+                    setTimeout(() => {
+                        continueBackgroundGeneration(remainingCards, completedJobs, totalJobs, progressCallback);
+                    }, 2000);
                 }
-            }).catch(error => {
-                console.error(`Failed to pre-generate for card: ${card.question}`, error);
-            }).finally(() => {
-                completedJobs++;
-                if (progressCallback) progressCallback(completedJobs, totalJobs);
+                break;
+            }
+
+            const batch = cardsToGenerate.slice(i, i + BATCH_SIZE);
+
+            const batchPromises = batch.map(card => {
+                let apiPromise;
+                const requestBody = {
+                    question: card.question,
+                    answer: card.answer
+                };
+
+                if (isElectron) {
+                    apiPromise = window.electronAPI.generateDistractors(requestBody);
+                } else {
+                    apiPromise = fetch('/.netlify/functions/generateDistractors', {
+                        method: 'POST',
+                        body: JSON.stringify(requestBody)
+                    })
+                        .then(response => {
+                            if (!response.ok) throw new Error('Server function for distractors failed.');
+                            return response.json();
+                        })
+                        .then(result => result.distractors);
+                }
+
+                return apiPromise.then(distractors => {
+                    if (distractors && distractors.length >= 3) {
+                        studyState.preGeneratedDistractors.set(card.id, distractors);
+                    }
+                }).catch(error => {
+                    console.error(`Failed to pre-generate for card: ${card.question}`, error);
+                }).finally(() => {
+                    completedJobs++;
+                    if (progressCallback) progressCallback(completedJobs, totalJobs);
+                });
             });
-        });
 
-        await Promise.all(batchPromises);
+            await Promise.all(batchPromises);
 
-        // Add delay if there are more batches
-        if (i + BATCH_SIZE < cardsToGenerate.length) {
-            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            if (i + BATCH_SIZE < cardsToGenerate.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            }
         }
+    } finally {
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+        studyState.preGenerationCountdownInterval = null;
     }
-
-    // Clear countdown interval when preload completes
-    clearInterval(countdownInterval);
 }
 
 // New function: Continue generating distractors in background during study
@@ -8880,7 +9229,7 @@ function updateOnlineStatusUI() {
 }
 
 function showAiGenerator() {
-    showView('aiGenerator');
+    transitionView('aiGenerator');
     documentsForAi = [];
     renderDocumentList();
     renderAiGeneratedCards([]);
@@ -8903,7 +9252,7 @@ function renderDocumentList() {
                     <div class="document-item" data-doc-id="${doc.id}">
                         <div class="document-item-header">
                             <span class="document-name">
-                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? 'âœ“' : 'ðŸ“„')}</span>
+                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? '✓' : 'FILE')}</span>
                                 ${doc.name}
                             </span>
                             <button class="remove-doc-btn" onclick="removeDocument(${index})">&times;</button>
@@ -9059,35 +9408,6 @@ async function processAllDocuments() {
                     throw new Error(`Server function error: ${response.status}`);
                 }
                 return response.json();
-            }).then(result => {
-
-                if (!result) throw new Error('Empty response from server function.');
-
-                // Normalize response to include deckName if missing
-                const deckName = result.deckName || "AI Generated Deck";
-
-                if (result.type === 'flashcard' && Array.isArray(result.cards)) {
-                    return { cards: result.cards.map(c => ({ question: c.question || c.q || '', answer: c.answer || c.a || '' })), deckName };
-                }
-
-                if (result.type === 'flashcard-legacy' && result.flashcardText) {
-                    const cards = result.flashcardText.split('\n').map(line => {
-                        const parts = line.split('\t');
-                        return parts.length === 2 && parts[0].trim() && parts[1].trim()
-                            ? { question: parts[0].trim(), answer: parts[1].trim() }
-                            : null;
-                    }).filter(Boolean);
-                    return { cards, deckName };
-                }
-
-                if (result.type === 'sequence' && Array.isArray(result.sequences)) {
-                    return {
-                        sequences: result.sequences.map(s => ({ _isSequence: true, title: s.title || s.term || s.name || '', description: s.description || s.desc || s.note || '', steps: s.steps || [] })),
-                        deckName
-                    };
-                }
-
-                throw new Error('Unexpected response format from AI function.');
             });
         }
         const generatedCards = await Promise.race([timeoutPromise, apiPromise]);
@@ -9099,28 +9419,8 @@ async function processAllDocuments() {
             throw new Error(generatedCards.message || "Cannot generate cards offline");
         }
 
-        // Ensure we have an array
-        let cardsArray;
-        if (Array.isArray(generatedCards)) {
-            cardsArray = generatedCards;
-        } else if (generatedCards && Array.isArray(generatedCards.cards)) {
-            // Server returned {cards: [...]}
-            cardsArray = generatedCards.cards;
-        } else if (generatedCards && Array.isArray(generatedCards.sequences)) {
-            // Server returned {sequences: [...]}
-            cardsArray = generatedCards.sequences;
-        } else {
-            console.error('[AI Generation] Unexpected response format:', generatedCards);
-            throw new Error("AI returned data in an unexpected format.");
-        }
-
-        if (!cardsArray || cardsArray.length === 0) {
-            console.error('[AI Generation] Empty cards array. Full response:', JSON.stringify(generatedCards, null, 2));
-            throw new Error("AI did not return any cards. Check console for full response.");
-        }
-
-        // Pass the full object to preserve deckName and deckNotes
-        renderAiGeneratedCards(generatedCards);
+        const normalizedDeck = normalizeAiDeckResponse(generatedCards);
+        renderAiGeneratedCards(normalizedDeck);
         document.getElementById('flashcard-summary').classList.remove('hidden');
     } catch (error) {
         console.error("Deck generation failed:", error);
@@ -9146,6 +9446,8 @@ function renderAiGeneratedCards(cardsData) {
     let cards = [];
     let deckName = null;
     let deckNotes = null;
+    let deckLanguage = '';
+    let deckType = 'flashcard';
 
     if (Array.isArray(cardsData)) {
         cards = cardsData;
@@ -9153,6 +9455,15 @@ function renderAiGeneratedCards(cardsData) {
         cards = cardsData.cards || cardsData.sequences;
         deckName = cardsData.deckName;
         deckNotes = cardsData.deckNotes;
+        deckLanguage = cardsData.language || '';
+        deckType = cardsData.type || deckType;
+    } else if (cardsData && typeof cardsData === 'object' && !Array.isArray(cardsData)) {
+        // Fallback in case of normalized object with unexpected keys
+        cards = cardsData.cards || cardsData.sequences || [];
+        deckName = cardsData.deckName;
+        deckNotes = cardsData.deckNotes;
+        deckLanguage = cardsData.language || '';
+        deckType = cardsData.type || deckType;
     }
 
     listContainer.dataset.cards = JSON.stringify(cards);
@@ -9162,6 +9473,8 @@ function renderAiGeneratedCards(cardsData) {
     if (deckNotes) {
         listContainer.dataset.deckNotes = deckNotes;
     }
+    listContainer.dataset.language = deckLanguage || '';
+    listContainer.dataset.deckType = deckType || 'flashcard';
 
     listContainer.innerHTML = '';
     if (cards.length === 0) {
@@ -9248,8 +9561,14 @@ function renderAiGeneratedCards(cardsData) {
     });
 
     const heading = document.getElementById('flashcard-count');
-    const isSequence = cards.length > 0 && cards[0]._isSequence;
-    heading.textContent = isSequence ? `Generated Sequences (${cards.length})` : `Generated Flashcards (${cards.length})`;
+    const deckTypeFromData = listContainer.dataset.deckType || '';
+    const isSequence = deckTypeFromData.toLowerCase() === 'sequence' || (cards.length > 0 && cards[0]._isSequence);
+    if (isSequence) {
+        const totalSteps = cards.reduce((count, card) => count + (Array.isArray(card.steps) ? card.steps.length : 0), 0) || cards.length;
+        heading.textContent = `Generated Sequence${totalSteps === 1 ? '' : 's'} (${totalSteps} steps)`;
+    } else {
+        heading.textContent = `Generated Flashcards (${cards.length})`;
+    }
 }
 
 function deleteGeneratedCard(index) {
@@ -9272,20 +9591,37 @@ async function saveAiGeneratedDeck() {
         return;
     }
 
+    const deckTypeFromDataset = (listContainer.dataset.deckType || 'flashcard').toLowerCase();
+    const isSequenceType = deckTypeFromDataset === 'sequence' || (cards[0] && cards[0]._isSequence);
 
-    if (cards[0] && cards[0]._isSequence) {
-        const finalCards = cards.map((s, idx) => ({
-            id: crypto.randomUUID(),
-            question: s.description || '',
-            answer: s.title || '',
-            order: idx + 1,
-            isNew: true,
-            questionImage: '',
-            answerImage: ''
-        }));
+
+    if (isSequenceType) {
+        const finalCards = [];
+        let orderCounter = 0;
+        cards.forEach(sequence => {
+            const steps = splitSteps(sequence.steps || sequence.sequence || sequence.items);
+            const question = sequence.description || sequence.title || '';
+            steps.forEach(step => {
+                orderCounter += 1;
+                finalCards.push({
+                    id: crypto.randomUUID(),
+                    question,
+                    answer: step,
+                    order: orderCounter,
+                    isNew: true,
+                    questionImage: '',
+                    answerImage: ''
+                });
+            });
+        });
+
+        if (!finalCards.length) {
+            showToast("No sequence steps were detected to save.", "error");
+            return;
+        }
 
         await createNewDeck(deckName, 'Other', finalCards, aiDeckNotes, 'Sequence');
-        showToast(`Sequence deck "${deckName}" created successfully!`, 'success');
+        showToast(`Sequence deck "${deckName}" created successfully with ${finalCards.length} steps!`, 'success');
         backToDashboard();
         return;
     }
@@ -9504,7 +9840,7 @@ async function showInsightsView() {
         });
 
         const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
-        const knowledgeMap = new Map(allKnowledgeStates.map(item => [item.cardID, item]));
+        const knowledgeMap = new Map(allKnowledgeStates.map(item => [String(item.cardID), item]));
 
 
         document.getElementById('insightsContent').classList.add('hidden');
@@ -9535,7 +9871,7 @@ async function showInsightsView() {
         });
     };
 
-    showView('insightsView', false, setupInsights);
+    transitionView('insightsView', false, setupInsights);
 }
 
 function updateCardDetailListForInsights(deckId, knowledgeMap) {
@@ -9546,13 +9882,13 @@ function updateCardDetailListForInsights(deckId, knowledgeMap) {
     list.innerHTML = '';
 
     deck.cards.forEach(card => {
-        const state = knowledgeMap.get(card.id);
+        const state = knowledgeMap.get(String(card.id));
         const retention = calculateRetentionAtDate(state, targetDate);
         if (globalSettings.devMode) {
             console.log("[FSRS insights] retention used:", retention);
         }
-        const retentionPercent = Math.round((Number.isFinite(retention) ? retention : 0) * 100);
-        const stability = state?.stability?.toFixed(1) || 'N/A';
+        const retentionPercent = state && Number.isFinite(retention) ? Math.round(retention * 100) : null;
+        const stabilityText = Number.isFinite(state?.stability) ? `${state.stability.toFixed(1)}d` : 'N/A';
 
         const cardItem = document.createElement('div');
         cardItem.className = 'deck-card-item';
@@ -9563,7 +9899,7 @@ function updateCardDetailListForInsights(deckId, knowledgeMap) {
         const metaDiv = document.createElement('div');
         metaDiv.style.color = 'var(--secondary-text)';
         metaDiv.style.fontWeight = '500';
-        metaDiv.textContent = `Retention: ${retentionPercent}% | Stability: ${stability}d`;
+        metaDiv.textContent = `Retention: ${retentionPercent === null ? 'N/A' : retentionPercent + '%'} | Stability: ${stabilityText}`;
         cardItem.appendChild(qDiv);
         cardItem.appendChild(metaDiv);
 
@@ -9605,7 +9941,7 @@ function renderForgettingCurveChart(cardState, deckId) {
         return;
     }
 
-    const card = decks[deckId]?.cards.find(c => c.id === cardState.cardID);
+    const card = decks[deckId]?.cards.find(c => String(c.id) === String(cardState.cardID));
     if (!card) {
         cardDetailP.textContent = 'Error: Could not find card details.';
         return;
@@ -9659,7 +9995,7 @@ function renderMasteryBreakdownChart(deckId, knowledgeMap) {
     const targetDate = examDate || new Date();
     let counts = { weak: 0, medium: 0, strong: 0 };
     deck.cards.forEach(card => {
-        const retention = calculateRetentionAtDate(knowledgeMap.get(card.id), targetDate);
+        const retention = calculateRetentionAtDate(knowledgeMap.get(String(card.id)), targetDate);
         if (globalSettings.devMode) {
             console.log("[FSRS insights] retention used:", retention);
         }
@@ -9874,7 +10210,7 @@ async function startExamPlanSession(planId) {
     studyState.examDate = currentPlan ? new Date(currentPlan.examDate) : null;
     studyState.targetRetention = currentPlan?.targetRetention || 0.8;
 
-    showView('studyMode');
+    transitionView('studyMode');
     document.getElementById('studyTitle').textContent = 'Exam Plan Session';
     document.getElementById('studySubtitle').textContent = currentPlan ? currentPlan.name : 'Studying';
 
@@ -9915,7 +10251,7 @@ async function showPlanDetails(planId) {
 
     renderPlanAnalytics(plan, knowledgeMap);
 
-    showView('planDetailView');
+    transitionView('planDetailView');
 }
 
 function renderPlanAnalytics(plan, knowledgeMap) {
@@ -10113,16 +10449,16 @@ async function updateUIAfterLogin(user) {
 
     document.getElementById('loggedInView').classList.remove('hidden');
     await loadUserDataAndSync();
+    initializeAccentModules();
 
     loadCookieConsent();
 
-    transitionView('dashboard');
+    transitionView('dashboard', false, null, false);
 }
 
 function updateUIAfterLogout() {
     document.getElementById('userProfileMenu').classList.add('hidden');
     document.getElementById('userProfileDropdown').classList.add('hidden');
-    document.getElementById('appHeader').classList.remove('hidden');
     document.getElementById('welcomeMessage').textContent = `Lagiote Revise`;
     document.getElementById('loggedInView').classList.remove('hidden');
 
@@ -10130,7 +10466,7 @@ function updateUIAfterLogout() {
     analyticsData = {};
     updateDashboard();
 
-    showView('dashboard');
+    transitionView('dashboard', false, null, false);
 }
 
 async function clearLocalData() {
@@ -10300,12 +10636,20 @@ async function loadUserDataAndSync() {
         allDecks.forEach(deck => localDecksMap.set(deck.id, deck));
 
         let conflictsResolved = 0;
-        for (const serverDeck of syncResult.updatedDecks) {
-            const localDeck = localDecksMap.get(serverDeck.id);
+        const skipStats = { decks: 0, knowledgeStates: 0, examPlans: 0 };
+        const updatedDecks = Array.isArray(syncResult.updatedDecks) ? syncResult.updatedDecks : [];
+        for (const serverDeck of updatedDecks) {
+            const normalizedDeck = normalizeDeckRecord(serverDeck);
+            if (!normalizedDeck) {
+                logSyncSkip('deck', 'missing identifier', serverDeck);
+                skipStats.decks += 1;
+                continue;
+            }
+            const localDeck = localDecksMap.get(normalizedDeck.id);
 
             if (localDeck) {
                 // Conflict resolution: compare timestamps
-                const serverTime = serverDeck.lastModified ? new Date(serverDeck.lastModified) : new Date(0);
+                const serverTime = normalizedDeck.lastModified ? new Date(normalizedDeck.lastModified) : new Date(0);
                 const localTime = localDeck.lastModified ? new Date(localDeck.lastModified) : new Date(0);
 
                 if (localTime > serverTime) {
@@ -10321,8 +10665,7 @@ async function loadUserDataAndSync() {
                 }
             }
 
-            // Update with server version
-            deckStore.put(serverDeck);
+            deckStore.put(normalizedDeck);
         }
 
         // CRITICAL FIX: Reload all decks from IndexedDB after sync
@@ -10356,16 +10699,35 @@ async function loadUserDataAndSync() {
 
         const knowledgeTransaction = db.transaction(['userKnowledgeState'], 'readwrite');
         const knowledgeStore = knowledgeTransaction.objectStore('userKnowledgeState');
-        for (const serverState of syncResult.updatedKnowledgeStates) {
-            knowledgeStore.put(serverState);
+        const updatedStates = Array.isArray(syncResult.updatedKnowledgeStates) ? syncResult.updatedKnowledgeStates : [];
+        for (const serverState of updatedStates) {
+            const normalizedState = prepareKnowledgeRecord(serverState);
+            if (normalizedState) {
+                knowledgeStore.put(normalizedState);
+            } else {
+                logSyncSkip('knowledge state', 'missing card or user id', serverState);
+                skipStats.knowledgeStates += 1;
+            }
         }
 
         if (syncResult.updatedExamPlans) {
             const planTransaction = db.transaction(['examPlans'], 'readwrite');
             const planStore = planTransaction.objectStore('examPlans');
             for (const serverPlan of syncResult.updatedExamPlans) {
-                planStore.put(serverPlan);
+                const normalizedPlan = normalizeExamPlanRecord(serverPlan);
+                if (normalizedPlan) {
+                    planStore.put(normalizedPlan);
+                } else {
+                    logSyncSkip('exam plan', 'missing id', serverPlan);
+                    skipStats.examPlans += 1;
+                }
             }
+        }
+
+        const skippedTotal = Object.values(skipStats).reduce((sum, count) => sum + count, 0);
+        if (skippedTotal > 0) {
+            console.warn('[SYNC] Skipped records summary:', skipStats);
+            showToast(`Sync skipped ${skippedTotal} invalid record(s). Check console for details.`, 'warning');
         }
 
         if (syncResult.updatedSettings) {
@@ -10418,7 +10780,7 @@ async function showCurriculaLibrary() {
         showToast("You must be online to browse the Curricula Library.", "error");
         return;
     }
-    showView('libraryView');
+    transitionView('libraryView');
     const grid = document.getElementById('libraryGrid');
     grid.innerHTML = '<p>Loading courses...</p>';
 
@@ -10646,16 +11008,19 @@ async function resetSpecificDeck(deckId) {
         // Create reset promises for all cards in this deck
         const resetPromises = deck.cards.map(card => {
             return new Promise((resolve, reject) => {
-                const defaultState = prepareKnowledgeRecord({
+                const defaultState = createDefaultKnowledgeState({ id: card.id, deckID: deck.id }, {
                     userID: 'default_user',
-                    cardID: card.id,
                     deckID: deck.id,
-                    masteryScore: 0.5,
                     stability: 1.0,
                     lastReviewed: new Date().toISOString(),
-                    recallHistory: [],
                     fsrs: null
                 });
+
+                if (!defaultState) {
+                    console.warn('[DB] Skipped reset for card due to missing identifiers', card);
+                    resolve();
+                    return;
+                }
 
                 const request = store.put(defaultState);
                 request.onsuccess = resolve;
@@ -10705,49 +11070,342 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Global Analytics stub - placeholder for now
-// TODO: Migrate full analytics rendering from main.js when module refactoring is complete
 async function renderGlobalAnalytics() {
     try {
-        showView('globalAnalyticsView');
+        transitionView('globalAnalyticsView');
 
-        const allDecks = Object.values(decks);
-        const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
-        const knowledgeMap = new Map(allKnowledgeStates.map(item => [item.cardID, item]));
-
-        const allCards = allDecks.flatMap(deck => deck.cards);
-
-        // Render forecast graph placeholder: do not write into a <canvas> using innerHTML
-        const forecastCanvas = document.getElementById('globalForecastGraphCanvas');
-        if (forecastCanvas) {
-            forecastCanvas.style.display = 'none';
-            let placeholder = document.getElementById('globalForecastGraphPlaceholder');
-            if (!placeholder) {
-                placeholder = document.createElement('div');
-                placeholder.id = 'globalForecastGraphPlaceholder';
-                placeholder.style.cssText = 'text-align: center; color: var(--secondary-text); padding: 40px;';
-                forecastCanvas.parentNode && forecastCanvas.parentNode.appendChild(placeholder);
+        const allDecks = Object.values(decks || {});
+        const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState').catch(error => {
+            console.warn('Failed to load user knowledge states for analytics', error);
+            return [];
+        });
+        const normalizedStates = [];
+        const normalizationTasks = [];
+        for (const rawState of allKnowledgeStates) {
+            const normalized = prepareKnowledgeRecord(rawState);
+            if (!normalized) continue;
+            normalizedStates.push(normalized);
+            if (shouldPersistNormalizedState(rawState, normalized)) {
+                normalizationTasks.push(
+                    saveDataToDB('userKnowledgeState', normalized).catch(error => {
+                        console.warn('Failed to persist normalized knowledge state', normalized?.id, error);
+                    })
+                );
             }
-            placeholder.textContent = 'Analytics visualization coming soon...';
+        }
+        if (normalizationTasks.length) {
+            await Promise.all(normalizationTasks);
+        }
+        const knowledgeMap = new Map(normalizedStates.map(state => [String(state.cardID), state]));
+        const now = new Date();
+        const cortex = await getCortexEngine();
+        const knowledgeStateUtils = getKnowledgeStateUtils();
+        const cardDeckPairs = allDecks.flatMap(deck => {
+            if (!deck || !Array.isArray(deck.cards)) return [];
+            return deck.cards.map(card => ({ card, deck }));
+        });
+
+        const analyticsStats = {
+            totalCards: cardDeckPairs.length,
+            reviewedCards: 0,
+            unreviewedCards: 0,
+            missingFsrs: 0,
+            lastReviewedButZero: 0
+        };
+        for (const { card } of cardDeckPairs) {
+            const knowledgeState = knowledgeMap.get(String(card.id));
+            if (!knowledgeState) {
+                analyticsStats.unreviewedCards++;
+                continue;
+            }
+            if (!knowledgeState.fsrs) {
+                analyticsStats.missingFsrs++;
+            }
+            const isReviewed = knowledgeStateUtils.isKnowledgeStateReviewed(knowledgeState);
+            analyticsStats[isReviewed ? 'reviewedCards' : 'unreviewedCards']++;
+            const lastReviewedIso = ensureIsoString(knowledgeState.lastReviewed || knowledgeState.fsrs?.last_review, '');
+            const stabilityValue = knowledgeStateUtils.coerceFsrsNumber(knowledgeState.fsrs?.stability ?? knowledgeState.stability);
+            const repsValue = knowledgeStateUtils.coerceFsrsNumber(knowledgeState.fsrs?.reps ?? knowledgeState.reps);
+            if (lastReviewedIso && (stabilityValue <= 0 || repsValue <= 0)) {
+                analyticsStats.lastReviewedButZero++;
+            }
+        }
+        if (studyState.cortexDebugEnabled) {
+            console.info('[Cortex Debug] Global analytics summaries', analyticsStats);
         }
 
-        // Render knowledge heatmap placeholder
+        const forecastCanvasId = 'globalForecastGraphCanvas';
+        const forecastCanvas = document.getElementById(forecastCanvasId);
+        const forecastParent = forecastCanvas?.parentElement || null;
+        const forecastMessageId = 'globalForecastNoReviewDataMessage';
+
+        const forecastEligible = [];
+        for (const pair of cardDeckPairs) {
+            const knowledgeState = knowledgeMap.get(String(pair.card.id));
+            if (!knowledgeState || !knowledgeStateUtils.isKnowledgeStateReviewed(knowledgeState)) continue;
+            forecastEligible.push({ pair, knowledgeState });
+        }
+
+        const chartContext = getCanvasContextById(forecastCanvasId);
+        if (chartInstances[forecastCanvasId]) {
+            try {
+                chartInstances[forecastCanvasId].destroy();
+            } catch (err) {
+                console.warn('Failed to destroy previous global forecast chart', err);
+            }
+            delete chartInstances[forecastCanvasId];
+        }
+
+        const showForecastMessage = (text) => {
+            if (!forecastParent) return;
+            let messageEl = document.getElementById(forecastMessageId);
+            if (!messageEl) {
+                messageEl = document.createElement('div');
+                messageEl.id = forecastMessageId;
+                messageEl.style.cssText = 'text-align: center; color: var(--secondary-text); padding: 24px 0;';
+                forecastParent.appendChild(messageEl);
+            }
+            messageEl.textContent = text;
+        };
+
+        const removeForecastMessage = () => {
+            const existing = document.getElementById(forecastMessageId);
+            if (existing) {
+                existing.remove();
+            }
+        };
+
+        if (!forecastEligible.length || !chartContext) {
+            if (forecastCanvas) {
+                forecastCanvas.style.display = 'none';
+            }
+            showForecastMessage('No review data yet. Complete a study session to generate insights.');
+        } else {
+            if (forecastCanvas) {
+                forecastCanvas.style.display = '';
+            }
+            removeForecastMessage();
+
+            const horizonDeadline = (() => {
+                const futureExamDates = allDecks
+                    .map(deck => deck?.settings?.examDate)
+                    .map(value => (value ? new Date(value) : null))
+                    .filter(date => date instanceof Date && !Number.isNaN(date.getTime()) && date > now);
+                if (!futureExamDates.length) return null;
+                return futureExamDates.reduce((latest, date) => (date > latest ? date : latest));
+            })();
+
+            let horizonDays = 30;
+            if (horizonDeadline) {
+                const dayDiff = Math.round((horizonDeadline - now) / (24 * 60 * 60 * 1000));
+                horizonDays = Math.min(60, Math.max(7, dayDiff || 7));
+            }
+
+            const labels = [];
+            const data = [];
+            const baseDate = new Date(now);
+            baseDate.setHours(0, 0, 0, 0);
+
+            for (let dayOffset = 0; dayOffset <= horizonDays; dayOffset++) {
+                const targetDate = new Date(baseDate);
+                targetDate.setDate(baseDate.getDate() + dayOffset);
+                labels.push(targetDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }));
+                let retentionSum = 0;
+                let retentionCount = 0;
+                for (const entry of forecastEligible) {
+                    const retention = calculateRetentionAtDate(entry.knowledgeState, targetDate);
+                    if (typeof retention === 'number' && !Number.isNaN(retention)) {
+                        retentionSum += retention;
+                        retentionCount += 1;
+                    }
+                }
+                const average = retentionCount ? (retentionSum / retentionCount) : 0;
+                data.push(average * 100);
+            }
+
+            chartInstances[forecastCanvasId] = new Chart(chartContext, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Average retrievability (%)',
+                        data,
+                        borderColor: 'rgb(102, 126, 234)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.25)',
+                        fill: true,
+                        tension: 0.25,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const value = typeof context.parsed?.y === 'number' ? context.parsed.y : 0;
+                                    return `Average retrievability: ${value.toFixed(0)}%`;
+                                }
+                            }
+                        },
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Days from today'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Retrievability (%)'
+                            },
+                            min: 0,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+
         const heatmapContainer = document.getElementById('globalKnowledgeHeatmapContainer');
         if (heatmapContainer) {
             heatmapContainer.innerHTML = '';
-            for (let i = 0; i < Math.min(allCards.length, 30); i++) {
+            const fragment = document.createDocumentFragment();
+            const heatmapLimit = 1000;
+            const totalCards = cardDeckPairs.length;
+            const cardsForHeatmap = cardDeckPairs.slice(0, heatmapLimit);
+            for (const { card, deck } of cardsForHeatmap) {
+                const knowledgeState = knowledgeMap.get(String(card.id));
+                const isReviewed = knowledgeStateUtils.isKnowledgeStateReviewed(knowledgeState);
+                let level = 'unreviewed';
+                let retentionPercent = 'Not reviewed';
+                let lastReviewedText = 'Never reviewed';
+
+                if (isReviewed) {
+                    const retentionValue = calculateRetentionAtDate(knowledgeState, now);
+                    const numericRetention = Number.isFinite(retentionValue) ? retentionValue : 0;
+                    level = 'very-high';
+                    if (numericRetention < 0.40) {
+                        level = 'low';
+                    } else if (numericRetention < 0.75) {
+                        level = 'medium';
+                    } else if (numericRetention < 0.90) {
+                        level = 'high';
+                    }
+                    retentionPercent = `${Math.round(numericRetention * 100)}%`;
+                    const lastReviewedValue = knowledgeState?.fsrs?.last_review || knowledgeState?.lastReviewed;
+                    if (lastReviewedValue) {
+                        const date = new Date(lastReviewedValue);
+                        if (!Number.isNaN(date.getTime())) {
+                            lastReviewedText = `Last reviewed ${date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+                        }
+                    }
+                }
+
+                const deckName = deck?.name || 'Untitled deck';
+                const trimmedQuestion = (card.question || 'Untitled card').replace(/\s+/g, ' ').trim().substring(0, 80);
                 const cell = document.createElement('div');
                 cell.className = 'heatmap-cell';
-                cell.setAttribute('data-stability-level', 'medium');
-                cell.title = `Card ${i + 1}`;
-                heatmapContainer.appendChild(cell);
+                cell.setAttribute('data-stability-level', level);
+                cell.title = `${deckName} • ${trimmedQuestion} • Retention: ${retentionPercent} • ${lastReviewedText}`;
+                fragment.appendChild(cell);
+            }
+            heatmapContainer.appendChild(fragment);
+
+            const summaryText = totalCards > heatmapContainer.childElementCount
+                ? `Showing ${Math.min(totalCards, heatmapLimit).toLocaleString('en-GB')} of ${totalCards.toLocaleString('en-GB')} cards`
+                : '';
+            const summaryId = 'globalHeatmapSummaryCaption';
+            const existingSummary = document.getElementById(summaryId);
+            if (summaryText) {
+                if (existingSummary) {
+                    existingSummary.textContent = summaryText;
+                } else if (heatmapContainer.parentElement) {
+                    const summaryEl = document.createElement('div');
+                    summaryEl.id = summaryId;
+                    summaryEl.style.cssText = 'text-align: center; font-size: 0.85rem; color: var(--secondary-text); margin-top: 8px;';
+                    summaryEl.textContent = summaryText;
+                    heatmapContainer.parentElement.appendChild(summaryEl);
+                }
+            } else if (existingSummary) {
+                existingSummary.remove();
             }
         }
 
-        // Render problem cards list
         const problemCardsContainer = document.getElementById('globalProblemCardsListContainer');
         if (problemCardsContainer) {
-            problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text); padding: 20px;">No problem cards data yet. Complete study sessions to populate this section.</p>';
+            problemCardsContainer.innerHTML = '';
+            const problemEntries = [];
+            for (const { card, deck } of cardDeckPairs) {
+                const knowledgeState = knowledgeMap.get(String(card.id));
+                if (!knowledgeState || !knowledgeStateUtils.isKnowledgeStateReviewed(knowledgeState)) continue;
+                const targetDate = cortex.buildTargetDate(deck, now);
+                const retentionNow = calculateRetentionAtDate(knowledgeState, now);
+                const retentionTarget = calculateRetentionAtDate(knowledgeState, targetDate);
+                problemEntries.push({
+                    card,
+                    deck,
+                    targetDate,
+                    retentionNow: Number.isFinite(retentionNow) ? retentionNow : 0,
+                    retentionTarget: Number.isFinite(retentionTarget) ? retentionTarget : 0
+                });
+            }
+
+            problemEntries.sort((a, b) => {
+                if (a.retentionTarget !== b.retentionTarget) {
+                    return a.retentionTarget - b.retentionTarget;
+                }
+                return a.retentionNow - b.retentionNow;
+            });
+
+            const topProblems = problemEntries.slice(0, 15);
+            if (!topProblems.length) {
+                const message = document.createElement('p');
+                message.style.cssText = 'text-align: center; color: var(--secondary-text); padding: 20px 0;';
+                message.textContent = 'No problem cards yet…';
+                problemCardsContainer.appendChild(message);
+            } else {
+                const fragment = document.createDocumentFragment();
+                for (const entry of topProblems) {
+                    const cardItem = document.createElement('div');
+                    cardItem.className = 'card-item';
+                    cardItem.tabIndex = 0;
+                    cardItem.style.cursor = (typeof showDeckDetail === 'function') ? 'pointer' : 'default';
+
+                    const questionEl = document.createElement('div');
+                    questionEl.className = 'question';
+                    const questionText = (entry.card.question || 'Untitled card').replace(/\s+/g, ' ').trim();
+                    questionEl.textContent = questionText;
+                    questionEl.title = questionText;
+
+                    const difficultyEl = document.createElement('div');
+                    difficultyEl.className = 'difficulty';
+                    const nowPercent = Math.round(entry.retentionNow * 100);
+                    const targetPercent = Math.round(entry.retentionTarget * 100);
+                    const targetLabel = entry.targetDate?.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) || '';
+                    const deckName = entry.deck?.name || 'Untitled deck';
+                    difficultyEl.textContent = `${deckName} • Now: ${nowPercent}% • By target: ${targetPercent}% (${targetLabel})`;
+
+                    if (typeof showDeckDetail === 'function') {
+                        cardItem.addEventListener('click', () => showDeckDetail(entry.deck.id));
+                        cardItem.addEventListener('keydown', (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                showDeckDetail(entry.deck.id);
+                            }
+                        });
+                    }
+
+                    cardItem.appendChild(questionEl);
+                    cardItem.appendChild(difficultyEl);
+                    fragment.appendChild(cardItem);
+                }
+                problemCardsContainer.appendChild(fragment);
+            }
         }
 
         showToast('Global Analytics loaded', 'info');
@@ -10757,20 +11415,213 @@ async function renderGlobalAnalytics() {
     }
 }
 
-window.debugLoadLearnModeNNModel = loadLearnModeNNModel;
-window.debugSetLearnModeNNModel = async function (model) {
-    await saveLearnModeNNModel(model);
-};
-window.debugScoreLearnCard = async function (cardId) {
-    const deck = decks[currentDeckId];
-    if (!deck) return null;
-    const knowledgeStates = studyState.knowledgeStates || new Map();
-    const ks = knowledgeStates.get(cardId);
-    const examDate = studyState.examDate || (deck.settings?.examDate ? new Date(deck.settings.examDate) : new Date());
-    await loadLearnModeNNModel();
-    const features = getLearnModeFeaturesForCard(deck.cards.find(c => c.id === cardId) || null, ks || null, deck, examDate);
-    return runLearnModeNN(features);
-};
+function normalizeCardRecord(entry, type) {
+    const questionValue = (entry.question || entry.q || entry.term || entry.prompt || '').toString().trim();
+    const answerValue = (entry.answer || entry.a || entry.definition || entry.response || '').toString().trim();
+    let question = questionValue;
+    if (type === 'vocab' && !question && entry.term) {
+        question = `Define: ${entry.term}`;
+    }
+    return { question, answer: answerValue };
+}
+
+const DEFAULT_SEQUENCE_TITLE = 'Sequence';
+const SEQUENCE_STEP_SOURCES = ['steps', 'sequence', 'items'];
+const STEP_PREFIX_REGEX = /^\s*(?:\d+[\.\)]|\(\d+\)|[-\u2013\u2014\u2022\u2023\u2024\u25E6])\s*/;
+
+function convertStepToString(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    if (typeof value === 'object') {
+        return String(value.answer || value.term || value.step || value.text || value.label || value.value || value.question || '');
+    }
+    return '';
+}
+
+function cleanStepText(value) {
+    const text = convertStepToString(value);
+    const sanitized = text.replace(STEP_PREFIX_REGEX, '');
+    return sanitized.trim();
+}
+
+function splitSteps(value) {
+    if (Array.isArray(value)) {
+        return value.map(item => cleanStepText(item)).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value.split(/\r?\n/).map(line => cleanStepText(line)).filter(Boolean);
+    }
+    return [];
+}
+
+function hasSequenceSources(entry) {
+    if (!entry || typeof entry !== 'object') return false;
+    return SEQUENCE_STEP_SOURCES.some(key => entry[key] !== undefined && entry[key] !== null);
+}
+
+function hasStepText(entry) {
+    if (!entry || typeof entry !== 'object') return false;
+    return Boolean(cleanStepText(entry.answer || entry.term || entry.step || entry.text || entry.description || entry.question));
+}
+
+function isStepCardShape(entry) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    if (hasSequenceSources(entry)) return false;
+    return hasStepText(entry);
+}
+
+function extractSequenceSteps(entry) {
+    for (const key of SEQUENCE_STEP_SOURCES) {
+        if (entry[key] !== undefined && entry[key] !== null) {
+            const steps = splitSteps(entry[key]);
+            if (steps.length) return steps;
+        }
+    }
+    return [];
+}
+
+function normalizeSequenceObject(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const steps = extractSequenceSteps(entry);
+    if (!steps.length) return null;
+    const title = (entry.title || entry.name || entry.term || DEFAULT_SEQUENCE_TITLE).toString().trim() || DEFAULT_SEQUENCE_TITLE;
+    const description = (entry.description || entry.desc || entry.note || entry.summary || '').toString().trim();
+    return {
+        _isSequence: true,
+        title,
+        description,
+        steps
+    };
+}
+
+function createSequenceFromStepCards(entries) {
+    const orderedSteps = entries
+        .map((entry, idx) => {
+            const text = cleanStepText(entry.answer || entry.term || entry.step || entry.text || entry.description);
+            if (!text) return null;
+            const order = Number.isFinite(entry.order) ? entry.order : idx;
+            return { order, text };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.order - b.order)
+        .map(item => item.text);
+
+    if (!orderedSteps.length) return null;
+    const meta = entries.find(entry => entry) || {};
+    const title = (meta.title || meta.name || DEFAULT_SEQUENCE_TITLE).toString().trim() || DEFAULT_SEQUENCE_TITLE;
+    const description = (meta.description || meta.desc || meta.note || '').toString().trim();
+    return {
+        _isSequence: true,
+        title,
+        description,
+        steps: orderedSteps
+    };
+}
+
+function normalizeSequenceEntries(entries) {
+    if (!Array.isArray(entries)) return [];
+    const validEntries = entries.filter(entry => entry !== null && entry !== undefined);
+    if (!validEntries.length) return [];
+
+    const simpleStringsOnly = validEntries.every(item => typeof item === 'string' || typeof item === 'number');
+    if (simpleStringsOnly) {
+        const steps = splitSteps(validEntries);
+        if (!steps.length) return [];
+        return [{
+            _isSequence: true,
+            title: DEFAULT_SEQUENCE_TITLE,
+            description: '',
+            steps
+        }];
+    }
+
+    const onlyStepCards = validEntries.every(entry => isStepCardShape(entry));
+    if (onlyStepCards) {
+        const sequence = createSequenceFromStepCards(validEntries);
+        return sequence ? [sequence] : [];
+    }
+
+    const sequences = validEntries
+        .map(entry => normalizeSequenceObject(entry))
+        .filter(Boolean);
+    return sequences;
+}
+
+function normalizeAiDeckResponse(response) {
+    if (!response) {
+        throw new Error('AI did not return any data.');
+    }
+    if (Array.isArray(response)) {
+        const cards = response
+            .map(card => normalizeCardRecord(card, 'flashcard'))
+            .map(entry => ({ question: entry.question || '', answer: entry.answer || '' }))
+            .filter(card => card.question && card.answer);
+        if (!cards.length) {
+            throw new Error('AI response did not include usable cards.');
+        }
+        return { type: 'flashcard', deckName: 'AI Generated Deck', deckNotes: '', language: '', cards };
+    }
+    if (response.error) {
+        throw new Error(response.message || 'AI server error.');
+    }
+    const type = (response.type || 'flashcard').toLowerCase();
+    const deckName = response.deckName || 'AI Generated Deck';
+    const deckNotes = response.deckNotes || '';
+    const language = response.language || '';
+
+    if (type === 'sequence') {
+        const sequenceSources = [response.sequences, response.cards, response.steps, response.items];
+        let rawSequenceEntries = null;
+        for (const source of sequenceSources) {
+            if (Array.isArray(source) && source.length > 0) {
+                rawSequenceEntries = source;
+                break;
+            }
+        }
+        if (!rawSequenceEntries) {
+            throw new Error('AI response did not include usable sequence steps.');
+        }
+        const sequences = normalizeSequenceEntries(rawSequenceEntries);
+        if (!sequences.length) {
+            throw new Error('AI response did not include usable sequence steps.');
+        }
+        return { type, deckName, deckNotes, language, sequences };
+    }
+
+    if (type === 'flashcard-legacy' && typeof response.flashcardText === 'string') {
+        const cards = response.flashcardText.split('\n').map(line => {
+            const parts = line.split('\t');
+            if (parts.length !== 2) return null;
+            const question = parts[0].trim();
+            const answer = parts[1].trim();
+            if (!question || !answer) return null;
+            return { question, answer };
+        }).filter(Boolean);
+        if (!cards.length) {
+            throw new Error('AI response did not include valid flashcards.');
+        }
+        return { type: 'flashcard', deckName, deckNotes, language, cards };
+    }
+
+    const cardsSource = Array.isArray(response.cards)
+        ? response.cards
+        : Array.isArray(response.vocab)
+            ? response.vocab
+            : [];
+    if (!cardsSource.length) {
+        throw new Error('AI response did not include cards.');
+    }
+    const cards = cardsSource
+        .map(entry => normalizeCardRecord(entry, type))
+        .map(card => ({ question: card.question || '', answer: card.answer || '' }))
+        .filter(card => card.question && card.answer);
+    if (!cards.length) {
+        throw new Error('AI response did not include valid cards.');
+    }
+
+    return { type: type === 'vocab' ? 'vocab' : 'flashcard', deckName, deckNotes, language, cards };
+}
+
 window.toggleCortexDebug = async function () {
     studyState.cortexDebugEnabled = !studyState.cortexDebugEnabled;
     const cortex = await getCortexEngine();
@@ -10780,4 +11631,3 @@ window.toggleCortexDebug = async function () {
     console.log('[Cortex Debug]', studyState.cortexDebugEnabled ? 'ENABLED' : 'DISABLED');
     return studyState.cortexDebugEnabled;
 };
-

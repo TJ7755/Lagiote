@@ -26,7 +26,7 @@ function initSequenceTest(cards) {
         itemDiv.style.border = '2px solid var(--border-color)';
         itemDiv.style.borderRadius = '10px';
         itemDiv.style.cursor = 'grab';
-        itemDiv.textContent = card.question || '';
+        itemDiv.textContent = card.answer || card.question || '';
         listContainer.appendChild(itemDiv);
     });
 

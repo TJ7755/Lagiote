@@ -17,3 +17,80 @@
     color: var(--secondary-text);
     font-size: 0.9rem;
 }
+
+.accent-buttons {
+    margin-top: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.accent-buttons button {
+    background: var(--button-secondary-bg);
+    border: 1px solid var(--border-color);
+    color: var(--button-secondary-text);
+    padding: 5px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.accent-buttons button:hover {
+    background: var(--button-secondary-hover);
+}
+
+.deck-accent-module {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+.deck-accent-toggle {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: var(--button-secondary-bg);
+    color: var(--button-secondary-text);
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.deck-accent-toggle:hover,
+.deck-accent-toggle:focus-visible {
+    background: var(--button-secondary-hover);
+    transform: translateY(-1px);
+}
+
+.deck-accent-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+}
+
+.deck-accent-button {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--button-secondary-bg);
+    color: var(--button-secondary-text);
+    padding: 6px 10px;
+    min-width: 34px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.deck-accent-button:hover,
+.deck-accent-button:focus-visible {
+    background: var(--button-secondary-hover);
+    border-color: var(--primary-color);
+    outline: none;
+}

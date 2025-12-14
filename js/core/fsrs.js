@@ -4,42 +4,47 @@ export class FSRSAlgorithm {
         this.Rating = null;
         this.fsrsClient = null;
         this.fsrsRepeat = null;
-        this.isAvailable = false;
+        this.isAvailable = true;
+        this.remoteFsrsPromise = null;
+        this.fallbackReady = false;
         this.defaultImplicitBaseline = {
             latency: 2500,
             corrections: 1,
             attempts: 1,
             fluency: 5
         };
+        this.fallbackActive = false;
+        this._fallbackNoticeLogged = false;
     }
 
     async init() {
-        if (this.fsrsRepeat || this.fsrsClient) return;
+        if (this.fsrsRepeat || this.fsrsClient) {
+            this.isAvailable = true;
+            return;
+        }
 
-        if (window.electronAPI?.getFsrsEnums && window.electronAPI?.fsrsRepeat) {
+        if (typeof window !== 'undefined' && window.electronAPI?.getFsrsEnums && window.electronAPI?.fsrsRepeat) {
             const enums = await window.electronAPI.getFsrsEnums();
             this.State = enums?.State || null;
             this.Rating = enums?.Rating || null;
             this.fsrsRepeat = (card, now) => window.electronAPI.fsrsRepeat(card, now);
             this.isAvailable = true;
+            this.fallbackActive = false;
             return;
         }
 
-        if (typeof window.fsrs === 'function') {
+        if (typeof window !== 'undefined' && typeof window.fsrs === 'function') {
             this.fsrsClient = window._fsrsInstance || window.fsrs();
             window._fsrsInstance = this.fsrsClient;
             this.State = window.State || this.fsrsClient.State || null;
             this.Rating = window.Rating || this.fsrsClient.Rating || null;
             this.isAvailable = true;
+            this.fallbackActive = false;
             return;
         }
 
-        // Instead of throwing here, mark the engine unavailable so callers can
-        // still use non-FSRS helpers (prepareCard/getRatings) without crashing.
-        // Methods that actually require the engine (repeat/reviewCard) will still
-        // throw if they are used while the engine is unavailable.
-        this.isAvailable = false;
-        return;
+        // No native engine yet; mark as available so fallback pathways can run.
+        this.isAvailable = true;
     }
 
     getRatings() {
@@ -128,22 +133,150 @@ export class FSRSAlgorithm {
         };
     }
 
+    async loadRemoteFsrs() {
+        if (this.fsrsClient?.repeat || typeof window === 'undefined' || window.electronAPI) {
+            return this.fsrsClient;
+        }
+        if (this.remoteFsrsPromise) return this.remoteFsrsPromise;
+        const remoteUrl = (typeof window !== 'undefined' && window.TS_FSRS_CDN)
+            ? window.TS_FSRS_CDN
+            : 'https://cdn.jsdelivr.net/npm/ts-fsrs@5.2.3/dist/index.mjs';
+        this.remoteFsrsPromise = import(/* @vite-ignore */ /* webpackIgnore: true */ remoteUrl)
+            .then(module => {
+                const factory = module?.fsrs || module?.FSRS || module?.default?.fsrs || module?.default;
+                if (typeof factory !== 'function') {
+                    throw new Error('Remote FSRS module missing scheduler factory');
+                }
+                const client = window._fsrsInstance || factory();
+                if (typeof window !== 'undefined') {
+                    window._fsrsInstance = client;
+                }
+                this.fsrsClient = client;
+                this.State = module.State || client.State || this.State;
+                this.Rating = module.Rating || client.Rating || this.Rating;
+                this.isAvailable = true;
+                this.fallbackActive = false;
+                return client;
+            })
+            .catch(err => {
+                console.warn('Failed to load remote FSRS scheduler:', err);
+                this.remoteFsrsPromise = null;
+                return null;
+            });
+        return this.remoteFsrsPromise;
+    }
 
+    enableFallback() {
+        if (!this.fallbackReady) {
+            this.fallbackReady = true;
+        }
+        this.isAvailable = true;
+        if (!this.fallbackActive && !this._fallbackNoticeLogged) {
+            console.warn('FSRS fallback heuristic active — schedules may be less precise until the full engine loads.');
+            this._fallbackNoticeLogged = true;
+        }
+        this.fallbackActive = true;
+    }
 
-    async repeat(card, now = new Date()) {
+    isFallbackActive() {
+        return this.fallbackActive;
+    }
+
+    buildFallbackRepeat(card, evaluationDate) {
+        const ratings = this.getRatings();
+        const now = evaluationDate instanceof Date ? evaluationDate : new Date(evaluationDate);
+        const baseStability = Number.isFinite(card?.stability) && card.stability > 0 ? card.stability : 1.0;
+        const baseDifficulty = Number.isFinite(card?.difficulty) && card.difficulty > 0 ? card.difficulty : 5.0;
+        const baseReps = Number.isFinite(card?.reps) ? card.reps : 0;
+        const baseLapses = Number.isFinite(card?.lapses) ? card.lapses : 0;
+        const clampValue = (val, min, max) => Math.min(Math.max(val, min), max);
+        const profiles = [
+            { key: 'Again', rating: ratings.Again, stabilityMultiplier: 0.5, difficultyDelta: 0.7, intervalMultiplier: 0.2, minIntervalDays: 0.25, lapsesDelta: 1 },
+            { key: 'Hard', rating: ratings.Hard, stabilityMultiplier: 0.85, difficultyDelta: 0.2, intervalMultiplier: 0.8, minIntervalDays: 1, lapsesDelta: 0 },
+            { key: 'Good', rating: ratings.Good, stabilityMultiplier: 1.15, difficultyDelta: -0.1, intervalMultiplier: 1.4, minIntervalDays: 2, lapsesDelta: 0 },
+            { key: 'Easy', rating: ratings.Easy, stabilityMultiplier: 1.4, difficultyDelta: -0.25, intervalMultiplier: 2.1, minIntervalDays: 4, lapsesDelta: 0 }
+        ];
+        const results = {};
+        for (const profile of profiles) {
+            const stability = clampValue(baseStability * profile.stabilityMultiplier, 0.2, 3650);
+            const difficulty = clampValue(baseDifficulty + profile.difficultyDelta, 1, 10);
+            const intervalDays = Math.max(profile.minIntervalDays, stability * profile.intervalMultiplier);
+            const dueDate = new Date(now.getTime() + intervalDays * 86400000);
+            const state =
+                profile.rating === ratings.Again
+                    ? (this.State?.Relearning ?? 3)
+                    : (this.State?.Review ?? 2);
+            const updatedCard = {
+                ...card,
+                state,
+                reps: baseReps + 1,
+                lapses: baseLapses + profile.lapsesDelta,
+                stability,
+                difficulty,
+                scheduled_days: intervalDays,
+                elapsed_days: 0,
+                due: dueDate,
+                last_review: now
+            };
+            const entry = {
+                card: updatedCard,
+                log: {
+                    rating: profile.rating,
+                    state,
+                    due: dueDate.toISOString(),
+                    review: now.toISOString()
+                }
+            };
+            if (typeof profile.rating === 'number') {
+                results[profile.rating] = entry;
+            }
+            results[profile.key] = entry;
+        }
+        return results;
+    }
+
+    async getRepeatResult(preparedCard, evaluationDate) {
         await this.init();
-        const preparedCard = this.prepareCard(card);
-        const evaluationDate = now instanceof Date ? now : new Date(now);
+        const evalDate = evaluationDate instanceof Date ? evaluationDate : new Date(evaluationDate);
 
         if (this.fsrsRepeat) {
-            return this.fsrsRepeat(preparedCard, evaluationDate.toISOString());
+            try {
+                const ipcResult = await this.fsrsRepeat(preparedCard, evalDate.toISOString());
+                if (ipcResult) return ipcResult;
+            } catch (err) {
+                console.warn('Electron FSRS repeat failed, attempting fallback path:', err);
+            }
         }
 
         if (this.fsrsClient?.repeat) {
-            return this.fsrsClient.repeat(preparedCard, evaluationDate);
+            try {
+                const clientResult = this.fsrsClient.repeat(preparedCard, evalDate);
+                if (clientResult) return clientResult;
+            } catch (err) {
+                console.warn('Local FSRS repeat failed:', err);
+            }
         }
 
-        throw new Error('FSRS repeat method unavailable.');
+        await this.loadRemoteFsrs();
+        if (this.fsrsClient?.repeat) {
+            try {
+                const remoteResult = this.fsrsClient.repeat(preparedCard, evalDate);
+                if (remoteResult) return remoteResult;
+            } catch (err) {
+                console.warn('Remote FSRS repeat failed:', err);
+            }
+        }
+
+        this.enableFallback();
+        return this.buildFallbackRepeat(preparedCard, evalDate);
+    }
+
+
+
+    async repeat(card, now = new Date()) {
+        const preparedCard = this.prepareCard(card);
+        const evaluationDate = now instanceof Date ? now : new Date(now);
+        return this.getRepeatResult(preparedCard, evaluationDate);
     }
 
     calculateRetrievability(cardState, now = new Date()) {
@@ -185,18 +318,10 @@ export class FSRSAlgorithm {
     }
 
     async reviewCard(cardState, rating, now = new Date()) {
-        await this.init();
         const evaluationDate = now instanceof Date ? now : new Date(now);
         const preparedCard = this.prepareCard(cardState);
 
-        let repeatResult = null;
-        if (this.fsrsRepeat) {
-            repeatResult = await this.fsrsRepeat(preparedCard, evaluationDate.toISOString());
-        } else if (this.fsrsClient?.repeat) {
-            repeatResult = this.fsrsClient.repeat(preparedCard, evaluationDate);
-        } else {
-            throw new Error('FSRS repeat method unavailable.');
-        }
+        const repeatResult = await this.getRepeatResult(preparedCard, evaluationDate);
 
         const ratings = this.getRatings();
         const ratingIndex = typeof rating === 'number' ? rating : ratings.Good;

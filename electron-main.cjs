@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
-require('ts-fsrs'); // Hint for packager
+const { autoUpdater } = require('electron-updater');
+const { updateElectronApp } = require('update-electron-app');
 const path = require('path');
 const fs = require('fs');
 
@@ -9,12 +10,8 @@ function loadEnvFile() {
     ? path.join(process.resourcesPath, '.env.local')
     : path.join(__dirname, '.env.local');
 
-
-
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
-
-
     let loadedCount = 0;
     envContent.split('\n').forEach(line => {
       const match = line.match(/^([^#=]+)=(.*)$/);
@@ -24,18 +21,14 @@ function loadEnvFile() {
         if (!process.env[key]) {
           process.env[key] = value;
           loadedCount++;
-          // Only log key names for Auth0 variables (values are safe to log since they're public)
-
         }
       }
     });
-
   } else {
     console.error('[Env] .env.local file not found!');
     console.error('[Env] Current directory:', __dirname);
     if (app.isPackaged) {
       console.error('[Env] Resources path:', process.resourcesPath);
-      // List files in resources directory for debugging
       try {
         const files = fs.readdirSync(process.resourcesPath);
         console.error('[Env] Files in resources directory:', files.slice(0, 10));
@@ -58,16 +51,11 @@ function safeSend(window, channel, ...args) {
   }
 }
 
-let PROXY_URL = process.env.PROXY_URL || 'https://tj7755-lagiote-proxy.hf.space'; // Default or env
-
-// Fix: If user provides the Web UI URL (huggingface.co/spaces/...), convert it to the direct API URL (.hf.space)
+let PROXY_URL = process.env.PROXY_URL || 'https://tj7755-lagiote-proxy.hf.space';
 if (PROXY_URL.includes('huggingface.co/spaces/')) {
-  // Convert https://huggingface.co/spaces/USERNAME/SPACE_NAME -> https://USERNAME-SPACE_NAME.hf.space
-  // Example: https://huggingface.co/spaces/TJ7755/lagiote-proxy -> https://tj7755-lagiote-proxy.hf.space
   try {
     const urlObj = new URL(PROXY_URL);
     const pathParts = urlObj.pathname.split('/').filter(p => p);
-    // pathParts should be ['spaces', 'USERNAME', 'SPACE_NAME']
     if (pathParts.length >= 3 && pathParts[0] === 'spaces') {
       const username = pathParts[1];
       const spacename = pathParts[2];
@@ -107,7 +95,6 @@ function createWindow() {
   });
 
   win.webContents.on('did-finish-load', () => {
-
   });
 
   win.webContents.on('crashed', () => {
@@ -136,7 +123,6 @@ async function createLoginWindow() {
   };
 
   return new Promise((resolve, reject) => {
-    // Create a local HTTP server to handle the callback
     server = http.createServer(async (req, res) => {
       if (hasResolved) return;
 
@@ -144,12 +130,10 @@ async function createLoginWindow() {
 
       if (req.url.startsWith('/callback')) {
         try {
-          // Get the full callback URL
           const callbackBase = serverOrigin || 'http://localhost';
           const callbackURL = `${callbackBase}${req.url}`;
           log('info', 'Processing callback:', callbackURL);
 
-          // Send success response to browser
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(`
             <!DOCTYPE html>
@@ -192,23 +176,19 @@ async function createLoginWindow() {
             </html>
           `);
 
-          // Exchange authorization code for tokens
           const { accessToken, profile } = await authService.loadTokens(callbackURL);
 
           log('info', 'Token exchange successful');
           log('info', 'User profile:', profile.email || profile.sub);
 
-          // Mark as resolved
           hasResolved = true;
 
-          // Close the auth window after a short delay
           setTimeout(() => {
             if (authWindow && !authWindow.isDestroyed()) {
               authWindow.close();
             }
           }, 1500);
 
-          // Resolve with user data
           resolve({
             type: 'authorization',
             user: {
@@ -222,7 +202,6 @@ async function createLoginWindow() {
             accessToken: accessToken
           });
 
-          // Close the server
           setTimeout(() => {
             if (server) {
               server.close(() => {
@@ -284,7 +263,6 @@ async function createLoginWindow() {
       }
     });
 
-    // Try to start server on port 80 first, then fall back to higher ports
     const tryPort = (port) => {
       return new Promise((resolvePort, rejectPort) => {
         server.once('error', (err) => {
@@ -304,16 +282,14 @@ async function createLoginWindow() {
       });
     };
 
-    // Try ports in order: 80, 8080, 3000, random
     (async () => {
       let serverPort = null;
-      const portsToTry = [80, 8080, 3000, 0]; // 0 = random available port
+      const portsToTry = [80, 8080, 3000, 0];
 
       for (const port of portsToTry) {
         try {
           serverPort = await tryPort(port);
           if (serverPort === 0) {
-            // Get the actual port if we used random
             serverPort = server.address().port;
             log('info', `Server started on random port: ${serverPort}`);
           }
@@ -326,7 +302,6 @@ async function createLoginWindow() {
           break;
         } catch (err) {
           if (port === portsToTry[portsToTry.length - 1]) {
-            // Last port attempt failed
             log('error', 'Failed to start server on any port');
             reject({
               message: 'Failed to start local callback server. Please ensure no other application is using ports 80, 8080, or 3000.',
@@ -334,7 +309,6 @@ async function createLoginWindow() {
             });
             return;
           }
-          // Try next port
           continue;
         }
       }
@@ -343,7 +317,6 @@ async function createLoginWindow() {
         log('warn', `Using non-standard port ${serverPort}. You may need to update Auth0 allowed callback URLs to http://localhost:${serverPort}/callback`);
       }
 
-      // Create authentication window
       authWindow = new BrowserWindow({
         width: 1000,
         height: 800,
@@ -364,9 +337,6 @@ async function createLoginWindow() {
         fullscreenable: false
       });
 
-      // Optional: Uncomment to open DevTools for debugging
-      // authWindow.webContents.openDevTools();
-
       authWindow.on('close', () => {
         log('info', 'Auth window closed');
 
@@ -382,12 +352,10 @@ async function createLoginWindow() {
         }
       });
 
-      // Get the authentication URL from the service
       try {
         const authURL = authService.getAuthenticationURL();
         log('info', 'Loading Auth0 login page:', authURL);
 
-        // Load the Auth0 login page
         authWindow.loadURL(authURL);
         authWindow.once('ready-to-show', () => {
           authWindow.show();
@@ -406,27 +374,121 @@ async function createLoginWindow() {
   });
 }
 
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    console.log('[Auto-Update] Skipping updater setup - not in packaged build');
+    return;
+  }
+
+  console.log('[Auto-Update] Setting up auto-updater for packaged build');
+
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'TJ7755',
+    repo: 'Lagiote-revise'
+  });
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[Auto-Update] Checking for update...');
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (mainWindow) {
+      safeSend(mainWindow, 'update-status', { event: 'checking-for-update' });
+    }
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('[Auto-Update] Update available:', info.version);
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (mainWindow) {
+      safeSend(mainWindow, 'update-status', {
+        event: 'update-available',
+        info: { version: info.version, releaseDate: info.releaseDate }
+      });
+    }
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('[Auto-Update] Update not available');
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (mainWindow) {
+      safeSend(mainWindow, 'update-status', { event: 'update-not-available' });
+    }
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    console.log('[Auto-Update] Download progress:', progressObj.percent + '%');
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (mainWindow) {
+      safeSend(mainWindow, 'update-status', {
+        event: 'download-progress',
+        progress: {
+          percent: progressObj.percent,
+          transferred: progressObj.transferred,
+          total: progressObj.total,
+          bytesPerSecond: progressObj.bytesPerSecond
+        }
+      });
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[Auto-Update] Update downloaded:', info.version);
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (mainWindow) {
+      safeSend(mainWindow, 'update-status', {
+        event: 'update-downloaded',
+        info: { version: info.version, releaseDate: info.releaseDate }
+      });
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[Auto-Update] Error:', err.message);
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (mainWindow) {
+      safeSend(mainWindow, 'update-status', {
+        event: 'error',
+        error: err.message
+      });
+    }
+  });
+
+  // Check for updates immediately and then every hour
+  autoUpdater.checkForUpdatesAndNotify();
+  setInterval(() => {
+    autoUpdater.checkForUpdatesAndNotify();
+  }, 60 * 60 * 1000); // 1 hour
+}
+
 app.whenReady().then(() => {
-  // Load environment variables
   loadEnvFile();
 
-  // Fallback: If packaged app doesn't have .env.local, use hardcoded values
-  // OAuth2 client IDs are public and safe to hardcode
   if (app.isPackaged && (!process.env.ELECTRON_AUTH0_DOMAIN || !process.env.ELECTRON_AUTH0_CLIENT_ID)) {
     console.warn('[Env] Auth0 credentials not found in .env.local for packaged app, using fallback');
     process.env.ELECTRON_AUTH0_DOMAIN = process.env.ELECTRON_AUTH0_DOMAIN || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
     process.env.ELECTRON_AUTH0_CLIENT_ID = process.env.ELECTRON_AUTH0_CLIENT_ID || 'olTWu5ifjiTKIoqfMGpF2FScFvuQI5ZW';
-
   }
 
-  // Ensure Audience is always set (required for API access)
-  // This fixes the 401 Sync error in dev mode if .env.local is missing this var
   if (!process.env.ELECTRON_AUTH0_AUDIENCE) {
     console.warn('[Env] ELECTRON_AUTH0_AUDIENCE not found, using default fallback');
     process.env.ELECTRON_AUTH0_AUDIENCE = 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/';
   }
 
-  // auto-updating is handled in electron-main.cjs for packaged builds
+  // Initialise update-electron-app in main process only when packaged
+  if (app.isPackaged) {
+    try {
+      updateElectronApp({
+        repo: 'TJ7755/Lagiote-revise',
+        updateInterval: '1 hour',
+        logger: console
+      });
+      console.log('[Auto-Update] update-electron-app initialised');
+    } catch (e) {
+      console.error('[Auto-Update] Failed to initialise update-electron-app', e && e.message ? e.message : e);
+    }
+  }
+
+  setupAutoUpdater();
 
   app.setAsDefaultProtocolClient("lagioterevise");
   createWindow();
@@ -444,12 +506,30 @@ app.on('window-all-closed', () => {
   }
 });
 
+ipcMain.handle('checkForUpdates', async () => {
+  if (!app.isPackaged) {
+    throw new Error('Auto-updating is only available in packaged builds');
+  }
+  try {
+    await autoUpdater.checkForUpdates();
+    return { success: true };
+  } catch (error) {
+    throw new Error(`Failed to check for updates: ${error.message}`);
+  }
+});
+
+ipcMain.handle('quitAndInstallUpdate', async () => {
+  if (!app.isPackaged) {
+    throw new Error('Auto-updating is only available in packaged builds');
+  }
+  autoUpdater.quitAndInstall();
+});
+
 ipcMain.handle('open-login-window', async () => {
   try {
     return await createLoginWindow();
   } catch (error) {
     console.error('Login window error:', error);
-    // Extract meaningful message
     let errorMessage = error.message || 'Login window failed';
     if (typeof error === 'object' && error !== null) {
       try {
@@ -458,7 +538,6 @@ ipcMain.handle('open-login-window', async () => {
         errorMessage = 'Unknown error object';
       }
     }
-    // Throw an Error instance so it serializes correctly to the renderer
     throw new Error(errorMessage);
   }
 });
@@ -488,19 +567,13 @@ ipcMain.handle('generate-distractors', async (event, { question, answer }) => {
   }
 });
 
-ipcMain.handle('gemini-generate-deck', async (event, payload = {}) => {
-  const {
-    documents,
-    cardType = 'auto',
-    cardCount = 'auto',
-    language = 'auto'
-  } = payload || {};
+ipcMain.handle('gemini-generate-deck', async (event, { documents, cardType = 'flashcard' }) => {
   try {
     const response = await Promise.race([
       fetch(NETLIFY_FUNCTION_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documents, cardType, cardCount, language })
+        body: JSON.stringify({ documents, cardType })
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 10000))
     ]);
@@ -553,8 +626,6 @@ ipcMain.handle('sync-data', async (event, arg) => {
   try {
     const { token, guestId, ...syncPayload } = arg;
 
-
-
     const headers = {
       'Content-Type': 'application/json'
     };
@@ -582,7 +653,6 @@ ipcMain.handle('sync-data', async (event, arg) => {
   } catch (error) {
     console.error('Sync error:', error);
 
-    // Propagate 401 specifically so renderer can handle logout
     if (error.message.includes('401')) {
       return {
         error: 'auth_error',
@@ -603,7 +673,7 @@ ipcMain.handle('sync-data', async (event, arg) => {
 
 // FSRS calculations handled in the main process to avoid sandbox issues
 const { fsrs, State, Rating } = require('ts-fsrs');
-const f = fsrs(); // Initialize with default parameters
+const f = fsrs();
 
 ipcMain.handle('get-fsrs-enums', () => {
   return { State, Rating };
@@ -611,7 +681,6 @@ ipcMain.handle('get-fsrs-enums', () => {
 
 ipcMain.handle('fsrs-repeat', (event, card, now) => {
   try {
-    // The card object from the renderer needs to be reconstituted with Date objects
     const cardForFsrs = {
         ...card,
         due: new Date(card.due),

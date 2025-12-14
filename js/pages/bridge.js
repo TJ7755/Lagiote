@@ -2,6 +2,7 @@ import * as db from '../core/db.js';
 import { levenshteinDistance, calculateIQS, shuffleArray } from '../core/utils.js';
 import { FSRSAlgorithm } from '../core/fsrs.js';
 import * as studyModule from './study.js';
+import * as fsrsUtils from '../core/fsrs-utils.js';
 
 const lagiote = window.lagiote || {};
 const fsrs = new FSRSAlgorithm();
@@ -11,6 +12,7 @@ lagiote.utils = { levenshteinDistance, calculateIQS, shuffleArray };
 lagiote.fsrs = fsrs;
 lagiote.FSRSAlgorithm = FSRSAlgorithm;
 lagiote.study = studyModule;
+lagiote.knowledgeStateUtils = fsrsUtils;
 
 if (!window.lagiote) {
     Object.defineProperty(window, 'lagiote', {

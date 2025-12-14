@@ -288,6 +288,12 @@ body {
     border-color: var(--danger-color);
 }
 
+.mcq-placeholder {
+    font-style: italic;
+    color: var(--secondary-text);
+    text-align: center;
+}
+
 .view-container {
     display: block;
 }

@@ -1,4 +1,5 @@
 import { FSRSAlgorithm } from './fsrs.js';
+import { initDB, getDB, getDataFromDB, saveDataToDB, getAllDataFromDB, deleteDataFromDB } from './db.js';
 
 const DEFAULT_HORIZON_DAYS = 3;
 let fsrsInstance = null;
@@ -6,10 +7,36 @@ let fsrsPromise = null;
 
 const cortexState = {
     modelConfig: null,
+    modelPredictor: null,
     nowProvider: () => new Date(),
     debugEnabled: false,
     featureNames: null
 };
+
+const MODEL_STORAGE_KEY = 'cortexModelV1';
+const TRAINING_STORE_NAME = 'cortexTrainingData';
+const MODEL_VERSION = 1;
+const MIN_PREDICTION_CONFIDENCE = 0.75;
+const NEURAL_FEATURE_KEYS = [
+    'reps',
+    'retrievabilityNow',
+    'volatility',
+    'lastLatency',
+    'sessionMeanLatency',
+    'timesSeenThisSession',
+    'cardAvgTime',
+    'hasExamDate',
+    'daysToExam',
+    'minutesSinceLastReview'
+];
+const TRAINING_SAMPLE_LIMIT = 5000;
+const TRAINING_TRIGGER_COUNT = 25;
+const TRAINING_BATCH_SIZE = 64;
+const LEARNING_RATE_GAIN = 0.015;
+const LEARNING_RATE_TIME = 0.01;
+const MIN_TIME_COST = 2.0;
+const MAX_TIME_COST = 60.0;
+const DEFAULT_TIME_COST_SECONDS = 5.0;
 
 // --- Helpers ---
 
@@ -215,30 +242,152 @@ function mapProbabilityToRating(pCorrect, confidence, engine) {
 
 // --- 2. Uncertainty-Aware Update Logic ---
 
-export async function processReview(card, knowledgeState, metrics, explicitFeedback = null) {
+export async function processReview(card, knowledgeState, metrics, explicitFeedback = null, userBaseline = {}, context = {}) {
     const engine = await getFsrsEngine();
     const now = getNow(cortexState.nowProvider);
+    const deckContext = context?.deck || null;
+    const sessionContext = context?.sessionState || null;
 
-    // 1. Infer outcome
-    const inference = inferRetrievalOutcome(metrics, {}, explicitFeedback); // TODO: pass userBaseline
+    const preFeatures = await computeFeatures(card, knowledgeState, sessionContext, deckContext);
+    const targetDate = buildTargetDate(deckContext, now);
+    const preparedState = engine.prepareCard(knowledgeState?.fsrs || knowledgeState);
+    const beforeRetrievability = await estimateRetrievabilityAt(engine, preparedState, targetDate);
 
-    // 2. Map to FSRS Rating
+    const inference = inferRetrievalOutcome(metrics, userBaseline, explicitFeedback);
     const rating = mapProbabilityToRating(inference.pCorrect, inference.confidence, engine);
-
-    // 3. Perform Update
-    // Standard FSRS update with the inferred rating
-    const currentFsrs = engine.prepareCard(knowledgeState?.fsrs || knowledgeState);
     const result = await engine.reviewCard(knowledgeState, rating, now);
 
-    // 4. Update Knowledge State (persist inference metadata)
+    const resolvedFsrs = result.fsrs || result;
+    const afterState = engine.prepareCard(resolvedFsrs);
+    const afterRetrievability = await estimateRetrievabilityAt(engine, afterState, targetDate);
+
+    const lastReviewRaw = result.fsrs?.last_review || result.lastReviewed || now;
+    const lastReviewedIso = new Date(lastReviewRaw).toISOString();
+    const derivedStability = result.fsrs?.stability ?? result.stability ?? 0;
+
     const updatedState = {
         ...result,
         evidenceSigma: inference.volatility,
         lastInference: inference,
-        lastMetrics: metrics // Optional: store raw metrics for debugging/training
+        lastMetrics: metrics,
+        lastRating: rating,
+        rating,
+        lastReviewed: lastReviewedIso,
+        stability: derivedStability
     };
-    
+
+    try {
+        await recordNeuralTrainingExample({
+            card,
+            context,
+            features: preFeatures,
+            metrics,
+            realizedGain: clamp(afterRetrievability - beforeRetrievability, 0, 1),
+            realizedTimeCost: computeRealizedTimeCost(metrics, preFeatures.cardAvgTime)
+        });
+    } catch (error) {
+        if (cortexState.debugEnabled) {
+            console.warn('[NeuralPredictor] Training sample skipped', error);
+        }
+    }
+
     return updatedState;
+}
+
+function computeRealizedTimeCost(metrics, fallbackSeconds = DEFAULT_TIME_COST_SECONDS) {
+    const latencyMs = metrics && Number.isFinite(metrics.recallLatency) ? metrics.recallLatency : null;
+    const seconds = latencyMs !== null ? latencyMs / 1000 : fallbackSeconds;
+    if (!Number.isFinite(seconds)) return fallbackSeconds;
+    return Math.min(MAX_TIME_COST, Math.max(MIN_TIME_COST, seconds));
+}
+
+async function recordNeuralTrainingExample({ card, context, features, metrics = {}, realizedGain, realizedTimeCost }) {
+    const predictor = cortexState.modelPredictor;
+    if (!predictor || !features) return;
+    await predictor.recordExample(
+        {
+            cardID: card?.id,
+            deck: context?.deck || null,
+            features
+        },
+        {
+            realizedGain,
+            realizedTimeCost
+        }
+    );
+}
+
+const DETERMINISTIC_INFERENCES = {
+    Again: { pCorrect: 0.05, confidence: 0.95, volatility: 0.1 },
+    Hard: { pCorrect: 0.55, confidence: 0.95, volatility: 0.1 },
+    Good: { pCorrect: 0.80, confidence: 0.95, volatility: 0.1 },
+    Easy: { pCorrect: 0.95, confidence: 0.95, volatility: 0.1 }
+};
+
+function resolveRatingLabel(engine, rating) {
+    const ratings = engine.getRatings();
+    return Object.keys(ratings).find(key => ratings[key] === rating) || null;
+}
+
+function buildDeterministicInference(label) {
+    if (label && DETERMINISTIC_INFERENCES[label]) {
+        return DETERMINISTIC_INFERENCES[label];
+    }
+    return { pCorrect: 0.5, confidence: 0.5, volatility: 0.1 };
+}
+
+export async function processReviewWithRating(card, knowledgeState, fsrsRating, nowOverride = null, meta = {}, context = {}) {
+    const engine = await getFsrsEngine();
+    const now = nowOverride
+        ? (nowOverride instanceof Date ? nowOverride : new Date(nowOverride))
+        : getNow(cortexState.nowProvider);
+    const deckContext = context?.deck || null;
+    const sessionContext = context?.sessionState || null;
+
+    const preFeatures = await computeFeatures(card, knowledgeState, sessionContext, deckContext);
+    const targetDate = buildTargetDate(deckContext, now);
+    const preparedState = engine.prepareCard(knowledgeState?.fsrs || knowledgeState);
+    const beforeRetrievability = await estimateRetrievabilityAt(engine, preparedState, targetDate);
+
+    const result = await engine.reviewCard(knowledgeState, fsrsRating, now);
+    const resolvedFsrs = result.fsrs || result;
+    const afterState = engine.prepareCard(resolvedFsrs);
+    const afterRetrievability = await estimateRetrievabilityAt(engine, afterState, targetDate);
+
+    const ratingLabel = resolveRatingLabel(engine, fsrsRating);
+    const inference = buildDeterministicInference(ratingLabel);
+    const evidenceSigma = (typeof knowledgeState?.evidenceSigma === 'number')
+        ? knowledgeState.evidenceSigma
+        : (typeof result?.evidenceSigma === 'number' ? result.evidenceSigma : 0.1);
+    const lastReviewRaw = result.fsrs?.last_review || result.lastReviewed || now;
+    const lastReviewedIso = new Date(lastReviewRaw).toISOString();
+    const stability = result.fsrs?.stability ?? result.stability ?? 0;
+
+    try {
+        await recordNeuralTrainingExample({
+            card,
+            context,
+            features: preFeatures,
+            metrics: meta?.metrics,
+            realizedGain: clamp(afterRetrievability - beforeRetrievability, 0, 1),
+            realizedTimeCost: computeRealizedTimeCost(meta?.metrics, preFeatures.cardAvgTime)
+        });
+    } catch (error) {
+        if (cortexState.debugEnabled) {
+            console.warn('[NeuralPredictor] Training sample skipped', error);
+        }
+    }
+
+    return {
+        ...result,
+        rating: fsrsRating,
+        lastRating: fsrsRating,
+        evidenceSigma,
+        lastInference: inference,
+        lastMetrics: meta?.metrics || null,
+        lastReviewed: lastReviewedIso,
+        stability
+    };
 }
 
 
@@ -298,13 +447,19 @@ async function calculateExpectedGain(engine, knowledgeState, deck, now, pCorrect
 
 // --- Helpers for Gain ---
 
-function buildTargetDate(deck, now) {
-    // Session Objective: Exam Date
+export function buildTargetDate(deck, now) {
     const examDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : null;
     if (examDate && examDate > now) {
-        return examDate; // Target is exam date
+        return examDate;
     }
-    // Fallback: Default Horizon
+
+    const horizonValue = Number(deck?.settings?.learnHorizonDays ?? 0);
+    if (Number.isFinite(horizonValue) && horizonValue > 0) {
+        const target = new Date(now);
+        target.setTime(target.getTime() + horizonValue * 86400000);
+        return target;
+    }
+
     const target = new Date(now);
     target.setTime(target.getTime() + DEFAULT_HORIZON_DAYS * 86400000);
     return target;
@@ -362,22 +517,23 @@ export async function scoreCard(card, knowledgeState, sessionState, deck) {
     let expectedGain = 0;
     let expectedTime = features.cardAvgTime;
     let scoreSource = 'heuristic';
+    const predictor = cortexState.modelPredictor;
 
     // 1. Neural Predictor (Strict Gating)
-    if (cortexState.modelConfig && cortexState.modelPredictor) {
-        const prediction = cortexState.modelPredictor.predict({ 
-            features, 
-            cardID: card.id 
-        });
-        
-        if (prediction.confidence >= MIN_PREDICTION_CONFIDENCE) {
+    if (predictor && predictor.isReady()) {
+        const prediction = predictor.predict({ features, cardID: card?.id });
+        if (prediction && prediction.confidence >= MIN_PREDICTION_CONFIDENCE) {
             expectedGain = prediction.expectedGain;
             expectedTime = prediction.expectedTimeCost;
             scoreSource = 'neural';
-            if (cortexState.debugEnabled) console.log(`[Neural] Used prediction for ${card.id} (conf: ${prediction.confidence})`);
-        } else {
-             if (cortexState.debugEnabled) console.log(`[Neural] Rejected prediction for ${card.id} (conf: ${prediction.confidence} < ${MIN_PREDICTION_CONFIDENCE})`);
+            if (cortexState.debugEnabled) {
+                console.log(`[Neural] Used prediction for ${card?.id || 'unknown'} (conf: ${prediction.confidence.toFixed(3)})`);
+            }
+        } else if (cortexState.debugEnabled && prediction) {
+            console.log(`[Neural] Rejected prediction for ${card?.id || 'unknown'} (conf: ${prediction.confidence.toFixed(3)} < ${MIN_PREDICTION_CONFIDENCE})`);
         }
+    } else if (cortexState.debugEnabled && predictor) {
+        console.log('[Neural] Predictor not ready - samples:', predictor.getSampleCount());
     }
 
     // 2. Fallback Heuristic
@@ -486,39 +642,242 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
 
 class NeuralPredictor {
     constructor() {
-        this.isEnabled = false;
-        this.confidenceThreshold = 0.8;
+        this.featureKeys = NEURAL_FEATURE_KEYS;
+        this.featureCount = this.featureKeys.length;
+        this.model = null;
+        this.trainingData = [];
+        this.trainingInProgress = false;
+        this.samplesSinceLastTraining = 0;
+        this.readyPromise = null;
     }
-    
-    /**
-     * Predicts ExpectedGain and ExpectedTimeCost
-     * @param {Object} inputs - { fsrsState, implicitMetrics, cardMetadata, timeSinceLast }
-     * @returns {Object} { expectedGain, expectedTimeCost, confidence }
-     */
-    predict(inputs) {
-        // Placeholder implementation
-        // In a real scenario, this would run an ONNX model or similar.
-        
+
+    async init() {
+        if (this.readyPromise) return this.readyPromise;
+        this.readyPromise = (async () => {
+            try {
+                await initDB();
+            } catch (error) {
+                if (cortexState.debugEnabled) console.warn('[NeuralPredictor] DB init failed', error);
+            }
+            await this.loadModel();
+            await this.loadTrainingData();
+            return this;
+        })();
+        return this.readyPromise;
+    }
+
+    isReady() {
+        return Boolean(this.model && this.trainingData.length >= 10);
+    }
+
+    getSampleCount() {
+        return this.trainingData.length;
+    }
+
+    async loadModel() {
+        const stored = await getDataFromDB('appData', MODEL_STORAGE_KEY).catch(() => null);
+        if (this.isModelValid(stored)) {
+            this.model = stored;
+        } else {
+            this.model = this.createDefaultModel();
+            await this.persistModel();
+        }
+        cortexState.modelConfig = this.model;
+    }
+
+    isModelValid(candidate) {
+        if (!candidate || candidate.version !== MODEL_VERSION) return false;
+        if (!Array.isArray(candidate.weightsGain) || candidate.weightsGain.length !== this.featureCount) return false;
+        if (!Array.isArray(candidate.weightsTime) || candidate.weightsTime.length !== this.featureCount) return false;
+        return true;
+    }
+
+    createDefaultModel() {
+        const randomArray = () => Array.from({ length: this.featureCount }, () => (Math.random() * 0.02) - 0.01);
         return {
-            expectedGain: 0, // Should be model output
-            expectedTimeCost: 0, // Should be model output
-            confidence: 0 // Should be model confidence
+            version: MODEL_VERSION,
+            featureCount: this.featureCount,
+            weightsGain: randomArray(),
+            biasGain: 0,
+            weightsTime: randomArray(),
+            biasTime: DEFAULT_TIME_COST_SECONDS,
+            sampleCount: 0,
+            lastTrainedAt: Date.now()
         };
     }
-    
-    /**
-     * Record a training example
-     * @param {Object} inputs 
-     * @param {Object} outcome - { realizedGain, realizedTimeCost, finalGrade }
-     */
-    recordExample(inputs, outcome) {
-        // Schema: 
-        // Inputs: FSRS vector, user stats, card stats
-        // Targets: Gain (change in R), Time
-        if (cortexState.debugEnabled) {
-             console.log('[NeuralTrainer] Example:', { inputs, outcome });
+
+    async persistModel() {
+        if (!this.model) return;
+        try {
+            await saveDataToDB('appData', { key: MODEL_STORAGE_KEY, ...this.model });
+            cortexState.modelConfig = this.model;
+        } catch (error) {
+            if (cortexState.debugEnabled) {
+                console.warn('[NeuralPredictor] Failed to persist model', error);
+            }
         }
-        // TODO: Persist to 'training_data' store in IDB
+    }
+
+    async loadTrainingData() {
+        const records = await getAllDataFromDB(TRAINING_STORE_NAME).catch(() => []);
+        this.trainingData = Array.isArray(records) ? records.slice().sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
+        await this.trimTrainingData();
+    }
+
+    flattenFeatures(features) {
+        return this.featureKeys.map(key => this.normalizeFeature(key, features?.[key]));
+    }
+
+    normalizeFeature(key, value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 0;
+        switch (key) {
+            case 'lastLatency':
+            case 'sessionMeanLatency':
+                return Math.min(5, num / 1000);
+            case 'minutesSinceLastReview':
+                return Math.min(2, num / 30);
+            case 'daysToExam':
+                return Math.min(6, num / 30);
+            case 'timesSeenThisSession':
+                return Math.min(1, num / 5);
+            case 'reps':
+                return Math.min(1, num / 20);
+            case 'cardAvgTime':
+                return Math.min(1, num / 60);
+            case 'hasExamDate':
+                return num ? 1 : 0;
+            default:
+                return Math.min(1, Math.max(0, num));
+        }
+    }
+
+    computeDot(weights, features) {
+        let total = 0;
+        for (let i = 0; i < this.featureCount; i++) {
+            total += (weights[i] || 0) * (features[i] || 0);
+        }
+        return total;
+    }
+
+    computeConfidence() {
+        const count = this.trainingData.length;
+        if (!count) return 0;
+        const base = Math.min(0.93, Math.log1p(count) / 8 + 0.1);
+        return Math.min(0.99, base + Math.min(0.03, count / TRAINING_SAMPLE_LIMIT));
+    }
+
+    predict(inputs) {
+        if (!this.model) return null;
+        const features = inputs?.features;
+        if (!Array.isArray(features) || features.length !== this.featureCount) return null;
+        const gainRaw = this.computeDot(this.model.weightsGain, features) + this.model.biasGain;
+        const timeRaw = this.computeDot(this.model.weightsTime, features) + this.model.biasTime;
+        const expectedGain = clamp(gainRaw, 0, 1);
+        const expectedTimeCost = clamp(timeRaw, MIN_TIME_COST, MAX_TIME_COST);
+        return {
+            expectedGain,
+            expectedTimeCost,
+            confidence: this.computeConfidence()
+        };
+    }
+
+    async recordExample(inputs, outcome) {
+        if (!this.model) return;
+        const flattened = this.flattenFeatures(inputs?.features || {});
+        if (flattened.length !== this.featureCount) return;
+        const sample = {
+            features: flattened,
+            realizedGain: clamp(outcome?.realizedGain ?? 0, 0, 1),
+            realizedTimeCost: Math.min(MAX_TIME_COST, Math.max(MIN_TIME_COST, Number(outcome?.realizedTimeCost) || DEFAULT_TIME_COST_SECONDS)),
+            cardID: inputs?.cardID || null,
+            deckID: inputs?.deck?.id || inputs?.deck?.deckId || null,
+            timestamp: Date.now()
+        };
+        const id = await this.appendTrainingSample(sample);
+        if (id) sample.id = id;
+        this.trainingData.push(sample);
+        await this.trimTrainingData();
+        this.samplesSinceLastTraining += 1;
+        if (cortexState.debugEnabled) {
+            console.log(`[NeuralPredictor] Recorded sample #${this.trainingData.length} (gain=${sample.realizedGain.toFixed(3)})`);
+        }
+        if (this.samplesSinceLastTraining >= TRAINING_TRIGGER_COUNT) {
+            this.samplesSinceLastTraining = 0;
+            await this.trainModel();
+        }
+    }
+
+    async appendTrainingSample(sample) {
+        const database = getDB();
+        if (!database) return null;
+        return new Promise((resolve) => {
+            try {
+                const transaction = database.transaction([TRAINING_STORE_NAME], 'readwrite');
+                const store = transaction.objectStore(TRAINING_STORE_NAME);
+                const request = store.add(sample);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => resolve(null);
+            } catch (error) {
+                if (cortexState.debugEnabled) {
+                    console.warn('[NeuralPredictor] Failed to append sample', error);
+                }
+                resolve(null);
+            }
+        });
+    }
+
+    async trimTrainingData() {
+        if (this.trainingData.length <= TRAINING_SAMPLE_LIMIT) return;
+        const excess = this.trainingData.length - TRAINING_SAMPLE_LIMIT;
+        const removed = this.trainingData.splice(0, excess);
+        await Promise.all(removed.map(entry => this.deleteTrainingSample(entry.id)));
+    }
+
+    async deleteTrainingSample(id) {
+        if (typeof id === 'undefined' || id === null) return;
+        try {
+            await deleteDataFromDB(TRAINING_STORE_NAME, id);
+        } catch (error) {
+            if (cortexState.debugEnabled) {
+                console.warn('[NeuralPredictor] Failed to delete training sample', error);
+            }
+        }
+    }
+
+    async trainModel() {
+        if (this.trainingInProgress || !this.trainingData.length || !this.model) return;
+        this.trainingInProgress = true;
+        try {
+            const batch = this.trainingData.slice(-TRAINING_BATCH_SIZE);
+            for (let epoch = 0; epoch < 2; epoch++) {
+                for (const sample of batch) {
+                    this.applyGradient(sample);
+                }
+            }
+            this.model.sampleCount = this.trainingData.length;
+            this.model.lastTrainedAt = Date.now();
+            await this.persistModel();
+            if (cortexState.debugEnabled) {
+                console.log(`[NeuralPredictor] Trained on ${batch.length} samples (total stored: ${this.trainingData.length})`);
+            }
+        } finally {
+            this.trainingInProgress = false;
+        }
+    }
+
+    applyGradient(sample) {
+        if (!sample) return;
+        const gainPred = this.computeDot(this.model.weightsGain, sample.features) + this.model.biasGain;
+        const timePred = this.computeDot(this.model.weightsTime, sample.features) + this.model.biasTime;
+        const gainError = sample.realizedGain - gainPred;
+        const timeError = sample.realizedTimeCost - timePred;
+        for (let i = 0; i < this.featureCount; i++) {
+            this.model.weightsGain[i] += LEARNING_RATE_GAIN * gainError * (sample.features[i] || 0);
+            this.model.weightsTime[i] += LEARNING_RATE_TIME * timeError * (sample.features[i] || 0);
+        }
+        this.model.biasGain += LEARNING_RATE_GAIN * gainError;
+        this.model.biasTime += LEARNING_RATE_TIME * timeError;
     }
 }
 
@@ -544,10 +903,24 @@ function getCardMetric(sessionState, cardId, key, fallback) {
 }
 
 export async function initCortex(options = {}) {
-    cortexState.modelConfig = options.modelConfig || null;
     cortexState.nowProvider = typeof options.nowProvider === 'function' ? options.nowProvider : () => new Date();
+    if (!cortexState.modelPredictor) {
+        cortexState.modelPredictor = new NeuralPredictor();
+    }
+    await cortexState.modelPredictor.init();
+
+    if (options.modelConfig && cortexState.modelPredictor.isModelValid(options.modelConfig)) {
+        cortexState.modelPredictor.model = options.modelConfig;
+        await cortexState.modelPredictor.persistModel();
+    }
+    cortexState.modelConfig = cortexState.modelPredictor.model;
+
     await getFsrsEngine();
     return cortexState;
+}
+
+export function setDebug(enabled) {
+    cortexState.debugEnabled = Boolean(enabled);
 }
 
 export function hasModel() {
@@ -557,12 +930,15 @@ export function hasModel() {
 const Cortex = {
     initCortex,
     hasModel,
+    setDebug,
     computeFeatures,
     scoreCard,
     pickNextCard,
     processReview,
+    processReviewWithRating,
     inferRetrievalOutcome,
-    NeuralPredictor
+    NeuralPredictor,
+    buildTargetDate
 };
 
 export default Cortex;

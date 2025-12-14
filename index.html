@@ -99,6 +99,7 @@ The accents in the manual editor are a bit off.
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/components.css">
     <link rel="icon" type="image/png" href="https://i.ibb.co/1fyDzymL/Study-Stack-Pro-Photoroom.png">
     <style>
         .stats-table {
@@ -1253,6 +1254,10 @@ The accents in the manual editor are a bit off.
             flex-direction: column;
         }
 
+        #practiceTestView .flashcard {
+            margin-bottom: 1.25rem;
+        }
+
         .flashcard-front,
         .flashcard-back {
             grid-area: 1 / 1 / 1 / 1;
@@ -1357,28 +1362,6 @@ The accents in the manual editor are a bit off.
 
         .dark-mode #writeAnswerInput.incorrect {
             background-color: #c5303030;
-        }
-
-        .accent-buttons {
-            margin-top: 15px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
-        }
-
-        .accent-buttons button {
-            background: var(--button-secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--button-secondary-text);
-            padding: 5px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-        }
-
-        .accent-buttons button:hover {
-            background: var(--button-secondary-hover);
         }
 
         .answer-buttons {
@@ -2957,10 +2940,10 @@ The accents in the manual editor are a bit off.
                             Document</button>
                     </div>
 
-                    <!-- New Customization Section -->
+                    <!-- New Customisation Section -->
                     <div class="form-group"
                         style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                        <label style="margin-bottom: 10px; display: block; font-weight: 600;">Customize
+                        <label style="margin-bottom: 10px; display: block; font-weight: 600;">Customise
                             Generation</label>
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
                             <div>
@@ -3205,14 +3188,6 @@ The accents in the manual editor are a bit off.
 
                 <!-- Right side: Action buttons -->
                 <div class="study-header-actions">
-                    <button id="accentToggleBtn" class="header-btn hidden" title="Toggle Accents"
-                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
-                        </svg>
-                    </button>
                     <button id="editStudyCardBtn" class="header-btn hidden" title="Edit Card" onclick="editCurrentStudyCard()">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" width="20" height="20">
@@ -3339,7 +3314,11 @@ The accents in the manual editor are a bit off.
                 <div style="text-align: center; margin-top: 20px;">
                     <textarea id="writeAnswerInput" class="form-group textarea hidden"
                         placeholder="Type your answer here..."></textarea>
-                    <div id="accentButtonsContainer" class="accent-buttons hidden"></div>
+                    <div id="deckAccentModule" class="deck-accent-module hidden">
+                        <button id="deckAccentToggle" type="button" class="deck-accent-toggle" aria-expanded="false"
+                            aria-controls="deckAccentButtons">´</button>
+                        <div id="deckAccentButtons" class="deck-accent-strip hidden" role="toolbar"></div>
+                    </div>
                     <div id="feedbackMessage"
                         style="text-align: center; margin-top: 10px; font-weight: 500; min-height: 20px;"></div>
                 </div>
@@ -3431,13 +3410,6 @@ The accents in the manual editor are a bit off.
                     <div class="study-subtitle" id="testSubtitle">Deck Name</div>
                 </div>
                 <div class="study-header-actions">
-                    <button id="testAccentToggleBtn" class="header-btn hidden" title="Toggle Accents">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                            stroke="currentColor" width="20" height="20">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c1.356 0 2.673-.174 3.946-.512M12 21c-1.273 0-2.59-.174-3.872-.512M21 12a9 9 0 0 0-9-9c-1.356 0-2.673.174-3.946-.512M3 12a9 9 0 0 1 9-9c1.273 0 2.59.174 3.872.512M12 3v18" />
-                        </svg>
-                    </button>
                     <button id="testInstructionsBtn" class="header-btn" title="Instructions">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" width="20" height="20">
@@ -3492,14 +3464,12 @@ The accents in the manual editor are a bit off.
                         <div class="flashcard-inner">
                             <div class="flashcard-front">
                                 <div class="question" id="testQuestion"></div>
-                            </div><br><br><br><br>
-                            <br>
+                            </div>
                             <div class="flashcard-back">
                                 <div id="testAnswerContent" class="hidden">
                                     <div class="answer" id="testAnswer"></div>
                                 </div>
                             </div>
-                            <br><br><br>
                         </div>
                     </div>
                     <div id="testOptions" class="hidden"></div>
@@ -3507,7 +3477,11 @@ The accents in the manual editor are a bit off.
                 <div style="text-align: center; margin-top: 30px;">
                     <textarea id="testAnswerInput" class="form-group textarea hidden"
                         placeholder="Type your answer here..."></textarea>
-                    <div id="testAccentButtonsContainer" class="accent-buttons hidden"></div>
+                    <div id="testAccentModule" class="deck-accent-module hidden">
+                        <button id="testAccentToggle" type="button" class="deck-accent-toggle" aria-expanded="false"
+                            aria-controls="testAccentButtons">´</button>
+                        <div id="testAccentButtons" class="deck-accent-strip hidden" role="toolbar"></div>
+                    </div>
                 </div>
                 <div class="answer-buttons">
                     <button class="btn btn-show" id="testShowAnswerBtn" onclick="showTestAnswer()">Show Answer</button>
@@ -3797,16 +3771,17 @@ The accents in the manual editor are a bit off.
                 </div>
 
                 <div class="settings-section">
-                    <h4>Learn Mode Options</h4>
+                    <h4>Round Options</h4>
                     <div class="form-group">
-                        <label for="deckSettingsCardsPerRound">Cards Per Round</label>
-                        <input type="number" id="deckSettingsCardsPerRound" value="10" min="3" max="50">
+                        <label for="deckSettingsCardsPerRound">Cards Per Round (Review/Exam)</label>
+                        <input type="number" id="deckSettingsCardsPerRound" value="10" min="1" max="200">
                         <label for="deckSettingsLearnHorizon">Learn Horizon (days)</label>
-                        <input type="number" id="deckSettingsLearnHorizon" value="0" min="0" max="14" placeholder="0 = auto">
+                        <input type="number" id="deckSettingsLearnHorizon" value="0" min="0" placeholder="0 = auto">
+                        <small style="color: var(--secondary-text);">0 = auto (defaults to 3 days unless an Exam Date is set)</small>
                     </div>
                     <div class="checkbox-group">
                         <input type="checkbox" id="retypeIncorrectToggle">
-                        <label for="retypeIncorrectToggle">Require retyping incorrect answers</label>
+                        <label for="retypeIncorrectToggle">Require retyping incorrect answers (Type mode)</label>
                     </div>
                 </div>
 
@@ -3951,6 +3926,7 @@ The accents in the manual editor are a bit off.
     </div>
     <script type="module" src="./js/core/keyboard.js"></script>
     <script type="module" src="./js/pages/bridge.js"></script>
+    <script type="module" src="./js/core/accent-utils.js"></script>
     <script src="./js/pages/dashboard.js"></script>
 
     <!-- Card History Modal -->

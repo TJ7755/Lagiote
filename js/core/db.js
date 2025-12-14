@@ -1,5 +1,11 @@
+import {
+    normalizeFsrsState,
+    parseFsrsDate,
+    isFsrsReviewedState
+} from './fsrs-utils.js';
+
 const DB_NAME = 'LagioteDB';
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 let db;
 
 export function getDB() {
@@ -25,16 +31,17 @@ function resolveKnowledgeKey(key) {
 }
 
 function ensureFsrsShape(record) {
-    const fsrs = record.fsrs || {};
+    const sanitized = normalizeFsrsState(record?.fsrs);
     const now = new Date();
+    const state = sanitized || {};
     return {
-        state: typeof fsrs.state === 'number' ? fsrs.state : 0,
-        stability: typeof fsrs.stability === 'number' ? fsrs.stability : 0,
-        difficulty: typeof fsrs.difficulty === 'number' ? fsrs.difficulty : 0,
-        reps: typeof fsrs.reps === 'number' ? fsrs.reps : 0,
-        lapses: typeof fsrs.lapses === 'number' ? fsrs.lapses : 0,
-        due: fsrs.due ? new Date(fsrs.due) : now,
-        last_review: fsrs.last_review ? new Date(fsrs.last_review) : now
+        state: state.state ?? 0,
+        stability: state.stability ?? 0,
+        difficulty: state.difficulty ?? 0,
+        reps: state.reps ?? 0,
+        lapses: state.lapses ?? 0,
+        due: state.due || now,
+        last_review: state.last_review || null
     };
 }
 
@@ -49,13 +56,22 @@ function prepareKnowledgeRecord(data) {
     const deckID = data.deckID || data.deckId || data.deck || null;
     const id = data.id && typeof data.id === 'string' && data.id.includes(':') ? data.id : `${userID}:${cardID}`;
     const fsrs = ensureFsrsShape(data);
+    const reviewed = isFsrsReviewedState(fsrs);
+    if (!reviewed) {
+        fsrs.last_review = null;
+    }
+
+    const candidateLastReview = data.lastReviewed || data.last_review || data.lastReview || fsrs.last_review;
+    const lastReviewedDate = reviewed ? parseFsrsDate(candidateLastReview) : null;
+    const lastReviewed = lastReviewedDate ? lastReviewedDate.toISOString() : null;
+
     return {
         id,
         userID,
         cardID,
         deckID,
         fsrs,
-        lastReviewed: data.lastReviewed || data.last_review || fsrs.last_review?.toISOString?.() || new Date().toISOString(),
+        lastReviewed,
         lastModified: data.lastModified || new Date().toISOString(),
         recallHistory: Array.isArray(data.recallHistory) ? data.recallHistory : [],
         masteryScore: data.masteryScore,
@@ -101,6 +117,10 @@ function migrateStores(transaction, oldVersion) {
     if (!db.objectStoreNames.contains('examPlans')) {
         db.createObjectStore('examPlans', { keyPath: 'id' });
     }
+    if (!db.objectStoreNames.contains('cortexTrainingData')) {
+        const trainingStore = db.createObjectStore('cortexTrainingData', { keyPath: 'id', autoIncrement: true });
+        trainingStore.createIndex('by_timestamp', 'timestamp', { unique: false });
+    }
 
     if (db.objectStoreNames.contains('userKnowledgeState')) {
         const existingStore = transaction.objectStore('userKnowledgeState');
@@ -140,6 +160,7 @@ function migrateStores(transaction, oldVersion) {
 }
 
 export function initDB() {
+    if (db) return Promise.resolve();
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
 
