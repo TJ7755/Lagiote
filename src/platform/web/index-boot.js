@@ -1,6 +1,25 @@
 import './auth0-boot.js';
 import { attachIndexGlobals } from '../../legacy/compat-globals.js';
 
+// Handle Auth0 web callback as early as possible so the app
+// processes code/state even if page scripts fail to attach onload.
+async function maybeHandleAuth0CallbackEarly() {
+    try {
+        if (typeof window === 'undefined') return;
+        if (window.electronAPI) return; // not web
+        const qs = window.location.search || '';
+        if (!qs.includes('code=') || !qs.includes('state=')) return;
+
+        const mod = await import('../shared/auth-session.js');
+        if (mod && typeof mod.handleWebRedirect === 'function') {
+            await mod.handleWebRedirect();
+        }
+    } catch (err) {
+        console.error('Auth0 callback processing failed:', err);
+        // Leave URL as-is so downstream handlers can retry or show errors.
+    }
+}
+
 function applyThemeFromSystem() {
     const target = document.documentElement;
     const applyTheme = (isDark) => {
@@ -73,6 +92,10 @@ function bootstrapCdn(loadCDNScript) {
 }
 
 function bootstrap() {
+    // Process Auth0 callback first to populate session storage.
+    // Intentionally not awaited so the rest of boot can proceed.
+    maybeHandleAuth0CallbackEarly();
+
     applyThemeFromSystem();
 
     const { gtag } = bootstrapAnalytics();
