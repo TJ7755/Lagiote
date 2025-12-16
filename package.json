@@ -11,7 +11,8 @@
   "author": "TJ7755",
   "license": "GPL-3.0",
   "scripts": {
-    "start": "electron .",
+    "start": "node server.js",
+    "start:electron": "electron .",
     "make": "electron-forge make",
     "dev:web": "vite",
     "build:web": "vite build",

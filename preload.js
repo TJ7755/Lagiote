@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
+  isDev: process.env.NODE_ENV !== 'production',
 
   // FSRS calculations
   getFsrsEnums: () => ipcRenderer.invoke('get-fsrs-enums'),

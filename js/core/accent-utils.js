@@ -84,6 +84,32 @@ export function getAccentBaseKey(char) {
     return resolveAccentBaseKey(char);
 }
 
+export function updateAccentButtonsVisibility() {
+    if (typeof window === 'undefined') return;
+
+    const studyModule = window.studyAccentModule;
+    if (studyModule?.refresh) {
+        studyModule.refresh();
+        return;
+    }
+
+    const writeInput = document.getElementById('writeAnswerInput');
+    const moduleEl = document.getElementById('deckAccentModule');
+    if (!moduleEl) return;
+
+    const buttonsEl = document.getElementById('deckAccentButtons');
+    const toggleButton = document.getElementById('deckAccentToggle');
+    const shouldShow = Boolean(writeInput && !writeInput.classList.contains('hidden'));
+
+    moduleEl.classList.toggle('hidden', !shouldShow);
+    if (buttonsEl) {
+        buttonsEl.classList.toggle('hidden', !shouldShow);
+    }
+    if (toggleButton) {
+        toggleButton.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+    }
+}
+
 if (typeof window !== 'undefined') {
     window.AccentUtils = window.AccentUtils || {};
     window.AccentUtils.ensureDeckAccentMetadata = ensureDeckAccentMetadata;
@@ -91,4 +117,5 @@ if (typeof window !== 'undefined') {
         if (!char) return '';
         return resolveAccentBaseKey(char);
     };
+    window.updateAccentButtonsVisibility = updateAccentButtonsVisibility;
 }

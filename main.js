@@ -3,6 +3,28 @@ require('ts-fsrs'); // Hint for packager
 const path = require('path');
 const fs = require('fs');
 
+const isDevMode = !app.isPackaged;
+process.env.NODE_ENV = process.env.NODE_ENV || (isDevMode ? 'development' : 'production');
+
+const VITE_CONFIG_PATH = path.join(__dirname, 'vite.config.js');
+const DEV_SERVER_DEFAULT_PORT = 5173;
+const DEV_SERVER_DEFAULT_HOST = '127.0.0.1';
+const SYNC_TIMEOUT_MS = 30000;
+const OFFLINE_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'EADDRNOTAVAIL',
+  'EPIPE',
+  'ERR_SOCKET_TIMEOUT'
+]);
+
 // Load environment variables from .env.local
 function loadEnvFile() {
   const envPath = app.isPackaged
@@ -82,11 +104,71 @@ const NETLIFY_FUNCTION_URL = `${PROXY_URL}/api/generate`;
 const DISTRACTOR_FUNCTION_URL = `${PROXY_URL}/api/distractors`;
 const AUTOCOMPLETE_FUNCTION_URL = `${PROXY_URL}/api/autocomplete`;
 
-function resolveRendererTargets() {
+let viteDevServer = null;
+let rendererTargetsCache = null;
+let rendererDevUrl = null;
+
+function normalizeHost(host) {
+  if (!host) return DEV_SERVER_DEFAULT_HOST;
+  if (host === '0.0.0.0' || host === '::') return DEV_SERVER_DEFAULT_HOST;
+  return host;
+}
+
+async function getDevServerUrl() {
+  if (rendererDevUrl) {
+    return rendererDevUrl;
+  }
+
+  const overrideUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL;
+  if (overrideUrl) {
+    rendererDevUrl = overrideUrl;
+    return rendererDevUrl;
+  }
+
+  if (!isDevMode) {
+    return null;
+  }
+
+  try {
+    const { createServer } = require('vite');
+    const server = await createServer({
+      configFile: VITE_CONFIG_PATH,
+      logLevel: 'warn',
+      clearScreen: false,
+      server: {
+        host: DEV_SERVER_DEFAULT_HOST,
+        port: DEV_SERVER_DEFAULT_PORT,
+        strictPort: false
+      }
+    });
+
+    await server.listen();
+
+    const address = server.httpServer?.address();
+    const resolvedPort = (address && address.port) || server.config.server.port || DEV_SERVER_DEFAULT_PORT;
+    const resolvedHost = normalizeHost(server.config.server.host);
+    const protocol = server.config.server.https ? 'https' : 'http';
+
+    rendererDevUrl = `${protocol}://${resolvedHost}:${resolvedPort}`;
+    process.env.VITE_DEV_SERVER_URL = rendererDevUrl;
+    viteDevServer = server;
+    console.log(`[Dev Server] Vite dev server running at ${rendererDevUrl}`);
+    return rendererDevUrl;
+  } catch (error) {
+    console.error('[Dev Server] Failed to start Vite dev server:', error);
+    return null;
+  }
+}
+
+async function resolveRendererTargets() {
+  if (rendererTargetsCache) {
+    return rendererTargetsCache;
+  }
+
   const targets = [];
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL;
-  if (devServerUrl) {
-    targets.push({ type: 'url', value: devServerUrl });
+  const devUrl = await getDevServerUrl();
+  if (devUrl) {
+    targets.push({ type: 'url', value: devUrl });
   }
 
   const distIndex = path.join(__dirname, 'dist', 'index.html');
@@ -95,7 +177,50 @@ function resolveRendererTargets() {
   }
 
   targets.push({ type: 'file', value: path.join(__dirname, 'index.html') });
+  rendererTargetsCache = targets;
   return targets;
+}
+
+function classifySyncError(error) {
+  const fallbackMessage = 'Unable to sync data. Your changes are saved locally.';
+  if (!error) {
+    return { type: 'unknown', message: fallbackMessage, status: null, tag: 'unknown' };
+  }
+
+  const message = error.message || fallbackMessage;
+  if (error.type === 'timeout' || /timeout/i.test(message)) {
+    return {
+      type: 'timeout',
+      message: 'Sync request timed out. Your changes are saved locally and will retry when the network returns.',
+      status: null,
+      tag: 'timeout'
+    };
+  }
+
+  if (error.name === 'AbortError') {
+    return {
+      type: 'timeout',
+      message: 'Sync request timed out. Your changes are saved locally and will retry when the network returns.',
+      status: null,
+      tag: 'timeout'
+    };
+  }
+
+  if (typeof error.code === 'string' && OFFLINE_ERROR_CODES.has(error.code)) {
+    return {
+      type: 'offline',
+      message: 'Network appears to be offline. Your changes will sync automatically once connectivity is restored.',
+      status: null,
+      tag: 'offline'
+    };
+  }
+
+  return {
+    type: 'unknown',
+    message,
+    status: null,
+    tag: 'unknown'
+  };
 }
 
 function loadRendererFromTargets(win, targets, index = 0) {
@@ -110,7 +235,7 @@ function loadRendererFromTargets(win, targets, index = 0) {
   }
 }
 
-function createWindow() {
+async function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -124,7 +249,7 @@ function createWindow() {
     },
   });
 
-  const rendererTargets = resolveRendererTargets();
+  const rendererTargets = await resolveRendererTargets();
   loadRendererFromTargets(win, rendererTargets, 0);
 
   win.webContents.on('did-fail-load', (_event, errorCode, errorDesc, validatedURL, isMainFrame) => {
@@ -437,7 +562,7 @@ async function createLoginWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Load environment variables
   loadEnvFile();
 
@@ -460,11 +585,11 @@ app.whenReady().then(() => {
   // auto-updating is handled in electron-main.cjs for packaged builds
 
   app.setAsDefaultProtocolClient("lagioterevise");
-  createWindow();
+  await createWindow();
 
-  app.on('activate', () => {
+  app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      await createWindow();
     }
   });
 });
@@ -472,6 +597,15 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('will-quit', async () => {
+  if (!viteDevServer) return;
+  try {
+    await viteDevServer.close();
+  } catch (error) {
+    console.error('[Dev Server] Failed to close Vite dev server:', error);
   }
 });
 
@@ -581,54 +715,73 @@ ipcMain.handle('gemini-autocomplete', async (event, { deckContent, currentCard, 
 });
 
 ipcMain.handle('sync-data', async (event, arg) => {
+  const { token, guestId, ...syncPayload } = arg;
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  } else if (guestId) {
+    headers['X-Guest-ID'] = guestId;
+  }
+
+  let timeoutId;
   try {
-    const { token, guestId, ...syncPayload } = arg;
-
-
-
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    } else if (guestId) {
-      headers['X-Guest-ID'] = guestId;
-    }
-
     const response = await Promise.race([
       fetch(`${PROXY_URL}/api/sync`, {
         method: 'POST',
-        headers: headers,
+        headers,
         body: JSON.stringify(syncPayload)
       }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 30000))
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          const timeoutError = new Error('Sync timeout');
+          timeoutError.type = 'timeout';
+          reject(timeoutError);
+        }, SYNC_TIMEOUT_MS);
+      })
     ]);
 
-    if (!response.ok) {
-      throw new Error(`Sync failed with status ${response.status}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Sync error:', error);
-
-    // Propagate 401 specifically so renderer can handle logout
-    if (error.message.includes('401')) {
+    if (response.status === 401) {
       return {
+        ok: false,
         error: 'auth_error',
-        message: 'Session expired or invalid (401)',
+        type: 'http',
+        status: 401,
         statusCode: 401,
-        originalError: error.message
+        message: 'Session expired or invalid (401)',
+        originalError: `HTTP ${response.status}`
       };
     }
 
+    if (!response.ok) {
+      const statusErrorMessage = `Sync failed with status ${response.status}`;
+      return {
+        ok: false,
+        error: 'http_error',
+        type: 'http',
+        status: response.status,
+        message: statusErrorMessage,
+        originalError: `${statusErrorMessage}${response.statusText ? ` (${response.statusText})` : ''}`
+      };
+    }
+
+    const data = await response.json();
+    return { ...data, ok: true };
+  } catch (error) {
+    console.error('Sync error:', error);
+    const classification = classifySyncError(error);
     return {
-      error: 'offline',
-      message: 'Cannot sync offline. Your changes will be saved locally and synced when online.',
-      offline: true,
-      originalError: error.message
+      ok: false,
+      error: classification.tag,
+      type: classification.type,
+      status: classification.status,
+      message: classification.message,
+      originalError: error && error.message ? error.message : undefined
     };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
   }
 });
 

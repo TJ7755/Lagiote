@@ -65,8 +65,22 @@ let studyState = {
     targetRetention: 0.8,
     cortexDebugEnabled: false,
     pendingMCQToken: 0,
-    pendingMCQCardId: null
+    pendingMCQCardId: null,
+    sequenceChunkSize: null,
+    sequenceLinkDrillQueue: [],
+    sequenceLinkDrillAttempts: 0,
+    sequenceLinkDrillCap: 8,
+    sequenceMissingEdges: [],
+    sequenceRecentLinkFailures: 0,
+    sequenceChunkStartTime: null,
+    sequenceLastActivity: null
 };
+
+const sequenceStepUtils = window.sequenceStepUtils || {};
+const cleanStepText = sequenceStepUtils.cleanStepText;
+if (typeof cleanStepText !== 'function') {
+    throw new Error('Shared sequence step helper is not available');
+}
 
 function getStoredSessionRaw() {
     if (authApi && typeof authApi.getStoredSessionRaw === 'function') {
@@ -1062,6 +1076,48 @@ async function applyFsrsReviewUpdate(card, deckId, explicitFeedback, interaction
         reviewTime,
         questionType
     };
+}
+
+function resolveSequenceRatingValue(rating) {
+    const ratings = fsrsRatings || { Again: 0, Hard: 1, Good: 2, Easy: 3 };
+    if (typeof rating === 'number' && Number.isFinite(rating)) return rating;
+    if (!rating) return ratings.Good;
+    const normalized = String(rating).trim().toLowerCase();
+    if (normalized === 'easy') return ratings.Easy;
+    if (normalized === 'hard') return ratings.Hard;
+    if (normalized === 'again' || normalized === 'wrong') return ratings.Again;
+    return ratings.Good;
+}
+
+async function applySequenceFsrsUpdate(stepId, rating, nowIso, options = {}) {
+    if (!currentDeckId) return null;
+    const deck = decks[currentDeckId];
+    if (!deck) return null;
+    const card = deck.cards.find(c => c.id === stepId) || null;
+    if (!card) return null;
+    await getFsrsEngine();
+    const resolvedRating = resolveSequenceRatingValue(rating);
+    const interactionLog = options.interactionLog || currentInteractionLog || {};
+    const iqs = typeof options.iqs === 'number' ? options.iqs : 0.5;
+    const explicitFeedback = typeof options.correct === 'boolean'
+        ? options.correct
+        : resolvedRating >= (fsrsRatings?.Good ?? 2);
+    const result = await applyFsrsReviewUpdate(
+        card,
+        deck.id,
+        explicitFeedback,
+        interactionLog,
+        iqs,
+        {
+            explicitFsrsRating: resolvedRating,
+            nowOverride: options.nowOverride || (nowIso ? new Date(nowIso) : new Date()),
+            questionType: options.questionType || 'Sequence'
+        }
+    );
+    if (studyState.cortexDebugEnabled) {
+        console.log(`[Sequence FSRS] step=${stepId} rating=${rating} resolved=${resolvedRating}`);
+    }
+    return result;
 }
 
 
@@ -3481,29 +3537,20 @@ async function updateDashboard() {
             const totalCards = deck.cards.length;
             let progressPercent = 0;
             if (totalCards > 0) {
-                const hasExamDate = deck.settings && deck.settings.examDate;
-                const targetRetention = (deck.settings && deck.settings.targetRetention) || 0.8;
-                const examDate = hasExamDate ? new Date(deck.settings.examDate) : null;
-                const targetDate = examDate || new Date();
-
-                let totalScore = 0;
-                deck.cards.forEach(card => {
-                    const state = knowledgeMap.get(card.id);
-                    const retention = calculateRetentionAtDate(state, targetDate);
-                    if (globalSettings.devMode) {
-                        console.log("[FSRS insights] retention used:", retention);
-                    }
-                    if (hasExamDate) {
-                        // Use retention for exam mode
-                        const score = retention / targetRetention;
-                        totalScore += Math.min(1, score);
-                    } else {
-                        // Use current-day retention
-                        const normalizedRetention = Number.isFinite(retention) ? retention : 0;
-                        totalScore += normalizedRetention;
-                    }
+                const cardIds = deck.cards.map(card => card.id);
+                const { percent, counts } = computeRetentionProgressPercent({
+                    cardIds,
+                    deck,
+                    stateMap: knowledgeMap
                 });
-                progressPercent = (totalScore / totalCards) * 100;
+                progressPercent = percent;
+                if (globalSettings.devMode) {
+                    console.log('[Progress] dashboardDeckProgress', {
+                        deckId: deck.id,
+                        percent,
+                        counts
+                    });
+                }
             }
 
             let actionButtonsHTML;
@@ -4874,37 +4921,25 @@ async function updateSessionProgress() {
         stateMap = new Map(allStates.map(s => [s.cardID, s]));
         studyState.knowledgeStates = stateMap;
     }
+
     const deck = decks[currentDeckId];
-    const hasExamDate = deck.settings && deck.settings.examDate;
-    const targetRetention = (deck.settings && deck.settings.targetRetention) || 0.8;
-    const examDate = hasExamDate ? new Date(deck.settings.examDate) : null;
-    const targetDate = hasExamDate ? examDate : new Date();
-
-    let totalScore = 0;
-
-    studyState.sessionCardIds.forEach(id => {
-        const state = stateMap.get(id);
-        const retention = hasExamDate ? calculateExamRetention(state, targetDate) : calculateRetentionAtDate(state, targetDate);
-        const target = hasExamDate ? targetRetention : 0.9;
-        let score = target ? retention / target : retention;
-        if (score > 1) score = 1;
-        totalScore += score;
+    const { percent, counts } = computeRetentionProgressPercent({
+        cardIds: studyState.sessionCardIds,
+        deck,
+        stateMap
     });
 
-    const avgScore = totalScore / studyState.sessionCardIds.length;
-
-    let visualPercent;
-    visualPercent = avgScore * 100;
-
-    visualPercent = Math.max(0, Math.min(100, visualPercent));
+    if (globalSettings.devMode) {
+        console.log('[Progress] sessionProgress', { deckId: deck?.id, percent, counts });
+    }
 
     const bar = document.getElementById('sessionProgressBar');
     const text = document.getElementById('sessionCounter');
 
-    if (bar) bar.style.width = `${visualPercent}%`;
+    if (bar) bar.style.width = `${percent}%`;
 
     if (text) {
-        const current = Math.round(visualPercent);
+        const current = Math.round(percent);
         text.innerHTML = '';
         const label = document.createTextNode('Progress: ');
         const percentSpan = document.createElement('span');
@@ -4913,6 +4948,68 @@ async function updateSessionProgress() {
         text.appendChild(label);
         text.appendChild(percentSpan);
     }
+}
+
+function computeRetentionProgressPercent({ cardIds, deck, stateMap, targetDateOverride = null }) {
+    const counts = {
+        missingStateCount: 0,
+        nonFiniteRetentionCount: 0,
+        reviewedLikeCount: 0
+    };
+
+    if (!deck || !Array.isArray(cardIds) || cardIds.length === 0) {
+        return { percent: 0, counts };
+    }
+
+    const settings = deck.settings || {};
+    const hasExamDate = Boolean(settings.examDate);
+    const targetRetention = Number.isFinite(settings.targetRetention) ? settings.targetRetention : 0.8;
+    const overrideDateValid =
+        targetDateOverride instanceof Date && !Number.isNaN(targetDateOverride.getTime());
+    const examDateCandidate = hasExamDate ? new Date(settings.examDate) : null;
+    const examTargetDate =
+        examDateCandidate && !Number.isNaN(examDateCandidate.getTime()) ? examDateCandidate : null;
+    const targetDate = overrideDateValid
+        ? targetDateOverride
+        : examTargetDate || new Date();
+
+    const getState = id => {
+        if (!stateMap) return undefined;
+        if (typeof stateMap.get === 'function') return stateMap.get(id);
+        return stateMap[id];
+    };
+
+    let totalScore = 0;
+    const scoringTarget = hasExamDate ? targetRetention : 0.9;
+
+    cardIds.forEach(id => {
+        const state = getState(id);
+        if (!state) {
+            counts.missingStateCount += 1;
+        } else if (state.lastReviewed || state.fsrs?.last_review) {
+            counts.reviewedLikeCount += 1;
+        }
+
+        const retention = hasExamDate
+            ? calculateExamRetention(state, targetDate)
+            : calculateRetentionAtDate(state, targetDate);
+
+        if (!Number.isFinite(retention)) {
+            counts.nonFiniteRetentionCount += 1;
+        }
+
+        let score = scoringTarget ? retention / scoringTarget : retention;
+        if (!Number.isFinite(score)) {
+            score = 0;
+        }
+        score = Math.max(0, Math.min(1, score));
+        totalScore += score;
+    });
+
+    const avgScore = cardIds.length ? totalScore / cardIds.length : 0;
+    let percent = Number.isFinite(avgScore) ? avgScore * 100 : 0;
+    percent = Math.max(0, Math.min(100, percent));
+    return { percent, counts };
 }
 
 async function startSpacedLearning(deckId) {
@@ -5026,6 +5123,11 @@ async function saveStudyProgress() {
             sequenceMissedInChunk: studyState.sequenceMissedInChunk,
             weakestLinkIteration: studyState.weakestLinkIteration,
             sequenceForwardQueue: studyState.sequenceForwardQueue,
+            sequenceChunkSize: studyState.sequenceChunkSize,
+            sequenceMissingEdges: studyState.sequenceMissingEdges,
+            sequenceLinkDrillQueue: (studyState.sequenceLinkDrillQueue || []).map(entry => ({ ...entry })),
+            sequenceLinkDrillAttempts: studyState.sequenceLinkDrillAttempts,
+            sequenceRecentLinkFailures: studyState.sequenceRecentLinkFailures,
             roundCardIds: (studyState.roundCards || []).map(c => c.id),
             activeChunkOverrideIds: studyState.sequenceActiveChunkOverride ? studyState.sequenceActiveChunkOverride.map(c => c.id) : null
         };
@@ -5600,9 +5702,9 @@ async function showNextCard() {
                 break;
             case 'Passive Review Quiz':
                 if (!studyState.roundCards || studyState.roundCards.length === 0) {
-                    const quizPool = [...currentChunk];
-                    const quizCount = Math.min(Math.max(2, quizPool.length >= 3 ? 3 : quizPool.length), quizPool.length);
-                    studyState.roundCards = shuffleArray(quizPool).slice(0, quizCount);
+                    const deck = decks[currentDeckId];
+                    const selectedTargets = selectPassiveReviewTargets(currentChunk, deck);
+                    studyState.roundCards = selectedTargets.length ? selectedTargets : shuffleArray(currentChunk).slice(0, Math.min(currentChunk.length, 3));
                     studyState.currentCardIndex = 0;
                 }
                 const quizCard = studyState.roundCards[studyState.currentCardIndex];
@@ -5816,6 +5918,40 @@ async function showNextCard() {
                 document.getElementById('cardRoundInfo').textContent = `Chunk ${studyState.currentChunkIndex + 1} - Arrange in Order`;
                 simpleButtons.classList.add('hidden');
                 break;
+            case 'Link Drill':
+                checkBtn.onclick = checkSequenceAnswer;
+                dontKnowBtn.onclick = dontKnowSequenceAnswer;
+                document.getElementById('flashcardViewContainer').classList.remove('hidden');
+                document.getElementById('writeAnswerInput').classList.remove('hidden');
+                document.getElementById('checkAnswerBtn').classList.remove('hidden');
+                document.getElementById('dontKnowBtn').classList.remove('hidden');
+                const linkItem = studyState.sequenceLinkDrillQueue?.[0];
+                if (!linkItem) {
+                    studyState.sequencePhase = 'Post-Drag Recall';
+                    moveToNextSequencePhase();
+                    return;
+                }
+                const cueCard = studyState.sequenceCards.find(c => c.id === linkItem.cueId);
+                const cueText = cleanStepText(cueCard || linkItem.cueId);
+                const promptText = linkItem.direction === 'before'
+                    ? `What comes just before ${cueText}?`
+                    : `What comes next after ${cueText}?`;
+                const promptContainer = document.getElementById('cardQuestion');
+                if (promptContainer) {
+                    promptContainer.innerHTML = `
+                        <div style="text-align: center;">
+                            <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 12px;">Link Drill</div>
+                            <div style="font-size: 1.1rem;">${promptText}</div>
+                        </div>
+                    `;
+                }
+                const answerPlaceholder = document.getElementById('cardAnswer');
+                if (answerPlaceholder) {
+                    answerPlaceholder.textContent = '';
+                }
+                const expectedCard = studyState.sequenceCards.find(c => c.id === linkItem.expectedId);
+                startInteractionLog(expectedCard?.id || linkItem.expectedId);
+                break;
             case 'Weakest Link':
                 checkBtn.onclick = checkSequenceAnswer;
                 dontKnowBtn.onclick = dontKnowSequenceAnswer;
@@ -5884,7 +6020,7 @@ async function showNextCard() {
         writeInput.disabled = false;
         writeInput.classList.remove('correct', 'incorrect');
         if (!writeInput.classList.contains('hidden')) setTimeout(() => writeInput.focus(), 100);
-        const timedSequencePhases = ['Forward Chaining', 'Backward Chaining', 'InterChunkReview', 'Weakest Link', 'Passive Review Quiz', 'Post-Drag Recall'];
+        const timedSequencePhases = ['Forward Chaining', 'Backward Chaining', 'InterChunkReview', 'Weakest Link', 'Passive Review Quiz', 'Post-Drag Recall', 'Link Drill'];
         if (timedSequencePhases.includes(studyState.sequencePhase)) {
             studyState.sequenceQuestionStartTime = Date.now();
             if (cardStatsInfo) {
@@ -6095,6 +6231,8 @@ async function moveToNextSequencePhase() {
         showComplete();
         return;
     }
+    const previousPhase = studyState.sequencePhase;
+    studyState.sequenceLastActivity = previousPhase;
     let nextPhase = null;
 
 
@@ -6102,12 +6240,15 @@ async function moveToNextSequencePhase() {
 
     switch (studyState.sequencePhase) {
         case null:
-            nextPhase = 'Passive Review';
             studyState.currentCardIndex = 0;
             studyState.sequenceMissedInChunk = [];
             studyState.sequenceActiveChunkOverride = null;
             studyState.weakestLinkIteration = 0;
             studyState.sequenceForwardQueue = [];
+            studyState.sequenceChunkStartTime = Date.now();
+            const ctxStart = buildSequenceActivityContext(currentChunk);
+            const startChoice = chooseNextSequenceActivity(ctxStart);
+            nextPhase = startChoice.activity;
             break;
         case 'Passive Review':
             nextPhase = 'Passive Review Quiz';
@@ -6193,8 +6334,12 @@ async function moveToNextSequencePhase() {
 
             studyState.currentChunkIndex++;
             if (studyState.currentChunkIndex < studyState.sequenceChunks.length) {
-                nextPhase = 'Passive Review';
-                showToast(`Chunk ${studyState.currentChunkIndex} complete! Starting chunk ${studyState.currentChunkIndex + 1}.`, "success");
+                const nextChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
+                studyState.sequenceChunkStartTime = Date.now();
+                const ctxNext = buildSequenceActivityContext(nextChunk);
+                const nextChoice = chooseNextSequenceActivity(ctxNext);
+                nextPhase = nextChoice.activity;
+                showToast(`Chunk ${studyState.currentChunkIndex} complete! ${nextPhase} next.`, "success");
             } else {
                 nextPhase = 'CheckWeakest';
             }
@@ -6203,6 +6348,10 @@ async function moveToNextSequencePhase() {
         case 'InterChunkReview':
             nextPhase = studyState.nextPhaseAfterReview;
             studyState.nextPhaseAfterReview = null;
+            break;
+        case 'Link Drill':
+            nextPhase = 'Post-Drag Recall';
+            studyState.currentCardIndex = 0;
             break;
 
         case 'CheckWeakest':
@@ -6539,14 +6688,29 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
         attemptCount: lastLog.attemptCount || 1
     }, userBaseline);
 
-    const fsrsResult = await applyFsrsReviewUpdate(
-        cardInDeck || card,
-        deckIdForThisCard,
-        correct,
-        { ...lastLog, questionType },
-        iqs,
-        { questionType }
-    );
+    let fsrsResult;
+    if (currentMode === 'sequence') {
+        fsrsResult = await applySequenceFsrsUpdate(
+            card.id,
+            correct ? 'Good' : 'Hard',
+            new Date().toISOString(),
+            {
+                interactionLog: { ...lastLog, questionType },
+                iqs,
+                correct,
+                questionType
+            }
+        );
+    } else {
+        fsrsResult = await applyFsrsReviewUpdate(
+            cardInDeck || card,
+            deckIdForThisCard,
+            correct,
+            { ...lastLog, questionType },
+            iqs,
+            { questionType }
+        );
+    }
     const fsrsSnapshot = fsrsResult?.fsrsSnapshot || null;
     const implicitRating = fsrsResult?.rating ?? null;
     const newStability = fsrsResult?.state?.stability ?? null;
@@ -6749,6 +6913,243 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
 
     // Persist deck changes
     await saveDataToDB('decks', decks[deckIdForThisCard]);
+}
+
+function ensureSequenceLinks(state) {
+    if (!state) return;
+    if (!state.sequenceLinks || typeof state.sequenceLinks !== 'object') {
+        state.sequenceLinks = { after: {}, before: {} };
+    } else {
+        state.sequenceLinks.after = state.sequenceLinks.after || {};
+        state.sequenceLinks.before = state.sequenceLinks.before || {};
+    }
+}
+
+function incrementLinkStat(bucket, targetId, correct, timestamp) {
+    if (!bucket[targetId]) {
+        bucket[targetId] = { correct: 0, wrong: 0, last: null };
+    }
+    bucket[targetId].correct += correct ? 1 : 0;
+    bucket[targetId].wrong += correct ? 0 : 1;
+    bucket[targetId].last = timestamp;
+}
+
+async function recordLinkResult({ direction = 'after', cueId, expectedId, correct = false, nowIso = null }) {
+    if (!cueId || !expectedId || cueId === expectedId) return;
+    const timestamp = nowIso || new Date().toISOString();
+    const knowledgeMap = studyState.knowledgeStates || new Map();
+    const cueState = knowledgeMap.get(cueId) || await getOrCreateKnowledgeState('default_user', cueId);
+    const expectedState = knowledgeMap.get(expectedId) || await getOrCreateKnowledgeState('default_user', expectedId);
+    ensureSequenceLinks(cueState);
+    ensureSequenceLinks(expectedState);
+    if (direction === 'after') {
+        incrementLinkStat(cueState.sequenceLinks.after, expectedId, correct, timestamp);
+        incrementLinkStat(expectedState.sequenceLinks.before, cueId, correct, timestamp);
+    } else {
+        incrementLinkStat(cueState.sequenceLinks.before, expectedId, correct, timestamp);
+        incrementLinkStat(expectedState.sequenceLinks.after, cueId, correct, timestamp);
+    }
+    knowledgeMap.set(cueId, cueState);
+    knowledgeMap.set(expectedId, expectedState);
+    await upsertKnowledgeState(cueState);
+    await upsertKnowledgeState(expectedState);
+    if (studyState.cortexDebugEnabled) {
+        console.log(`[Sequence] Link result ${correct ? 'correct' : 'wrong'} ${direction} ${cueId}->${expectedId}`);
+    }
+}
+
+function getWorstLinksInChunk(chunkIds, knowledgeStates = studyState.knowledgeStates, limit = 3) {
+    if (!Array.isArray(chunkIds) || chunkIds.length === 0) return [];
+    const entries = [];
+    const statesMap = knowledgeStates || new Map();
+    chunkIds.forEach(cardId => {
+        const state = statesMap.get(cardId);
+        if (!state || !state.sequenceLinks) return;
+        const { after = {}, before = {} } = state.sequenceLinks;
+        Object.entries(after).forEach(([nextId, stats]) => {
+            const total = (stats.correct || 0) + (stats.wrong || 0);
+            if (!total) return;
+            const weight = (stats.wrong || 0) / total;
+            entries.push({ direction: 'after', cueId: cardId, expectedId: nextId, weight });
+        });
+        Object.entries(before).forEach(([prevId, stats]) => {
+            const total = (stats.correct || 0) + (stats.wrong || 0);
+            if (!total) return;
+            const weight = (stats.wrong || 0) / total;
+            entries.push({ direction: 'before', cueId: cardId, expectedId: prevId, weight });
+        });
+    });
+    entries.sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    return entries.slice(0, limit);
+}
+
+function computeMedian(values = []) {
+    const nums = values.filter(v => typeof v === 'number' && Number.isFinite(v)).sort((a, b) => a - b);
+    if (!nums.length) return 0;
+    const mid = Math.floor(nums.length / 2);
+    if (nums.length % 2 === 0) {
+        return (nums[mid - 1] + nums[mid]) / 2;
+    }
+    return nums[mid];
+}
+
+function buildSequenceActivityContext(chunkOverride = null) {
+    const deck = decks[currentDeckId];
+    const knowledgeMap = studyState.knowledgeStates || new Map();
+    const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
+    const chunk = chunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex] || [];
+    const projectedRetentions = chunk.map(card => {
+        const state = knowledgeMap.get(card.id);
+        const retention = calculateRetentionAtDate(state, targetDate);
+        return { stepId: card.id, retention: typeof retention === 'number' ? retention : 0 };
+    });
+    const medianRetention = computeMedian(projectedRetentions.map(entry => entry.retention));
+    const targetRetention = deck?.settings?.targetRetention || studyState.targetRetention || 0.8;
+    const missingEdgesCount = (studyState.sequenceMissingEdges?.length) || 0;
+    const recentLinkFailures = studyState.sequenceRecentLinkFailures || 0;
+    const timeSpent = studyState.sequenceChunkStartTime ? (Date.now() - studyState.sequenceChunkStartTime) / 1000 : 0;
+    return {
+        chunkIds: chunk.map(card => card.id),
+        projectedRetentions,
+        medianRetention,
+        targetRetention,
+        missingEdgesCount,
+        recentLinkFailures,
+        timeSpent,
+        lastActivity: studyState.sequenceLastActivity
+    };
+}
+
+function chooseNextSequenceActivity(ctx) {
+    if (!ctx) return { activity: 'Passive Review', reason: 'default fallback' };
+    const lastActivity = ctx.lastActivity === 'Link Drill' ? 'Drag and Drop' : ctx.lastActivity;
+    if (ctx.missingEdgesCount > 0 || ctx.recentLinkFailures >= 2) {
+        const reason = `link trouble (${ctx.missingEdgesCount} missing edges, ${ctx.recentLinkFailures} failures)`;
+        if (studyState.cortexDebugEnabled) {
+            console.log(`[Sequence Activity] Choosing LINK_DRILL because ${reason}`);
+        }
+        return { activity: 'Link Drill', reason };
+    }
+    if (ctx.medianRetention < (ctx.targetRetention || 0.8)) {
+        const reason = `median retention low (${ctx.medianRetention.toFixed(2)} < ${ctx.targetRetention.toFixed(2)})`;
+        if (studyState.cortexDebugEnabled) {
+            console.log(`[Sequence Activity] Choosing PASSIVE_REVIEW because ${reason}`);
+        }
+        return { activity: 'Passive Review', reason };
+    }
+    if (lastActivity === 'Passive Review') {
+        const reason = 'progressing to forward chaining';
+        if (studyState.cortexDebugEnabled) {
+            console.log(`[Sequence Activity] Choosing FORWARD_CHAIN because ${reason}`);
+        }
+        return { activity: 'Forward Chaining', reason };
+    }
+    if (lastActivity === 'Forward Chaining') {
+        const reason = 'progressing to backward chaining';
+        if (studyState.cortexDebugEnabled) {
+            console.log(`[Sequence Activity] Choosing BACKWARD_CHAIN because ${reason}`);
+        }
+        return { activity: 'Backward Chaining', reason };
+    }
+    if (lastActivity === 'Backward Chaining') {
+        const reason = 'progressing to drag & drop';
+        if (studyState.cortexDebugEnabled) {
+            console.log(`[Sequence Activity] Choosing DRAG_DROP because ${reason}`);
+        }
+        return { activity: 'Drag and Drop', reason };
+    }
+    const fallback = lastActivity === 'Drag and Drop' ? 'Passive Review' : 'Forward Chaining';
+    if (studyState.cortexDebugEnabled) {
+        console.log(`[Sequence Activity] Choosing ${fallback} as fallback`);
+    }
+    return { activity: fallback, reason: 'fallback cycle' };
+}
+
+function selectPassiveReviewTargets(chunk, deck = decks[currentDeckId]) {
+    if (!Array.isArray(chunk) || chunk.length === 0) return [];
+    const chunkSize = studyState.sequenceChunkSize || chunk.length;
+    let targetCount = Math.min(3, chunkSize);
+    if (targetCount < 2 && chunkSize >= 2) targetCount = 2;
+    targetCount = Math.min(targetCount, chunk.length);
+    const knowledgeMap = studyState.knowledgeStates || new Map();
+    const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
+    const entries = chunk.map(card => {
+        const state = knowledgeMap.get(card.id);
+        const retention = calculateRetentionAtDate(state, targetDate);
+        return {
+            card,
+            retention: typeof retention === 'number' ? retention : null
+        };
+    });
+    const priorityIds = new Set([
+        ...(studyState.sequenceMissedInChunk || []),
+        ...(studyState.sequenceMissingEdges || []).flatMap(edge => [edge.cueId, edge.expectedId]),
+        ...(studyState.sequenceLinkDrillQueue || []).flatMap(entry => [entry.cueId, entry.expectedId])
+    ]);
+    const prioritized = entries.filter(entry => priorityIds.has(entry.card.id));
+    const nonPrioritized = entries.filter(entry => !priorityIds.has(entry.card.id));
+    prioritized.sort((a, b) => (a.retention ?? 0) - (b.retention ?? 0));
+    nonPrioritized.sort((a, b) => (a.retention ?? 0) - (b.retention ?? 0));
+    const selected = [];
+    prioritized.forEach(entry => {
+        if (selected.length < targetCount) selected.push(entry);
+    });
+    nonPrioritized.forEach(entry => {
+        if (selected.length < targetCount) selected.push(entry);
+    });
+    if (selected.length < targetCount) {
+        const fallback = shuffleArray(chunk).filter(entry => !selected.some(selectedEntry => selectedEntry.card.id === entry.id));
+        for (const card of fallback) {
+            if (selected.length >= targetCount) break;
+            selected.push({ card, retention: null });
+        }
+    }
+    const retentions = selected.map(entry => [entry.card.id, entry.retention]);
+    if (studyState.cortexDebugEnabled) {
+        console.log('[Sequence Passive Review] targets', retentions);
+    }
+    return selected.map(entry => entry.card);
+}
+
+function buildLinkDrillQueue(options = {}) {
+    const queue = [];
+    const seen = new Set();
+    const addItem = (item) => {
+        if (!item || !item.cueId || !item.expectedId) return;
+        const key = `${item.direction}:${item.cueId}:${item.expectedId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        queue.push(item);
+    };
+    (options.missingEdges || []).forEach(edge => addItem({ direction: edge.direction || 'after', cueId: edge.cueId, expectedId: edge.expectedId }));
+    const weakLinks = getWorstLinksInChunk(options.chunkIds || [], options.knowledgeStates, options.weakLimit || 3);
+    weakLinks.forEach(link => addItem(link));
+    if (options.boundaryLink) {
+        addItem(options.boundaryLink);
+    }
+    (options.previousQueue || []).forEach(item => addItem(item));
+    return queue;
+}
+
+function determineSequenceChunkSize(configuredSize, persistedSize, deck, sequenceCards, knowledgeStates) {
+    const normalizedPersisted = Number(persistedSize);
+    if (Number.isFinite(normalizedPersisted) && normalizedPersisted >= 3 && normalizedPersisted <= 10) {
+        return normalizedPersisted;
+    }
+    const normalizedConfigured = Number(configuredSize);
+    if (Number.isFinite(normalizedConfigured) && normalizedConfigured >= 3 && normalizedConfigured <= 10) {
+        return normalizedConfigured;
+    }
+    const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
+    const retentionValues = (sequenceCards || []).map(card => {
+        const state = (knowledgeStates || studyState.knowledgeStates || new Map()).get(card.id);
+        const retention = calculateRetentionAtDate(state, targetDate);
+        return typeof retention === 'number' && Number.isFinite(retention) ? retention : 0;
+    });
+    const median = computeMedian(retentionValues);
+    if (median < 0.55) return 3;
+    if (median < 0.75) return 5;
+    return 7;
 }
 
 function dontKnowAnswer() {
@@ -7459,6 +7860,21 @@ function setupKeyboardControls() {
     document.addEventListener('keydown', (e) => {
         if (document.querySelector('.modal.show')) return;
 
+        // If the user is typing in a generic input/textarea or a contentEditable element,
+        // don't intercept keys like Space — but allow handling when the focused element
+        // is the sequence answer field (`writeAnswerInput`) so Enter can submit there.
+        try {
+            const active = document.activeElement;
+            if (active) {
+                const tag = (active.tagName || '').toUpperCase();
+                const type = (active.type || '').toLowerCase();
+                const isTextInput = tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'search', 'email', 'password', 'tel', 'url'].includes(type));
+                const isAnswerField = active.id === 'writeAnswerInput';
+                if ((isTextInput || active.isContentEditable) && !isAnswerField) return;
+            }
+        } catch (err) {
+            // ignore errors and continue with existing logic
+        }
         if (activeView === 'studyMode' && !document.getElementById('progressView').classList.contains('hidden')) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -8677,9 +9093,18 @@ async function processDeckContent(deck) {
 }
 
 async function startSequenceSessionInternal(deckId) {
+    const deck = decks?.[deckId];
+    if (!deck) {
+        showToast('Unable to find that deck yet. Please wait while decks finish loading.', 'error');
+        return;
+    }
+    if (!Array.isArray(deck.cards)) {
+        showToast('Deck cards are not available yet. Please try again in a moment.', 'error');
+        return;
+    }
+
     currentMode = 'sequence';
     currentDeckId = deckId;
-    const deck = decks[deckId];
 
     const sequenceCards = [...deck.cards].sort((a, b) => a.order - b.order);
 
@@ -8691,7 +9116,10 @@ async function startSequenceSessionInternal(deckId) {
     const sequenceKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
     studyState.knowledgeStates = new Map(sequenceKnowledgeStates.map(item => [item.cardID, item]));
 
-    const chunkSize = 5;
+    const persistedChunkSize = deck.sequenceState?.sequenceChunkSize ?? deck.sequenceState?.chunkSize;
+    const configuredChunkSize = Number(deck.settings?.sequenceChunkSize);
+    const chunkSize = determineSequenceChunkSize(configuredChunkSize, persistedChunkSize, deck, sequenceCards, studyState.knowledgeStates);
+    studyState.sequenceChunkSize = chunkSize;
     studyState.sequenceChunks = [];
     for (let i = 0; i < sequenceCards.length; i += chunkSize) {
         studyState.sequenceChunks.push(sequenceCards.slice(i, i + chunkSize));
@@ -8712,6 +9140,10 @@ async function startSequenceSessionInternal(deckId) {
         studyState.sequenceMissedInChunk = deck.sequenceState.sequenceMissedInChunk || [];
         studyState.weakestLinkIteration = deck.sequenceState.weakestLinkIteration || 0;
         studyState.sequenceForwardQueue = deck.sequenceState.sequenceForwardQueue || [];
+        studyState.sequenceMissingEdges = deck.sequenceState.sequenceMissingEdges || [];
+        studyState.sequenceLinkDrillQueue = deck.sequenceState.sequenceLinkDrillQueue || [];
+        studyState.sequenceLinkDrillAttempts = deck.sequenceState.sequenceLinkDrillAttempts || 0;
+        studyState.sequenceRecentLinkFailures = deck.sequenceState.sequenceRecentLinkFailures || 0;
         if (deck.sequenceState.roundCardIds && deck.sequenceState.roundCardIds.length > 0) {
             const roundIdList = deck.sequenceState.roundCardIds;
             studyState.roundCards = roundIdList
@@ -8728,6 +9160,7 @@ async function startSequenceSessionInternal(deckId) {
         } else {
             studyState.sequenceActiveChunkOverride = null;
         }
+        studyState.sequenceChunkStartTime = Date.now();
         showToast(`Resuming from Chunk ${studyState.currentChunkIndex + 1}...`, "info");
     } else {
         studyState.currentChunkIndex = 0;
@@ -8738,6 +9171,7 @@ async function startSequenceSessionInternal(deckId) {
         studyState.roundCards = [];
         studyState.sequenceActiveChunkOverride = null;
         studyState.sequenceForwardQueue = [];
+        studyState.sequenceChunkStartTime = Date.now();
     }
 
     transitionView('studyMode');
@@ -9719,22 +10153,25 @@ function setupDragDropView(chunk) {
     });
 }
 
-function checkDragDropOrder() {
+async function checkDragDropOrder() {
     const listItems = document.querySelectorAll('#dragDropList .deck-card-item');
     const correctOrder = studyState.correctDragDropOrder;
     let isCorrect = true;
     let incorrectCount = 0;
 
-
     const currentOrder = Array.from(listItems).map(item => item.dataset.id);
-    console.log('Correct order:', correctOrder);
-    console.log('Current order:', currentOrder);
+    const edgeKey = (from, to) => `${from}::${to}`;
+    const correctEdges = new Set();
+    const userEdges = new Set();
+    for (let i = 0; i < correctOrder.length - 1; i++) {
+        correctEdges.add(edgeKey(correctOrder[i], correctOrder[i + 1]));
+    }
+    for (let i = 0; i < currentOrder.length - 1; i++) {
+        userEdges.add(edgeKey(currentOrder[i], currentOrder[i + 1]));
+    }
 
     listItems.forEach((item, index) => {
         const cardId = item.dataset.id;
-
-        console.log(`Position ${index}: cardId="${cardId}" vs correctId="${correctOrder[index]}" - Match: ${cardId === correctOrder[index]}`);
-
         if (cardId !== correctOrder[index]) {
             isCorrect = false;
             incorrectCount++;
@@ -9757,6 +10194,14 @@ function checkDragDropOrder() {
         });
     }
 
+    const missingEdges = [];
+    correctEdges.forEach(key => {
+        if (!userEdges.has(key)) {
+            const [cueId, expectedId] = key.split('::');
+            missingEdges.push({ cueId, expectedId, direction: 'after' });
+        }
+    });
+
     if (isCorrect) {
         showToast("Perfect Order!", "success");
         const recallPool = studyState.sequenceChunks[studyState.currentChunkIndex] || [];
@@ -9776,10 +10221,54 @@ function checkDragDropOrder() {
                 item.style.backgroundColor = 'var(--card-bg)';
             });
         }, 2000);
+
+        if (missingEdges.length > 0) {
+            studyState.sequenceMissingEdges = missingEdges;
+            if (studyState.cortexDebugEnabled) {
+                console.log('[Sequence] Missing edges detected:', missingEdges);
+            }
+            const nowIso = new Date().toISOString();
+            for (const edge of missingEdges) {
+                await recordLinkResult({
+                    direction: 'after',
+                    cueId: edge.cueId,
+                    expectedId: edge.expectedId,
+                    correct: false,
+                    nowIso
+                });
+                await Promise.all([
+                    applySequenceFsrsUpdate(edge.cueId, 'Hard', nowIso, { questionType: 'Drag and Drop', correct: false }),
+                    applySequenceFsrsUpdate(edge.expectedId, 'Hard', nowIso, { questionType: 'Drag and Drop', correct: false })
+                ]);
+            }
+            const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
+            const nextChunk = studyState.sequenceChunks[studyState.currentChunkIndex + 1];
+            let boundaryLink = null;
+            if (nextChunk && nextChunk.length && currentChunk && currentChunk.length) {
+                const lastCard = currentChunk[currentChunk.length - 1];
+                const firstNext = nextChunk[0];
+                if (lastCard && firstNext) {
+                    boundaryLink = { direction: 'after', cueId: lastCard.id, expectedId: firstNext.id };
+                }
+            }
+            studyState.sequenceLinkDrillQueue = buildLinkDrillQueue({
+                missingEdges,
+                chunkIds: currentChunk ? currentChunk.map(c => c.id) : [],
+                knowledgeStates: studyState.knowledgeStates,
+                boundaryLink,
+                previousQueue: studyState.sequenceLinkDrillQueue || []
+            });
+            studyState.sequenceLinkDrillAttempts = 0;
+            studyState.sequencePhase = 'Link Drill';
+            await saveStudyProgress();
+            showToast(`${missingEdges.length} adjacency${missingEdges.length > 1 ? 'ies' : 'y'} misplaced — Link Drill time!`, "warning");
+            showNextCard();
+            return;
+        }
     }
 }
 
-function checkSequenceAnswer() {
+async function checkSequenceAnswer() {
     const userInput = document.getElementById('writeAnswerInput');
     const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
     const cardPhasesUsingRoundCards = ['Weakest Link', 'InterChunkReview', 'Passive Review Quiz', 'Post-Drag Recall'];
@@ -9791,6 +10280,11 @@ function checkSequenceAnswer() {
         card = studyState.roundCards?.[studyState.currentCardIndex];
     } else {
         card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
+    }
+
+    if (studyState.sequencePhase === 'Link Drill') {
+        await handleLinkDrillResponse(userInput.value.trim());
+        return;
     }
 
     if (!card || userInput.value.trim() === '') return;
@@ -9823,7 +10317,7 @@ function checkSequenceAnswer() {
     }, delay);
 }
 
-function dontKnowSequenceAnswer() {
+async function dontKnowSequenceAnswer() {
     const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
     const cardPhasesUsingRoundCards = ['Weakest Link', 'InterChunkReview', 'Passive Review Quiz', 'Post-Drag Recall'];
     let card = null;
@@ -9834,6 +10328,11 @@ function dontKnowSequenceAnswer() {
         card = studyState.roundCards?.[studyState.currentCardIndex];
     } else {
         card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
+    }
+
+    if (studyState.sequencePhase === 'Link Drill') {
+        await handleLinkDrillResponse('', true);
+        return;
     }
 
     if (!card) return;
@@ -9850,6 +10349,57 @@ function dontKnowSequenceAnswer() {
     setTimeout(() => {
         moveCard(card, false, 'Sequence');
     }, 2000);
+}
+
+async function handleLinkDrillResponse(userAnswer, isDontKnow = false) {
+    const linkItem = studyState.sequenceLinkDrillQueue?.[0];
+    if (!linkItem) {
+        moveToNextSequencePhase();
+        return;
+    }
+    const expectedCard = studyState.sequenceCards.find(c => c.id === linkItem.expectedId);
+    const expectedText = cleanStepText(expectedCard || linkItem.expectedId).toLowerCase();
+    const normalizedAnswer = (userAnswer || '').trim().toLowerCase();
+    const isCorrect = !isDontKnow && normalizedAnswer && normalizedAnswer === expectedText;
+    await recordLinkResult({
+        direction: linkItem.direction || 'after',
+        cueId: linkItem.cueId,
+        expectedId: linkItem.expectedId,
+        correct: isCorrect
+    });
+    const responseTime = studyState.sequenceQuestionStartTime ? Date.now() - studyState.sequenceQuestionStartTime : null;
+    await applySequenceFsrsUpdate(linkItem.expectedId, isCorrect ? 'Good' : 'Hard', new Date().toISOString(), {
+        interactionLog: {
+            recallLatency: responseTime,
+            totalCorrections: 0,
+            attemptCount: 1,
+            questionType: 'Link Drill'
+        },
+        iqs: 0.5,
+        correct: isCorrect,
+        questionType: 'Link Drill'
+    });
+    studyState.sequenceLinkDrillAttempts = (studyState.sequenceLinkDrillAttempts || 0) + 1;
+    if (!isCorrect) {
+        studyState.sequenceRecentLinkFailures = (studyState.sequenceRecentLinkFailures || 0) + 1;
+        const failedEntry = studyState.sequenceLinkDrillQueue.shift();
+        if (failedEntry) studyState.sequenceLinkDrillQueue.push(failedEntry);
+        showToast("We'll revisit that adjacency shortly.", "error");
+    } else {
+        studyState.sequenceLinkDrillQueue.shift();
+        showToast("Great! That link is reinforced.", "success");
+    }
+    await saveStudyProgress();
+    const shouldExit = !studyState.sequenceLinkDrillQueue.length || studyState.sequenceLinkDrillAttempts >= studyState.sequenceLinkDrillCap;
+    if (shouldExit) {
+        studyState.sequenceRecentLinkFailures = 0;
+        studyState.sequenceMissingEdges = [];
+        studyState.sequenceLinkDrillAttempts = 0;
+        studyState.sequencePhase = 'Post-Drag Recall';
+        moveToNextSequencePhase();
+        return;
+    }
+    showNextCard();
 }
 
 async function showInsightsView() {
@@ -10590,12 +11140,14 @@ async function loadUserDataAndSync() {
                 guestId: guestId
             });
 
-            if (syncResult.error === 'auth_error' || syncResult.statusCode === 401) {
+            if (syncResult.error === 'auth_error' || syncResult.statusCode === 401 || syncResult.status === 401) {
                 throw new Error('Sync failed with status 401');
             }
 
-            if (syncResult.error) {
-                throw new Error(syncResult.message || 'Sync failed');
+            if (syncResult && syncResult.ok === false) {
+                const syncError = new Error(syncResult.message || 'Sync failed');
+                syncError.syncInfo = syncResult;
+                throw syncError;
             }
         } else {
             // Web app fallback - direct fetch to HuggingFace proxy
@@ -10761,12 +11313,20 @@ async function loadUserDataAndSync() {
         showToast('Sync complete!', 'success');
 
     } catch (error) {
-        console.error('Sync Error:', error);
-        if (error.message.includes('401')) {
+        const isDev = window.electronAPI?.isDev;
+        if (isDev) {
+            console.error('Sync Error:', error);
+        }
+        const syncInfo = error && error.syncInfo;
+        if (error.message.includes('401') || syncInfo?.error === 'auth_error' || syncInfo?.status === 401) {
             showToast('Session expired. Logging out.', 'error');
             logout();
-        } else if (error.name === 'AbortError') {
+        } else if (syncInfo?.type === 'timeout' || error.name === 'AbortError') {
             showToast('Sync timed out. Data is saved locally.', 'info');
+        } else if (syncInfo?.type === 'offline') {
+            showToast('You are offline. Your data is stored locally and will sync when you reconnect.', 'warning');
+        } else if (syncInfo?.type === 'http') {
+            showToast(syncInfo.message || 'Server error occurred while syncing. Please try again later.', 'error');
         } else {
             showToast('Could not sync data. Working in offline mode.', 'error');
         }
@@ -11441,22 +12001,6 @@ function normalizeCardRecord(entry, type) {
 
 const DEFAULT_SEQUENCE_TITLE = 'Sequence';
 const SEQUENCE_STEP_SOURCES = ['steps', 'sequence', 'items'];
-const STEP_PREFIX_REGEX = /^\s*(?:\d+[\.\)]|\(\d+\)|[-\u2013\u2014\u2022\u2023\u2024\u25E6])\s*/;
-
-function convertStepToString(value) {
-    if (value === null || value === undefined) return '';
-    if (typeof value === 'string' || typeof value === 'number') return String(value);
-    if (typeof value === 'object') {
-        return String(value.answer || value.term || value.step || value.text || value.label || value.value || value.question || '');
-    }
-    return '';
-}
-
-function cleanStepText(value) {
-    const text = convertStepToString(value);
-    const sanitized = text.replace(STEP_PREFIX_REGEX, '');
-    return sanitized.trim();
-}
 
 function splitSteps(value) {
     if (Array.isArray(value)) {
