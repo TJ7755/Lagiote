@@ -1,8 +1,10 @@
+import { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from './auth0-config.js';
+
 const SESSION_KEY = 'auth0Session';
 const GUEST_ID_KEY = 'guestID';
-const DEFAULT_AUTH0_DOMAIN = 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-const DEFAULT_AUTH0_CLIENT_ID = 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
-const DEFAULT_AUTH0_AUDIENCE = 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/';
+const DEFAULT_AUTH0_DOMAIN = AUTH0_DOMAIN;
+const DEFAULT_AUTH0_CLIENT_ID = AUTH0_CLIENT_ID;
+const DEFAULT_AUTH0_AUDIENCE = AUTH0_AUDIENCE;
 
 function safeParse(json) {
     if (!json) return null;
@@ -43,15 +45,10 @@ export function getStoredToken() {
 }
 
 export function getAuthConfig(overrides = {}) {
-    const domain = overrides.domain ||
-        document.querySelector('meta[name="auth0-domain"]')?.content ||
-        DEFAULT_AUTH0_DOMAIN;
-    const clientId = overrides.clientId ||
-        document.querySelector('meta[name="auth0-client-id"]')?.content ||
-        DEFAULT_AUTH0_CLIENT_ID;
-    const audience = overrides.audience ||
-        document.querySelector('meta[name="auth0-audience"]')?.content ||
-        DEFAULT_AUTH0_AUDIENCE;
+    const runtimeConfig = (typeof window !== 'undefined' && window.auth0WebConfig) ? window.auth0WebConfig : {};
+    const domain = overrides.domain || runtimeConfig.domain || DEFAULT_AUTH0_DOMAIN;
+    const clientId = overrides.clientId || runtimeConfig.clientId || DEFAULT_AUTH0_CLIENT_ID;
+    const audience = overrides.audience || runtimeConfig.audience || DEFAULT_AUTH0_AUDIENCE;
 
     return { domain, clientId, audience };
 }
@@ -77,24 +74,13 @@ export function getOrCreateGuestID() {
     return guestId;
 }
 
-function ensureAuth0Script(loadScript) {
+function ensureAuth0Script() {
     if (typeof window === 'undefined') return Promise.reject(new Error('No window available'));
-    if (window.auth0) return Promise.resolve();
-
-    if (typeof loadScript === 'function') {
-        return loadScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
-    }
-
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js';
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-    });
+    if (window.auth0 && typeof window.auth0.createAuth0Client === 'function') return Promise.resolve();
+    return Promise.reject(new Error('Auth0 client not available'));
 }
 
-export async function startAuthFlow({ screenHint, loadScript } = {}) {
+export async function startAuthFlow({ screenHint } = {}) {
     // Electron path
     if (typeof window !== 'undefined' && window.electronAPI?.openLoginWindow) {
         const authResult = await window.electronAPI.openLoginWindow();
@@ -104,7 +90,7 @@ export async function startAuthFlow({ screenHint, loadScript } = {}) {
         return authResult;
     }
 
-    await ensureAuth0Script(loadScript);
+    await ensureAuth0Script();
     const { domain, clientId, audience } = getAuthConfig();
 
     const auth0Client = await window.auth0.createAuth0Client({
@@ -122,8 +108,8 @@ export async function startAuthFlow({ screenHint, loadScript } = {}) {
     return null;
 }
 
-export async function handleWebRedirect({ loadScript, save = saveSession } = {}) {
-    await ensureAuth0Script(loadScript);
+export async function handleWebRedirect({ save = saveSession } = {}) {
+    await ensureAuth0Script();
     const { domain, clientId, audience } = getAuthConfig();
 
     const auth0Client = await window.auth0.createAuth0Client({

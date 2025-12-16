@@ -1148,7 +1148,7 @@ window.onload = async function () {
         console.log('Detected Auth0 callback in web environment');
         if (authApi && typeof authApi.handleWebRedirect === 'function') {
             try {
-                await authApi.handleWebRedirect({ loadScript: window.loadCDNScript, save: saveAuthSession });
+                await authApi.handleWebRedirect({ save: saveAuthSession });
             } catch (error) {
                 console.error('Auth callback error:', error);
                 console.error('Error stack:', error.stack);
@@ -2341,6 +2341,15 @@ async function getOrCreateKnowledgeState(userId, cardId, deckId) {
     return state;
 }
 
+function getBrowserAuthConfig() {
+    const config = window.auth0WebConfig || {};
+    return {
+        domain: config.domain || 'REPLACE_WITH_AUTH0_DOMAIN',
+        clientId: config.clientId || 'REPLACE_WITH_AUTH0_CLIENT_ID',
+        audience: config.audience || 'REPLACE_WITH_AUTH0_AUDIENCE'
+    };
+}
+
 function setupEventListeners() {
 
     // Authentication event listeners will be handled by Auth0 (to be implemented)
@@ -2349,7 +2358,7 @@ function setupEventListeners() {
 
     const runAuthFlow = async (screenHint) => {
         if (authApi && typeof authApi.startAuthFlow === 'function') {
-            const result = await authApi.startAuthFlow({ screenHint, loadScript: window.loadCDNScript });
+            const result = await authApi.startAuthFlow({ screenHint });
             if (result && result.user) {
                 saveAuthSession(result);
                 await updateUIAfterLogin(result.user);
@@ -2366,20 +2375,22 @@ function setupEventListeners() {
             return;
         }
 
-        const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';
-        const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+        const {
+            domain: auth0Domain,
+            clientId: auth0ClientId,
+            audience: auth0Audience
+        } = getBrowserAuthConfig();
 
-        if (!window.auth0) {
-            showToast('Loading authentication...', 'info');
-            await loadCDNScript('https://cdn.auth0.com/js/auth0-spa-js/2.4/auth0-spa-js.production.js');
+        if (!window.auth0?.createAuth0Client) {
+            throw new Error('Auth0 client not available');
         }
 
-        const auth0Client = await auth0.createAuth0Client({
+        const auth0Client = await window.auth0.createAuth0Client({
             domain: auth0Domain,
             clientId: auth0ClientId,
             authorizationParams: {
                 redirect_uri: window.location.origin + '/',
-                audience: 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/',
+                audience: auth0Audience,
                 scope: 'openid profile email',
                 ...(screenHint ? { screen_hint: screenHint } : {})
             }
@@ -6419,20 +6430,13 @@ function showAnswer() {
 }
 async function logout() {
     try {
-        // Get Auth0 configuration
-        const auth0Domain = document.querySelector('meta[name="auth0-domain"]')?.content || 'dev-sxs00xsv43d5qfx7.us.auth0.com';
-        const auth0ClientId = document.querySelector('meta[name="auth0-client-id"]')?.content || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H';
+        const { domain: auth0Domain, clientId: auth0ClientId } = getBrowserAuthConfig();
 
-        // Load Auth0 SDK if needed
-        if (!window.auth0) {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
-            document.head.appendChild(script);
-            await new Promise(resolve => script.onload = resolve);
+        if (!window.auth0?.createAuth0Client) {
+            throw new Error('Auth0 client not available');
         }
 
-        // Create Auth0 client
-        const auth0Client = await auth0.createAuth0Client({
+        const auth0Client = await window.auth0.createAuth0Client({
             domain: auth0Domain,
             clientId: auth0ClientId,
             authorizationParams: {
@@ -7538,7 +7542,7 @@ async function triggerGeminiAutocomplete(textarea, cardRow, fieldType) {
                 fieldType: fieldType
             });
         } else {
-            const response = await fetch('/.netlify/functions/gemini-autocomplete', {
+            const response = await fetch('/api/autocomplete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -9298,8 +9302,8 @@ async function generateAndDisplayMCQ(correctCard) {
                 console.log("[MCQ] Using Electron API for distractor generation");
                 generatedDistractors = await window.electronAPI.generateDistractors(requestBody);
             } else {
-                console.log("[MCQ] Using Netlify function for distractor generation");
-                const response = await fetch('/.netlify/functions/generateDistractors', {
+                console.log("[MCQ] Using server API for distractor generation");
+                const response = await fetch('/api/distractors', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -9564,10 +9568,11 @@ async function preGenerateAdaptiveQuestions(roundCards, progressCallback) {
                 if (isElectron) {
                     apiPromise = window.electronAPI.generateDistractors(requestBody);
                 } else {
-                    apiPromise = fetch('/.netlify/functions/generateDistractors', {
-                        method: 'POST',
-                        body: JSON.stringify(requestBody)
-                    })
+                apiPromise = fetch('/api/distractors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                })
                         .then(response => {
                             if (!response.ok) throw new Error('Server function for distractors failed.');
                             return response.json();
@@ -9632,8 +9637,9 @@ async function continueBackgroundGeneration(remainingCards, startingCount, total
             if (isElectron) {
                 apiPromise = window.electronAPI.generateDistractors(requestBody);
             } else {
-                apiPromise = fetch('/.netlify/functions/generateDistractors', {
+                apiPromise = fetch('/api/distractors', {
                     method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestBody)
                 })
                     .then(response => {
@@ -9857,8 +9863,8 @@ async function processAllDocuments() {
             console.log('[AI Generation] Using Electron IPC');
             apiPromise = window.electronAPI.generateDeck(payload);
         } else {
-            console.log('[AI Generation] Using Netlify function');
-            apiPromise = fetch('/.netlify/functions/getAiCompletion', {
+            console.log('[AI Generation] Using server API');
+            apiPromise = fetch('/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)

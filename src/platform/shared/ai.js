@@ -1,6 +1,6 @@
 import { isElectronRenderer } from './env.js';
 
-const NETLIFY_GENERATE_URL = '/.netlify/functions/getAiCompletion';
+const SERVER_GENERATE_URL = '/api/generate';
 
 async function generateDeckViaElectron(payload) {
     if (!window.electronAPI || typeof window.electronAPI.generateDeck !== 'function') {
@@ -9,8 +9,8 @@ async function generateDeckViaElectron(payload) {
     return window.electronAPI.generateDeck(payload);
 }
 
-async function generateDeckViaNetlify(payload) {
-    const response = await fetch(NETLIFY_GENERATE_URL, {
+async function generateDeckViaServer(payload) {
+    const response = await fetch(SERVER_GENERATE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -28,5 +28,5 @@ export async function generateDeck(payload) {
         return generateDeckViaElectron(payload);
     }
 
-    return generateDeckViaNetlify(payload);
+    return generateDeckViaServer(payload);
 }

@@ -1,3 +1,4 @@
+import './auth0-boot.js';
 import { attachIndexGlobals } from '../../legacy/compat-globals.js';
 
 function applyThemeFromSystem() {
