@@ -8,9 +8,9 @@ const rootDir = path.resolve(__dirname);
 app.use(express.static(rootDir));
 
 app.use((req, res) => {
-  res.sendFile(path.join(rootDir, 'index.html'));
+    res.sendFile(path.join(rootDir, 'index.html'));
 });
 
 app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+    console.log(`Server listening on port ${port}`);
 });
