@@ -2344,9 +2344,9 @@ async function getOrCreateKnowledgeState(userId, cardId, deckId) {
 function getBrowserAuthConfig() {
     const config = window.auth0WebConfig || {};
     return {
-        domain: config.domain || 'REPLACE_WITH_AUTH0_DOMAIN',
-        clientId: config.clientId || 'REPLACE_WITH_AUTH0_CLIENT_ID',
-        audience: config.audience || 'REPLACE_WITH_AUTH0_AUDIENCE'
+        domain: config.domain || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com',
+        clientId: config.clientId || 'fFvjuKKem8V4mN6W5eD753fKmCVncT1H',
+        audience: config.audience || undefined
     };
 }
 
@@ -9878,6 +9878,14 @@ async function processAllDocuments() {
         const generatedCards = await Promise.race([timeoutPromise, apiPromise]);
 
         console.log('[AI Generation] Response received:', generatedCards);
+
+        if (generatedCards?.aiFallback) {
+            const fallbackReason = generatedCards.fallbackReason;
+            const message = fallbackReason
+                ? `Gemini unavailable: ${fallbackReason}`
+                : 'Gemini unavailable; generated a simplified fallback deck.';
+            showToast(message, 'info', 6000);
+        }
 
         // Handle offline response
         if (generatedCards?.offline) {

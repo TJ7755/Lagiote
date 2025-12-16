@@ -318,13 +318,16 @@ async function handleAiDeckRequest(event) {
       body: 'Method Not Allowed'
     };
   }
+  let parsedBody = {};
+  let documents = [];
+  let context;
   try {
-    const parsedBody = event.body ? JSON.parse(event.body) : {};
-    const documents = sanitizeDocuments(parsedBody.documents);
+    parsedBody = event.body ? JSON.parse(event.body) : {};
+    documents = sanitizeDocuments(parsedBody.documents);
     if (!documents.length) {
       throw new Error('At least one document is required for AI generation.');
     }
-    const context = buildContext(parsedBody, documents);
+    context = buildContext(parsedBody, documents);
     const deck = await generateDeckWithRetries(context);
     return {
       statusCode: 200,
@@ -332,6 +335,19 @@ async function handleAiDeckRequest(event) {
     };
   } catch (error) {
     console.error('AI deck generation error:', error);
+    if (documents.length && context) {
+      const fallbackDeck = buildFallbackDeck(documents, context, error?.message);
+      if (fallbackDeck?.cards?.length) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            ...fallbackDeck,
+            aiFallback: true,
+            fallbackReason: error?.message || 'AI service unavailable.'
+          })
+        };
+      }
+    }
     return {
       statusCode: 500,
       body: JSON.stringify({
@@ -340,6 +356,61 @@ async function handleAiDeckRequest(event) {
       })
     };
   }
+}
+
+const SENTENCE_SPLIT_PATTERN = /(?<=[.!?])\s+|[\r\n]+/;
+
+function splitIntoSentences(text = '') {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return [];
+  }
+  return normalized
+    .split(SENTENCE_SPLIT_PATTERN)
+    .map(sentence => sentence.trim())
+    .filter(Boolean);
+}
+
+function createFallbackQuestion(sentence, index) {
+  const preview = sentence
+    .split(/\s+/)
+    .slice(0, 12)
+    .join(' ')
+    .trim();
+  if (preview) {
+    const ellipsis = preview.endsWith('.') ? '' : '...';
+    return `Explain this idea: "${preview}${ellipsis}"`;
+  }
+  return `Describe the key concept #${index + 1}.`;
+}
+
+function buildFallbackDeck(documents, context, reason = '') {
+  const fallbackCount = Math.max(1, context.targetCount || CARD_COUNT_MAP.flashcard.medium);
+  const sentences = documents
+    .flatMap(doc => splitIntoSentences(doc.content))
+    .filter(Boolean);
+  const uniqueSentences = [...new Set(sentences)];
+  const selectedSentences = uniqueSentences.slice(0, fallbackCount);
+  if (!selectedSentences.length) {
+    return null;
+  }
+  const cards = selectedSentences.map((sentence, index) => ({
+    question: createFallbackQuestion(sentence, index),
+    answer: sentence
+  }));
+  const deckName = context.deckNameSuggestion
+    ? `${context.deckNameSuggestion} (Fallback)`
+    : 'Fallback Flashcards';
+  const reasonSnippet = reason ? ` Reason: ${reason}` : '';
+  return {
+    type: 'flashcard',
+    deckName,
+    deckNotes: `A simplified fallback deck generated from your documents because the AI service was unavailable.${reasonSnippet}`,
+    language: context.languagePreference !== 'auto'
+      ? context.languagePreference
+      : detectLanguageFromDocuments(documents),
+    cards
+  };
 }
 
 module.exports = {
