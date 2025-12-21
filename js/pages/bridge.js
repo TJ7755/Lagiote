@@ -3,6 +3,7 @@ import { levenshteinDistance, calculateIQS, shuffleArray } from '../core/utils.j
 import { FSRSAlgorithm } from '../core/fsrs.js';
 import * as studyModule from './study.js';
 import * as fsrsUtils from '../core/fsrs-utils.js';
+import * as mcqRemediation from '../core/mcq-remediation.js';
 import { isElectronRenderer } from '../../src/platform/shared/env.js';
 import { generateDeck as platformGenerateDeck } from '../../src/platform/shared/ai.js';
 import * as authSession from '../../src/platform/shared/auth-session.js';
@@ -16,6 +17,7 @@ const fsrs = new FSRSAlgorithm();
 
 lagiote.db = db;
 lagiote.utils = { levenshteinDistance, calculateIQS, shuffleArray };
+lagiote.mcqRemediation = mcqRemediation;
 lagiote.fsrs = fsrs;
 lagiote.FSRSAlgorithm = FSRSAlgorithm;
 lagiote.study = studyModule;

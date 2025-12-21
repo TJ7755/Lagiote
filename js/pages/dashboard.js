@@ -5,12 +5,13 @@ const isElectron = typeof window.electronAPI !== 'undefined';
 const authApi = window.authSession || (window.lagiote && window.lagiote.authSession) || null;
 const learnModeAdapterFactory = window.createLearnModeAdapter || null;
 const reviewModeAdapterFactory = window.createReviewModeAdapter || null;
-const sequenceModeAdapterFactory = window.createSequenceModeAdapter || null;
 let toastQueue = [];
 let currentEditingPlanId = null;
 let dailyPriorityQueue = [];
 let isToastVisible = false;
 let sortableInstance = null;
+let sequenceSortable = null;
+let sequenceStepSortables = new Map();
 let documentsForAi = [];
 let isOnline = navigator.onLine;
 let db;
@@ -46,41 +47,30 @@ let studyState = {
     incorrectInThisRound: [],
     sessionState: null,
     currentCard: null,
-    sequencePhase: null,
-    sequenceCards: [],
-    sequenceChunks: [],
-    currentChunkIndex: 0,
-    correctDragDropOrder: [],
-    sequenceMissedInChunk: [],
-    sequenceActiveChunkOverride: null,
-    sequenceQuestionStartTime: null,
-    sequenceTimerInterval: null,
+    evalExposureLogged: { cardId: null, token: null },
     preGenerationCountdownInterval: null,
-    sequenceForwardQueue: [],
-    weakestLinkIteration: 0,
-    maxWeakestLinkIterations: 3,
-    nextPhaseAfterReview: null,
     preGeneratedDistractors: new Map(),
     examDate: null,
     targetRetention: 0.8,
     cortexDebugEnabled: false,
     pendingMCQToken: 0,
     pendingMCQCardId: null,
-    sequenceChunkSize: null,
-    sequenceLinkDrillQueue: [],
-    sequenceLinkDrillAttempts: 0,
-    sequenceLinkDrillCap: 8,
-    sequenceMissingEdges: [],
-    sequenceRecentLinkFailures: 0,
-    sequenceChunkStartTime: null,
-    sequenceLastActivity: null
+    mcqPipeline: null,
+    spacedQueue: [],
+    spacedMeta: new Map(),
+    spacedAnswerShown: false,
+    spacedCounts: { dueRemaining: 0, newRemaining: 0 },
+    sequenceSession: null,
+    sequenceAccuracy: [],
+    mcqRemediation: {
+        queue: [],
+        cooldownUntil: 0,
+        cooldownMs: 60000,
+        maxQueue: 20,
+        pendingSteps: 0,
+        activeTask: null
+    }
 };
-
-const sequenceStepUtils = window.sequenceStepUtils || {};
-const cleanStepText = sequenceStepUtils.cleanStepText;
-if (typeof cleanStepText !== 'function') {
-    throw new Error('Shared sequence step helper is not available');
-}
 
 function getStoredSessionRaw() {
     if (authApi && typeof authApi.getStoredSessionRaw === 'function') {
@@ -190,6 +180,20 @@ const fallbackKnowledgeStateUtils = {
     isKnowledgeStateReviewed: fallbackIsKnowledgeStateReviewed
 };
 
+function formatIntervalFromNow(dueDate, now = new Date()) {
+    if (!dueDate) return '';
+    const target = dueDate instanceof Date ? dueDate : new Date(dueDate);
+    if (Number.isNaN(target.getTime())) return '';
+    const diffMs = Math.max(0, target.getTime() - now.getTime());
+    const minutes = Math.round(diffMs / 60000);
+    if (minutes < 60) return `${Math.max(1, minutes)}m`;
+    const hours = Math.round(diffMs / 3600000);
+    if (hours < 48) return `${hours}h`;
+    const days = Math.round(diffMs / 86400000);
+    if (days < 365) return `${days}d`;
+    return `${Math.max(1, Math.round(days / 365))}y`;
+}
+
 let cachedKnowledgeStateUtils = null;
 function getKnowledgeStateUtils() {
     const globalUtils = (typeof window !== 'undefined' && window.lagiote && window.lagiote.knowledgeStateUtils)
@@ -204,6 +208,63 @@ function getKnowledgeStateUtils() {
     }
     return cachedKnowledgeStateUtils;
 }
+
+function normalizeMetricValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    const normalized = num > 1 ? num : num * 100;
+    return Math.max(0, Math.min(100, normalized));
+}
+
+function getMetricLevel(percent) {
+    if (percent >= 70) return 'high';
+    if (percent >= 40) return 'mid';
+    return 'low';
+}
+
+function renderVisualMetric({ label = 'Metric', value = 0, kind = 'metric' } = {}) {
+    const percent = normalizeMetricValue(value);
+    const level = getMetricLevel(percent);
+    const wrapper = document.createElement('span');
+    const labelText = String(label || 'Metric').trim() || 'Metric';
+    wrapper.className = `metric-chip metric--${level}`;
+    wrapper.setAttribute('role', 'img');
+    wrapper.setAttribute('aria-label', `${labelText} ${percent.toFixed(0)} percent`);
+    wrapper.title = `${labelText}: ${percent.toFixed(0)}%`;
+    wrapper.dataset.metricKind = kind;
+    wrapper.tabIndex = 0;
+
+    const dot = document.createElement('span');
+    dot.className = 'metric-dot';
+    wrapper.appendChild(dot);
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'metric-label';
+    labelEl.textContent = labelText;
+    wrapper.appendChild(labelEl);
+
+    const bar = document.createElement('span');
+    bar.className = 'metric-bar';
+    const fill = document.createElement('span');
+    fill.className = 'metric-bar-fill';
+    fill.style.setProperty('--metric-fill', `${percent}%`);
+    bar.appendChild(fill);
+    wrapper.appendChild(bar);
+
+    return wrapper;
+}
+
+function renderMetricInto(target, options = {}, extraClasses = []) {
+    const el = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!el) return null;
+    el.innerHTML = '';
+    const metric = renderVisualMetric(options);
+    if (Array.isArray(extraClasses) && extraClasses.length) {
+        metric.classList.add(...extraClasses.filter(Boolean));
+    }
+    el.appendChild(metric);
+    return metric;
+}
 const DEFAULT_DECK_SETTINGS = {
     learnMode: 'flashcard',
     reviewOrder: 'random',
@@ -214,8 +275,32 @@ const DEFAULT_DECK_SETTINGS = {
     retypeIncorrect: true,
     learnHorizonDays: 0,
     feedbackStyle: 'simple',
-    forgivingAutomarking: true
+    forgivingAutomarking: true,
+    spacedNewPerDay: 20,
+    spacedMaxReviewsPerDay: 200,
+    spacedOrder: 'dueThenNew',
+    spacedRequeueAgain: true,
+    spacedShowIntervals: true,
+    sequenceChunkMin: 2,
+    sequenceChunkMax: 8,
+    sequenceStartChunk: 4,
+    sequenceMixingThreshold: 0.8,
+    sequenceAllowMixed: true
 };
+const SEQUENCE_TASK_TYPES = ['order', 'next', 'gap'];
+const SEQUENCE_GRAPH_ALPHA = 0.18;
+let sequenceGraphModulePromise = null;
+
+async function getSequenceGraphModule() {
+    if (!sequenceGraphModulePromise) {
+        sequenceGraphModulePromise = import('../core/sequence-graph.js');
+    }
+    return sequenceGraphModulePromise;
+}
+
+function getSequenceGraphCardId(deckId, sequenceId) {
+    return `sequenceGraph:${String(deckId)}:${String(sequenceId || 'default')}`;
+}
 const CURRENT_ANALYSIS_VERSION = 2;
 const smartCoachMessages = {
     greetings: [
@@ -315,6 +400,145 @@ function transactionCompletePromise(transaction) {
         transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction error'));
         transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
     });
+}
+
+function buildSequenceGroups(cards = [], sequenceMeta = {}) {
+    const groups = new Map();
+    cards.forEach((card, idx) => {
+        if (!card) return;
+        const sequenceId = card.sequenceId || card.sequenceID || null;
+        if (!sequenceId) return;
+        const entry = groups.get(sequenceId) || [];
+        entry.push({ card, idx });
+        groups.set(sequenceId, entry);
+    });
+    return Array.from(groups.entries()).map(([sequenceId, items], index) => {
+        const title = sequenceMeta?.[sequenceId]?.title || items[0]?.card?.sequenceTitle || `Sequence ${index + 1}`;
+        const description = sequenceMeta?.[sequenceId]?.description || '';
+        const sortedSteps = [...items].sort((a, b) => {
+            const aOrder = typeof a.card.order === 'number' ? a.card.order : a.idx;
+            const bOrder = typeof b.card.order === 'number' ? b.card.order : b.idx;
+            const aStep = typeof a.card.stepIndex === 'number' ? a.card.stepIndex : aOrder;
+            const bStep = typeof b.card.stepIndex === 'number' ? b.card.stepIndex : bOrder;
+            if (aStep === bStep) return aOrder - bOrder;
+            return aStep - bStep;
+        }).map(entry => entry.card);
+        return { sequenceId, title, description, steps: sortedSteps };
+    });
+}
+
+function normalizeSequenceDeck(deck) {
+    if (!deck || deck.typeHint !== 'Sequence') return false;
+    let changed = false;
+    if (!deck.sequenceMeta || typeof deck.sequenceMeta !== 'object') {
+        deck.sequenceMeta = {};
+        changed = true;
+    }
+    const cards = Array.isArray(deck.cards) ? deck.cards : [];
+    if (!cards.length) return changed;
+
+    const existingSequenceIds = new Set(cards.filter(c => c?.sequenceId).map(c => c.sequenceId));
+    const metaIds = Object.keys(deck.sequenceMeta || {});
+
+    if (!existingSequenceIds.size) {
+        const fallbackId = metaIds[0] || crypto.randomUUID();
+        const title = deck.sequenceMeta?.[fallbackId]?.title || deck.name || 'Sequence';
+        deck.sequenceMeta[fallbackId] = deck.sequenceMeta[fallbackId] || { title };
+        cards.forEach((card, idx) => {
+            card.sequenceId = fallbackId;
+            card.sequenceTitle = card.sequenceTitle || title;
+            card.stepIndex = idx;
+            card.order = typeof card.order === 'number' ? card.order : idx;
+        });
+        changed = true;
+    } else {
+        const titleLookup = new Map();
+        metaIds.forEach(id => {
+            const title = deck.sequenceMeta[id]?.title;
+            if (title) titleLookup.set(title.toLowerCase(), id);
+        });
+        const sequenceIdsArray = Array.from(existingSequenceIds);
+        const primaryMetaId = metaIds[0] || sequenceIdsArray[0] || null;
+        cards.forEach(card => {
+            if (card.sequenceId) return;
+            const titleKey = (card.sequenceTitle || '').trim().toLowerCase();
+            let matchId = null;
+            if (titleKey && titleLookup.has(titleKey)) {
+                matchId = titleLookup.get(titleKey);
+            } else if (titleKey) {
+                const matchingCard = cards.find(c => c.sequenceId && (c.sequenceTitle || '').trim().toLowerCase() === titleKey);
+                if (matchingCard?.sequenceId) {
+                    matchId = matchingCard.sequenceId;
+                }
+            }
+            const targetId = matchId || primaryMetaId || sequenceIdsArray[0] || null;
+            if (targetId) {
+                card.sequenceId = targetId;
+                if (!card.sequenceTitle && deck.sequenceMeta?.[targetId]?.title) {
+                    card.sequenceTitle = deck.sequenceMeta[targetId].title;
+                }
+                changed = true;
+            }
+        });
+    }
+
+    const groups = new Map();
+    cards.forEach((card, idx) => {
+        const sequenceId = card.sequenceId;
+        if (!sequenceId) return;
+        const arr = groups.get(sequenceId) || [];
+        arr.push({ card, idx });
+        groups.set(sequenceId, arr);
+    });
+
+    const grouped = Array.from(groups.entries());
+    grouped.forEach(([sequenceId, items], groupIndex) => {
+        const sorted = [...items].sort((a, b) => {
+            const aOrder = typeof a.card.order === 'number' ? a.card.order : a.idx;
+            const bOrder = typeof b.card.order === 'number' ? b.card.order : b.idx;
+            return aOrder - bOrder;
+        });
+        sorted.forEach((entry, stepIndex) => {
+            if (entry.card.stepIndex !== stepIndex) {
+                entry.card.stepIndex = stepIndex;
+                changed = true;
+            }
+            if (typeof entry.card.order !== 'number') {
+                entry.card.order = stepIndex;
+                changed = true;
+            }
+            if (!entry.card.sequenceTitle) {
+                const seqTitle = deck.sequenceMeta?.[sequenceId]?.title
+                    || sorted[0]?.card?.sequenceTitle
+                    || `${deck.name || 'Sequence'} ${grouped.length > 1 ? groupIndex + 1 : ''}`.trim();
+                if (seqTitle) {
+                    entry.card.sequenceTitle = seqTitle;
+                    changed = true;
+                }
+            }
+        });
+        if (!deck.sequenceMeta[sequenceId]) {
+            const inferredTitle = sorted[0]?.card?.sequenceTitle || `${deck.name || 'Sequence'} ${grouped.length > 1 ? groupIndex + 1 : ''}`.trim();
+            deck.sequenceMeta[sequenceId] = { title: inferredTitle };
+            changed = true;
+        } else if (!deck.sequenceMeta[sequenceId].title && sorted[0]?.card?.sequenceTitle) {
+            deck.sequenceMeta[sequenceId].title = sorted[0].card.sequenceTitle;
+            changed = true;
+        }
+    });
+
+    const usedIds = new Set(grouped.map(([sequenceId]) => sequenceId));
+    Object.keys(deck.sequenceMeta).forEach(id => {
+        if (!usedIds.has(id)) {
+            delete deck.sequenceMeta[id];
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        deck.lastModified = new Date().toISOString();
+    }
+    return changed;
 }
 
 function syncDeckSelectionHighlight() {
@@ -821,6 +1045,15 @@ async function restoreStudySession() {
 function resetSessionState() {
     studyState.sessionState = createDefaultSessionState();
     if (db) deleteDataFromDB('appData', 'lastSession').catch(() => {});
+    studyState.mcqRemediation = {
+        queue: [],
+        cooldownUntil: 0,
+        cooldownMs: 60000,
+        maxQueue: 20,
+        pendingSteps: 0,
+        activeTask: null
+    };
+    studyState.evalExposureLogged = { cardId: null, token: null };
 }
 
 function ensureSessionState() {
@@ -876,7 +1109,16 @@ function isCardMasteredForLearn(knowledgeState, deck, targetDate) {
     const sigma = typeof knowledgeState.evidenceSigma === 'number' ? knowledgeState.evidenceSigma : 0.3;
     const targetRetention = deck?.settings?.targetRetention ?? 0.9;
     const k = 1.0;
-    return (retention - (k * sigma)) >= targetRetention;
+    const mastered = (retention - (k * sigma)) >= targetRetention;
+    if (!mastered) return false;
+
+    if (knowledgeState && knowledgeState.mcqStats) {
+        const stats = ensureMcqStats(knowledgeState.mcqStats);
+        if (stats.recognitionDependenceEma > 0.35) return false;
+        if (stats.mcqCorrect > 0 && stats.recallCorrect === 0) return false;
+    }
+
+    return true;
 }
 
 function logLearnTargetSource(deck, now, targetDate) {
@@ -922,6 +1164,64 @@ function mapQualityToFsrsRating(quality, ratingsOverride = null) {
     if (quality === 3) return ratings.Good;
     if (quality >= 4) return ratings.Easy;
     return ratings.Good;
+}
+
+function createDefaultMcqStats() {
+    return {
+        attempts: 0,
+        recallAttempts: 0,
+        recallCorrect: 0,
+        mcqAttempts: 0,
+        mcqCorrect: 0,
+        lureCounts: {},
+        lastLureKey: null,
+        recognitionDependenceEma: 0.0,
+        remediationAttempts: 0,
+        remediationCorrect: 0,
+        lastRemediationAt: 0,
+        lastUpdated: 0
+    };
+}
+
+function normalizeMcqStats(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const defaults = createDefaultMcqStats();
+    const asInt = (value, fallback = 0) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return fallback;
+        return Math.max(0, Math.floor(num));
+    };
+    const asEma = (value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 0.0;
+        return Math.max(0, Math.min(1, num));
+    };
+    const lureCounts = {};
+    const rawLures = raw.lureCounts && typeof raw.lureCounts === 'object' ? raw.lureCounts : {};
+    Object.entries(rawLures).forEach(([key, value]) => {
+        if (typeof key !== 'string' || !key) return;
+        lureCounts[key] = asInt(value, 0);
+    });
+    const lastLureKey = typeof raw.lastLureKey === 'string' ? raw.lastLureKey : null;
+    return {
+        attempts: asInt(raw.attempts, defaults.attempts),
+        recallAttempts: asInt(raw.recallAttempts, defaults.recallAttempts),
+        recallCorrect: asInt(raw.recallCorrect, defaults.recallCorrect),
+        mcqAttempts: asInt(raw.mcqAttempts, defaults.mcqAttempts),
+        mcqCorrect: asInt(raw.mcqCorrect, defaults.mcqCorrect),
+        lureCounts,
+        lastLureKey,
+        recognitionDependenceEma: asEma(raw.recognitionDependenceEma),
+        remediationAttempts: asInt(raw.remediationAttempts, defaults.remediationAttempts),
+        remediationCorrect: asInt(raw.remediationCorrect, defaults.remediationCorrect),
+        lastRemediationAt: asInt(raw.lastRemediationAt, defaults.lastRemediationAt),
+        lastUpdated: asInt(raw.lastUpdated, defaults.lastUpdated)
+    };
+}
+
+function ensureMcqStats(raw) {
+    const normalized = normalizeMcqStats(raw);
+    return normalized || createDefaultMcqStats();
 }
 
 function createDefaultKnowledgeState(card = {}, overrides = {}) {
@@ -976,6 +1276,7 @@ async function applyFsrsReviewUpdate(card, deckId, explicitFeedback, interaction
             : (Number.isFinite(interactionLog?.recallLatency) ? interactionLog.recallLatency : null),
         focusLossCount: typeof interactionLog?.focusLossCount === 'number' ? interactionLog.focusLossCount : 0,
         questionType,
+        responseTimeSec: typeof interactionLog?.responseTimeSec === 'number' ? interactionLog.responseTimeSec : null,
         iqs: typeof iqs === 'number' ? iqs : null
     };
 
@@ -983,6 +1284,15 @@ async function applyFsrsReviewUpdate(card, deckId, explicitFeedback, interaction
         deck,
         sessionState: studyState.sessionState
     };
+    if (options.calibrationTruth === true) {
+        context.calibrationTruth = true;
+    }
+    if (typeof options.format === 'string' && options.format) {
+        context.format = options.format;
+    }
+    if (typeof options.subformat === 'string' && options.subformat) {
+        context.subformat = options.subformat;
+    }
 
     let updatedState;
     try {
@@ -1033,8 +1343,13 @@ async function applyFsrsReviewUpdate(card, deckId, explicitFeedback, interaction
     const lastReviewedIso = updatedState?.lastReviewed
         || (resolvedFsrsState?.last_review ? new Date(resolvedFsrsState.last_review).toISOString() : new Date().toISOString());
 
+    const preservedMcqStats = (typeof options.mcqStats !== 'undefined')
+        ? options.mcqStats
+        : (typeof state?.mcqStats !== 'undefined' ? state.mcqStats : undefined);
+
     const normalizedRecord = prepareKnowledgeRecord({
         ...updatedState,
+        ...(typeof preservedMcqStats !== 'undefined' ? { mcqStats: preservedMcqStats } : {}),
         id: knowledgeId,
         userID: userId,
         cardID: card.id,
@@ -1078,58 +1393,24 @@ async function applyFsrsReviewUpdate(card, deckId, explicitFeedback, interaction
     };
 }
 
-function resolveSequenceRatingValue(rating) {
-    const ratings = fsrsRatings || { Again: 0, Hard: 1, Good: 2, Easy: 3 };
-    if (typeof rating === 'number' && Number.isFinite(rating)) return rating;
-    if (!rating) return ratings.Good;
-    const normalized = String(rating).trim().toLowerCase();
-    if (normalized === 'easy') return ratings.Easy;
-    if (normalized === 'hard') return ratings.Hard;
-    if (normalized === 'again' || normalized === 'wrong') return ratings.Again;
-    return ratings.Good;
-}
-
-async function applySequenceFsrsUpdate(stepId, rating, nowIso, options = {}) {
-    if (!currentDeckId) return null;
-    const deck = decks[currentDeckId];
-    if (!deck) return null;
-    const card = deck.cards.find(c => c.id === stepId) || null;
-    if (!card) return null;
-    await getFsrsEngine();
-    const resolvedRating = resolveSequenceRatingValue(rating);
-    const interactionLog = options.interactionLog || currentInteractionLog || {};
-    const iqs = typeof options.iqs === 'number' ? options.iqs : 0.5;
-    const explicitFeedback = typeof options.correct === 'boolean'
-        ? options.correct
-        : resolvedRating >= (fsrsRatings?.Good ?? 2);
-    const result = await applyFsrsReviewUpdate(
-        card,
-        deck.id,
-        explicitFeedback,
-        interactionLog,
-        iqs,
-        {
-            explicitFsrsRating: resolvedRating,
-            nowOverride: options.nowOverride || (nowIso ? new Date(nowIso) : new Date()),
-            questionType: options.questionType || 'Sequence'
-        }
-    );
-    if (studyState.cortexDebugEnabled) {
-        console.log(`[Sequence FSRS] step=${stepId} rating=${rating} resolved=${resolvedRating}`);
-    }
-    return result;
-}
-
-
 let practiceTestState = {
     deckId: null,
-    cards: [],
-    currentCardIndex: 0,
-    correctCount: 0,
-    incorrectCount: 0,
-    startTime: null,
-    testType: 'flashcard',
-    numQuestions: 10
+    attemptId: null,
+    startedAt: null,
+    finishedAt: null,
+    blueprint: null,
+    form: null,
+    flatItems: [],
+    responses: [],
+    currentIndex: 0,
+    mode: 'exam_indicative',
+    showTimer: true,
+    allowBack: true,
+    strictMarking: true,
+    confidenceIntervalEnabled: true,
+    modeFlags: null,
+    itemStartTime: null,
+    applyLearningInProgress: false
 };
 
 window.onload = async function () {
@@ -1205,6 +1486,7 @@ window.onload = async function () {
 registerPracticeTestModeAdapter();
 registerLearnModeAdapter();
 registerReviewModeAdapter();
+registerSpacedModeAdapter();
 registerSequenceModeAdapter();
 
 function handleGuestToUserTransition() {
@@ -1412,8 +1694,9 @@ function prepareKnowledgeRecord(data) {
     const lastModified = ensureIsoString(data.lastModified || data.updatedAt, nowISO);
     const createdAt = ensureIsoString(data.createdAt, lastModified) || lastModified;
     const updatedAt = ensureIsoString(data.updatedAt, lastModified) || lastModified;
+    const mcqStats = (typeof data.mcqStats !== 'undefined') ? ensureMcqStats(data.mcqStats) : undefined;
 
-    return {
+    const record = {
         ...data,
         id: `${userID}:${cardID}`,
         userID,
@@ -1426,6 +1709,10 @@ function prepareKnowledgeRecord(data) {
         updatedAt,
         lastModified
     };
+    if (typeof mcqStats !== 'undefined') {
+        record.mcqStats = mcqStats;
+    }
+    return record;
 }
 
 function shouldPersistNormalizedState(original, normalized) {
@@ -1554,7 +1841,6 @@ function initDB() {
     });
 }
 let currentInteractionLog = {};
-let interactionSequenceCounter = 0;
 
 function startInteractionLog(cardID) {
     currentInteractionLog = {
@@ -1644,7 +1930,6 @@ async function logInteraction(logData) {
     const sessionRelativeTime = analyticsManager?.sessionStartTime
         ? Date.now() - analyticsManager.sessionStartTime.getTime()
         : null;
-    interactionSequenceCounter += 1;
 
     let similarityScore = null;
     let errorType = null;
@@ -1689,9 +1974,9 @@ async function logInteraction(logData) {
             awayDuration: currentInteractionLog.awayDuration || 0,
             sessionId,
             sessionRelativeTime,
-            sequenceIndex: interactionSequenceCounter,
             errorType,
-            similarityScore
+            similarityScore,
+            responseTimeSec: typeof logData.responseTimeSec === 'number' ? logData.responseTimeSec : null
         };
 
         store.add(logEntry);
@@ -2486,6 +2771,10 @@ function setupEventListeners() {
     safeAddListener('deckDetailEditBtn', 'click', () => editDeck(currentViewingDeckId));
     safeAddListener('deckDetailDeleteBtn', 'click', () => deleteDeck(currentViewingDeckId));
     safeAddListener('deckDetailSettingsBtn', 'click', () => openDeckSettingsModal(currentViewingDeckId));
+    safeAddListener('spacedAgainBtn', 'click', () => gradeSpaced('Again'));
+    safeAddListener('spacedHardBtn', 'click', () => gradeSpaced('Hard'));
+    safeAddListener('spacedGoodBtn', 'click', () => gradeSpaced('Good'));
+    safeAddListener('spacedEasyBtn', 'click', () => gradeSpaced('Easy'));
     safeAddListener('headerBackBtn', 'click', goBack);
     const nameForm = document.getElementById('nameForm');
     if (nameForm) {
@@ -2499,21 +2788,6 @@ function setupEventListeners() {
     });
     safeAddListener('switchStudyModeBtn', 'click', toggleStudyMode);
     safeAddListener('editStudyCardBtn', 'click', editCurrentStudyCard);
-    const writeInputEl = document.getElementById('writeAnswerInput');
-    if (writeInputEl) writeInputEl.addEventListener('keydown', (e) => {
-        if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'ArrowUp') {
-            e.preventDefault();
-            e.stopPropagation();
-            const writeInput = document.getElementById('writeAnswerInput');
-            const checkAnswerBtnVisible = !document.getElementById('checkAnswerBtn').classList.contains('hidden');
-            if (!checkAnswerBtnVisible || writeInput.disabled) return;
-            if (writeInput.value.trim() === '') {
-                showToast('Please enter an answer', 'error');
-                return;
-            }
-            autoCheckAnswer();
-        }
-    });
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             focusLossStartTime = Date.now();
@@ -2558,36 +2832,6 @@ function setupEventListeners() {
             }
         }
     });
-    document.addEventListener('keydown', handlePracticeTestShortcut);
-
-    function handlePracticeTestShortcut(event) {
-        if (event.key !== 'Enter' && event.key !== 'ArrowUp') return;
-        const practiceTestView = document.getElementById('practiceTestView');
-        if (!practiceTestView || practiceTestView.classList.contains('hidden')) return;
-
-        const nextBtn = document.getElementById('testNextBtn');
-        if (nextBtn && !nextBtn.classList.contains('hidden')) {
-            event.preventDefault();
-            nextBtn.click();
-            return;
-        }
-
-        const checkBtn = document.getElementById('testCheckAnswerBtn');
-        if (checkBtn && !checkBtn.classList.contains('hidden')) {
-            const answerInput = document.getElementById('testAnswerInput');
-            if (event.target === answerInput) {
-                event.preventDefault();
-            }
-            checkBtn.click();
-            return;
-        }
-
-        const showAnswerBtn = document.getElementById('testShowAnswerBtn');
-        if (showAnswerBtn && !showAnswerBtn.classList.contains('hidden')) {
-            event.preventDefault();
-            showAnswerBtn.click();
-        }
-    }
 
     bind('testInstructionsBtn', 'click', () => {
         showToast("Practice test instructions would appear here", "info");
@@ -3153,6 +3397,12 @@ function resetStudySubViews() {
     if (mcqOptions) mcqOptions.innerHTML = '';
     studyState.pendingMCQToken = 0;
     studyState.pendingMCQCardId = null;
+    const sequenceView = document.getElementById('sequenceTaskView');
+    if (sequenceView) sequenceView.classList.add('hidden');
+    const sequenceBody = document.getElementById('sequenceTaskBody');
+    if (sequenceBody) sequenceBody.innerHTML = '';
+    const seqFeedback = document.getElementById('sequenceTaskFeedback');
+    if (seqFeedback) seqFeedback.classList.add('hidden');
 }
 
 function goBack() {
@@ -3175,20 +3425,21 @@ function continueGoBack() {
     }
 }
 
-function showEditor() {
-    transitionView('editorView');
-    editorInitialise();
-
-    const container = document.getElementById('flashcardsContainer');
+function destroyStandardSortableInstance() {
     if (sortableInstance) {
         try {
             sortableInstance.destroy();
         } catch (error) {
             console.warn('Failed to destroy Sortable instance:', error);
-            // Continue execution even if destroy fails
         }
         sortableInstance = null;
     }
+}
+
+function initStandardEditorSortable() {
+    const container = document.getElementById('flashcardsContainer');
+    if (!container) return;
+    destroyStandardSortableInstance();
     sortableInstance = new Sortable(container, {
         animation: 150,
         handle: '.drag-handle',
@@ -3197,6 +3448,17 @@ function showEditor() {
             editorRenumberCards();
         }
     });
+}
+
+function showEditor() {
+    transitionView('editorView');
+    editorInitialise();
+
+    destroySequenceSortables();
+    const deckType = document.getElementById('deckTypeHint')?.value;
+    if (deckType !== 'Sequence') {
+        initStandardEditorSortable();
+    }
 }
 
 async function showSettings() {
@@ -3292,6 +3554,11 @@ async function loadSavedData() {
     const fsrsEngine = await getFsrsEngine();
     for (const deck of savedDecks) {
         let deckUpdated = false;
+        if (deck.typeHint === 'Sequence') {
+            if (normalizeSequenceDeck(deck)) {
+                deckUpdated = true;
+            }
+        }
         for (const card of deck.cards) {
             if (!card.id) {
                 card.id = crypto.randomUUID();
@@ -3392,7 +3659,18 @@ async function exportDeck(deckId, event) {
     const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
     const cardIdsInDeck = new Set(deck.cards.map(c => c.id));
 
+    const deckKey = String(deckId);
     const knowledgeStateForDeck = allKnowledgeStates.filter(state => cardIdsInDeck.has(state.cardID));
+    if (deck.typeHint === 'Sequence') {
+        const graphStates = allKnowledgeStates.filter(state =>
+            state
+            && String(state.deckID || state.deckId || '') === deckKey
+            && state.sequenceGraph
+            && !cardIdsInDeck.has(state.cardID));
+        if (graphStates.length) {
+            knowledgeStateForDeck.push(...graphStates);
+        }
+    }
 
     const exportPayload = {
         deck: JSON.parse(JSON.stringify(deck)),
@@ -3407,6 +3685,24 @@ async function exportDeck(deckId, event) {
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
+
+    if (deck.typeHint === 'Sequence') {
+        const groups = buildSequenceGroups(deck.cards || [], deck.sequenceMeta || {});
+        const tsvLines = [];
+        groups.forEach(group => {
+            group.steps.forEach(step => {
+                tsvLines.push([group.title, step.question || '', step.answer || ''].map(field => field.replace(/\t/g, ' ')).join('\t'));
+            });
+        });
+        if (tsvLines.length) {
+            const tsvStr = tsvLines.join('\n');
+            const tsvUri = 'data:text/tab-separated-values;charset=utf-8,' + encodeURIComponent(tsvStr);
+            const tsvLink = document.createElement('a');
+            tsvLink.setAttribute('href', tsvUri);
+            tsvLink.setAttribute('download', `${deck.name.replace(/ /g, '_')}_sequence.tsv`);
+            tsvLink.click();
+        }
+    }
 
     showToast('Complete export started successfully!');
 }
@@ -3564,97 +3860,197 @@ async function updateDashboard() {
                 }
             }
 
-            let actionButtonsHTML;
-            if (deck.typeHint === 'Sequence') {
-                actionButtonsHTML = `
-                        <button class="action-btn learn-btn spaced-btn" style="grid-column: 1 / 3;" onclick="event.stopPropagation(); startSequenceSession('${deck.id}')">
-                            Learn Sequence
-                        </button>
-                    `;
-            } else {
-                actionButtonsHTML = `
-                        <button class="action-btn learn-btn" onclick="event.stopPropagation(); configureStudy('learn', '${deck.id}')">Learn</button>
-                        <button class="action-btn review-btn" onclick="event.stopPropagation(); configureStudy('review', '${deck.id}')">Review</button>
-                    `;
+            let dueCount = 0;
+            let newCount = 0;
+            const nowMs = Date.now();
+            for (const card of deck.cards) {
+                const state = knowledgeMap.get(card.id);
+                const reviewed = fallbackIsKnowledgeStateReviewed(state);
+                const fsrs = fallbackNormalizeFsrsState(state?.fsrs);
+                const reps = fsrs ? fsrs.reps : 0;
+
+                if (!reviewed || reps === 0) {
+                    newCount += 1;
+                    continue;
+                }
+
+                if (fsrs?.due && fsrs.due.getTime() <= nowMs) {
+                    dueCount += 1;
+                }
             }
 
             const deckCard = document.createElement('div');
             deckCard.className = 'deck-card';
             deckCard.dataset.category = String(category);
             deckCard.dataset.deckId = String(deck.id);
+            const isSequenceDeck = deck.typeHint === 'Sequence';
 
             const mainClickable = document.createElement('div');
             mainClickable.className = 'deck-card-main-clickable';
             mainClickable.addEventListener('click', () => showDeckDetail(deck.id, mainClickable.parentElement));
 
-            const deckHeader = document.createElement('div');
-            deckHeader.className = 'deck-header';
+            const deckTop = document.createElement('div');
+            deckTop.className = 'deck-card-top';
 
-            const deckCategoryEl = document.createElement('div');
-            deckCategoryEl.className = 'deck-category';
+            const deckCategoryEl = document.createElement('span');
+            deckCategoryEl.className = 'deck-chip deck-chip--category';
             deckCategoryEl.textContent = String(category);
+            deckTop.appendChild(deckCategoryEl);
+
+            if (isSequenceDeck) {
+                const typePill = document.createElement('span');
+                typePill.className = 'deck-chip deck-chip--type deck-chip--sequence';
+                typePill.textContent = 'Sequence';
+                deckTop.appendChild(typePill);
+            }
+
             const deckNameEl = document.createElement('div');
             deckNameEl.className = 'deck-name';
             deckNameEl.textContent = String(deck.name);
-            const deckInfoEl = document.createElement('div');
-            deckInfoEl.className = 'deck-info';
-            deckInfoEl.innerHTML = `<span>${totalCards} cards</span>`;
 
-            deckHeader.appendChild(deckCategoryEl);
-            deckHeader.appendChild(deckNameEl);
-            deckHeader.appendChild(deckInfoEl);
+            const deckMetaRow = document.createElement('div');
+            deckMetaRow.className = 'deck-meta';
+            deckMetaRow.textContent = `${totalCards} cards`;
+            const createdLabel = formatDate(deck.created);
+            const updatedLabel = formatDate(deck.lastModified || deck.created);
+            deckMetaRow.title = `Created: ${String(createdLabel)} • Updated: ${String(updatedLabel)}`;
+            deckMetaRow.setAttribute('aria-label', `Deck metadata. ${totalCards} cards. Created ${String(createdLabel)}. Updated ${String(updatedLabel)}.`);
+
+            const statusRow = document.createElement('div');
+            statusRow.className = 'deck-status-row';
+
+            const buildStatusChip = ({ variant, label, title, ariaLabel }) => {
+                const chip = document.createElement('span');
+                chip.className = `status-chip status-chip--${variant}`;
+                chip.title = title;
+                chip.setAttribute('aria-label', ariaLabel);
+
+                const dot = document.createElement('span');
+                dot.className = 'status-chip-dot';
+                chip.appendChild(dot);
+
+                const text = document.createElement('span');
+                text.textContent = label;
+                chip.appendChild(text);
+
+                return chip;
+            };
+
+            if (dueCount > 0) {
+                statusRow.appendChild(buildStatusChip({
+                    variant: 'due',
+                    label: 'Due',
+                    title: `${dueCount} due card${dueCount === 1 ? '' : 's'}`,
+                    ariaLabel: `Due: ${dueCount} card${dueCount === 1 ? '' : 's'} due.`
+                }));
+            }
+
+            if (newCount > 0) {
+                statusRow.appendChild(buildStatusChip({
+                    variant: 'new',
+                    label: 'New',
+                    title: `${newCount} new card${newCount === 1 ? '' : 's'}`,
+                    ariaLabel: `New: ${newCount} new card${newCount === 1 ? '' : 's'}.`
+                }));
+            }
+
+            if (dueCount === 0 && newCount === 0) {
+                statusRow.appendChild(buildStatusChip({
+                    variant: 'ok',
+                    label: 'On track',
+                    title: 'No due or new cards',
+                    ariaLabel: 'On track: no due or new cards.'
+                }));
+            }
 
             const progressContainer = document.createElement('div');
             progressContainer.className = 'deck-progress-container';
             const progressLabel = document.createElement('div');
             progressLabel.className = 'deck-progress-label';
-            progressLabel.innerHTML = `<span>Progress</span><span>${Math.round(progressPercent)}%</span>`;
+            const progressText = document.createElement('span');
+            progressText.textContent = 'Progress';
+            progressLabel.appendChild(progressText);
+            const progressPercentEl = document.createElement('span');
+            progressPercentEl.textContent = `${Math.round(progressPercent)}%`;
+            progressLabel.appendChild(progressPercentEl);
             const progressOuter = document.createElement('div');
             progressOuter.className = 'deck-progress-bar-outer';
             const progressInner = document.createElement('div');
             progressInner.className = 'deck-progress-bar-inner';
             progressInner.style.width = `${progressPercent}%`;
-            progressInner.style.backgroundColor = 'var(--success-color)';
             progressOuter.appendChild(progressInner);
             progressContainer.appendChild(progressLabel);
             progressContainer.appendChild(progressOuter);
 
-            const deckDate = document.createElement('div');
-            deckDate.className = 'deck-date';
-            deckDate.textContent = `Created: ${String(formatDate(deck.created))}`;
-
-            mainClickable.appendChild(deckHeader);
+            mainClickable.appendChild(deckTop);
+            mainClickable.appendChild(deckNameEl);
+            mainClickable.appendChild(deckMetaRow);
+            mainClickable.appendChild(statusRow);
             mainClickable.appendChild(progressContainer);
-            mainClickable.appendChild(deckDate);
 
-            const actions = document.createElement('div');
-            actions.className = 'deck-actions';
-            if (deck.typeHint === 'Sequence') {
-                const seqBtn = document.createElement('button');
-                seqBtn.className = 'action-btn learn-btn spaced-btn';
-                seqBtn.style.gridColumn = '1 / 3';
-                seqBtn.textContent = 'Learn Sequence';
-                seqBtn.addEventListener('click', (e) => { e.stopPropagation(); startSequenceSession(deck.id); });
-                actions.appendChild(seqBtn);
-            } else {
-                const learnBtn = document.createElement('button');
-                learnBtn.className = 'action-btn learn-btn';
-                learnBtn.textContent = 'Learn';
-                learnBtn.addEventListener('click', (e) => { e.stopPropagation(); configureStudy('learn', deck.id); });
-                const reviewBtn = document.createElement('button');
-                reviewBtn.className = 'action-btn review-btn';
-                reviewBtn.textContent = 'Review';
-                reviewBtn.addEventListener('click', (e) => { e.stopPropagation(); configureStudy('review', deck.id); });
-                actions.appendChild(learnBtn);
-                actions.appendChild(reviewBtn);
+	            const actions = document.createElement('div');
+	            actions.className = 'deck-actions';
+
+            let primaryMode = 'review';
+            let primaryLabel = 'Review';
+            let secondaryMode = 'learn';
+            let secondaryLabel = 'Learn';
+
+            if (isSequenceDeck) {
+                primaryMode = 'sequence';
+                primaryLabel = 'Sequence';
+                if (dueCount > 0) {
+                    secondaryMode = 'spaced';
+                    secondaryLabel = 'Spaced';
+                } else if (newCount > 0) {
+                    secondaryMode = 'learn';
+                    secondaryLabel = 'Learn';
+                } else {
+                    secondaryMode = 'review';
+                    secondaryLabel = 'Review';
+                }
+            } else if (dueCount > 0) {
+                primaryMode = 'spaced';
+                primaryLabel = 'Spaced';
+                if (newCount > 0) {
+                    secondaryMode = 'learn';
+                    secondaryLabel = 'Learn';
+                } else {
+                    secondaryMode = 'review';
+                    secondaryLabel = 'Review';
+                }
+            } else if (newCount > 0) {
+                primaryMode = 'learn';
+                primaryLabel = 'Learn';
+                secondaryMode = 'review';
+                secondaryLabel = 'Review';
             }
 
-            const exportBtn = document.createElement('button');
-            exportBtn.className = 'action-btn export-btn';
-            exportBtn.title = 'Export Deck';
-            exportBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>`;
-            exportBtn.addEventListener('click', (e) => { e.stopPropagation(); exportDeck(String(deck.id), e); });
-            actions.appendChild(exportBtn);
+	            const primaryBtn = document.createElement('button');
+	            primaryBtn.className = 'btn deck-action-primary';
+	            primaryBtn.type = 'button';
+	            primaryBtn.textContent = primaryLabel;
+	            primaryBtn.addEventListener('click', (e) => {
+	                e.stopPropagation();
+	                configureStudy(primaryMode, deck.id);
+	            });
+	            if (primaryMode === 'spaced') {
+	                primaryBtn.title = dueCount > 0 ? `${dueCount} due` : 'Spaced review';
+	                primaryBtn.setAttribute('aria-label', dueCount > 0 ? `Spaced review. ${dueCount} due.` : 'Spaced review.');
+	            }
+	            actions.appendChild(primaryBtn);
+
+	            if (secondaryMode !== primaryMode) {
+	                const secondaryBtn = document.createElement('button');
+	                secondaryBtn.className = 'btn deck-action-secondary';
+	                secondaryBtn.type = 'button';
+	                secondaryBtn.textContent = secondaryLabel;
+	                secondaryBtn.addEventListener('click', (e) => {
+	                    e.stopPropagation();
+	                    configureStudy(secondaryMode, deck.id);
+	                });
+	                actions.appendChild(secondaryBtn);
+	            }
 
             deckCard.appendChild(mainClickable);
             deckCard.appendChild(actions);
@@ -3664,7 +4060,6 @@ async function updateDashboard() {
     }
 
     rebuildDeckSelection();
-    updateDueCardCounts();
 
     const internalBtn = document.getElementById('internalDashboardBtn');
     if (internalBtn) {
@@ -3692,9 +4087,10 @@ function showDeckDetail(deckId, cardElement) {
 
     document.getElementById('deckDetailTitle').textContent = deck.name;
     const categoryElement = document.getElementById('deckDetailCategory');
-    const category = deck.category || "Other";
+    const category = deck.category || 'Other';
     categoryElement.textContent = category;
     categoryElement.className = `deck-detail-category ${category}`;
+    document.documentElement.setAttribute('data-deck-category', category);
 
     const deckDetailActions = document.getElementById('deckDetailActions');
     if (!deckDetailActions) {
@@ -3702,19 +4098,19 @@ function showDeckDetail(deckId, cardElement) {
         return;
     }
 
-    let sequenceBtn = deckDetailActions.querySelector('.sequence-btn');
-    if (deck.typeHint === 'Sequence') {
-        if (!sequenceBtn) {
-            sequenceBtn = document.createElement('button');
-            sequenceBtn.className = 'btn sequence-btn';
-            sequenceBtn.textContent = 'Practice Sequence';
-            sequenceBtn.style.backgroundColor = '#dd6b20';
-            sequenceBtn.onclick = () => startSequenceSession(deckId);
-            const reviewBtn = deckDetailActions.querySelector('.review-btn');
-            deckDetailActions.insertBefore(sequenceBtn, reviewBtn);
-        }
-    } else {
-        if (sequenceBtn) sequenceBtn.remove();
+    const deckDetailExportBtn = document.getElementById('deckDetailExportBtn');
+    if (deckDetailExportBtn) {
+        deckDetailExportBtn.onclick = (event) => {
+            event?.stopPropagation?.();
+            exportDeck(String(deckId), event);
+        };
+    }
+    const sequenceActionBtn = document.getElementById('deckDetailSequenceBtn');
+    if (sequenceActionBtn) {
+        const isSequenceDeck = deck.typeHint === 'Sequence';
+        sequenceActionBtn.classList.toggle('hidden', !isSequenceDeck);
+        sequenceActionBtn.setAttribute('aria-hidden', (!isSequenceDeck).toString());
+        sequenceActionBtn.onclick = () => configureStudy('sequence', deck.id);
     }
 
     const cardsList = document.getElementById('deckCardsList');
@@ -3723,9 +4119,7 @@ function showDeckDetail(deckId, cardElement) {
     if (deck.cards.length === 0) {
         cardsList.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck yet.</p>';
     } else {
-        const cardsToDisplay = (deck.typeHint === 'Sequence')
-            ? [...deck.cards].sort((a, b) => a.order - b.order)
-            : deck.cards;
+        const cardsToDisplay = deck.cards;
 
         cardsToDisplay.forEach((card, index) => {
             const cardItem = document.createElement('div');
@@ -3844,7 +4238,7 @@ async function saveEditedCard() {
                 if (idx > -1) arr[idx] = { ...arr[idx], question: newQuestion, answer: newAnswer };
             };
 
-            if (currentMode === 'learn' || currentMode === 'spaced') {
+            if (currentMode === 'learn') {
                 if (Array.isArray(studyState.buckets)) {
                     studyState.buckets.forEach(bucket => updateCardInArray(bucket));
                 }
@@ -3947,7 +4341,7 @@ function initKeyboardShortcuts() {
     keyboardManager?.registerContext('dashboard', handleDashboardShortcuts);
 }
 
-async function createNewDeck(name, category, cards, notes = '', typeHint = 'General') {
+async function createNewDeck(name, category, cards, notes = '', typeHint = 'General', extraDeckFields = {}) {
     const deckId = Date.now().toString();
 
     const settings = {
@@ -3959,7 +4353,8 @@ async function createNewDeck(name, category, cards, notes = '', typeHint = 'Gene
 
     const normalizedCards = cards.map(card => ({
         ...card,
-        id: card.id || crypto.randomUUID()
+        id: card.id || crypto.randomUUID(),
+        deckId: deckId
     }));
 
     const tempDeck = { name, category, cards: normalizedCards, notes, typeHint };
@@ -3986,7 +4381,8 @@ async function createNewDeck(name, category, cards, notes = '', typeHint = 'Gene
         typeHint,
         created: new Date().toISOString(),
         lastModified: new Date().toISOString(),
-        settings: settings
+        settings: settings,
+        ...extraDeckFields
     };
     decks[deckId] = newDeck;
 
@@ -4029,14 +4425,7 @@ function editDeck(deckId) {
     const deckTypeHintEl = document.getElementById('deckTypeHint');
     if (deckTypeHintEl) deckTypeHintEl.value = deck.typeHint || 'General';
 
-    const container = document.getElementById('flashcardsContainer');
-    container.innerHTML = '';
-    editorCardCounter = 0;
-
-    const addType = (deck.typeHint === 'Sequence') ? 'Sequence' : 'Standard';
-    deck.cards.forEach(card => editorAddNewCard(addType, card));
-
-    toggleEditorView(deck.typeHint || 'General');
+    toggleEditorView(deck.typeHint || 'General', deck);
     currentDeckId = deckId;
 }
 
@@ -4082,8 +4471,6 @@ function editorInitialise() {
 
     toggleEditorView('General');
 
-    editorAddNewCard('General');
-    editorAddNewCard('General');
     document.getElementById('deckTitle').focus();
 }
 
@@ -4098,8 +4485,8 @@ function isEditorClean() {
     const cardItems = document.querySelectorAll('#editorView .flashcard-item');
     for (const item of cardItems) {
 
-        const qEl = item.querySelector('.question-input') || item.querySelector('.sequence-desc-input') || item.querySelector('.sequence-term-input');
-        const aEl = item.querySelector('.solution-input') || item.querySelector('.sequence-term-input') || item.querySelector('.sequence-desc-input');
+        const qEl = item.querySelector('.question-input');
+        const aEl = item.querySelector('.solution-input');
 
         const q = qEl ? ((qEl.value || '').trim()) : '';
         const a = aEl ? ((aEl.value || '').trim()) : '';
@@ -4110,6 +4497,19 @@ function isEditorClean() {
         const aImg = aImgEl ? ((aImgEl.value || '').trim()) : '';
 
         if (q || a || qImg || aImg) return false;
+    }
+
+    const sequenceBlocks = document.querySelectorAll('#editorView .sequence-editor-block');
+    for (const block of sequenceBlocks) {
+        const title = block.querySelector('.sequence-title-input')?.value.trim();
+        const desc = block.querySelector('.sequence-description-input')?.value.trim();
+        if (title || desc) return false;
+        const steps = block.querySelectorAll('.sequence-step');
+        for (const step of steps) {
+            const q = step.querySelector('.sequence-step-question')?.value.trim() || '';
+            const a = step.querySelector('.sequence-step-notes')?.value.trim() || '';
+            if (q || a) return false;
+        }
     }
     return true;
 }
@@ -4129,9 +4529,7 @@ function editorAddNewStandardCard(card = {}) {
     const deckType = document.getElementById('deckTypeHint').value;
     const cardNumber = document.querySelectorAll('.flashcard-editor-row').length + 1;
 
-    const orderInputHTML = (deckType === 'Sequence')
-        ? `<input type="number" class="card-order-input" value="${escapeHtml(String(order || cardNumber))}" style="width: 60px; margin-right: 10px; padding: 5px 8px; text-align: center;">`
-        : '';
+    const orderInputHTML = '';
 
     newRow.innerHTML = `<div class="flashcard-item" data-original-id="${escapeHtml(String(id || ''))}">
                 <div class="flashcard-number" style="display: flex; align-items: center;">
@@ -4139,7 +4537,7 @@ function editorAddNewStandardCard(card = {}) {
                     <span>${cardNumber}.</span>
                 </div>
                 
-                <textarea class="question-input" placeholder="Question (e.g., The event or item in the sequence)" data-card-id="${editorCardCounter}">${escapeHtml(String(question))}</textarea>
+                <textarea class="question-input" placeholder="Question" data-card-id="${editorCardCounter}">${escapeHtml(String(question))}</textarea>
                 <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
                 <div class="image-controls">
                     <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1">Upload Image</button>
@@ -4148,7 +4546,7 @@ function editorAddNewStandardCard(card = {}) {
                 <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
                 <input type="hidden" class="question-image-input" value="${escapeHtml(String(questionImage))}">
                 
-                <textarea class="solution-input" placeholder="Answer (e.g., The name of the event or item)" style="margin-top:20px;" data-card-id="${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
+                <textarea class="solution-input" placeholder="Answer" style="margin-top:20px;" data-card-id="${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
                 <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
                 <div class="image-controls">
                     <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1">Upload Image</button>
@@ -4179,133 +4577,312 @@ function editorAddNewStandardCard(card = {}) {
     if (!question && !answer) newRow.querySelector('.question-input').focus();
 }
 
+function setButtonDisabledState(button, isDisabled) {
+    if (!button) return;
+    button.disabled = isDisabled;
+    button.classList.toggle('is-disabled', isDisabled);
+}
+
+function destroySequenceSortables() {
+    if (sequenceSortable) {
+        try {
+            sequenceSortable.destroy();
+        } catch (error) {
+            console.warn('Failed to destroy sequence Sortable instance:', error);
+        }
+        sequenceSortable = null;
+    }
+    sequenceStepSortables.forEach((instance, el) => {
+        try {
+            instance.destroy();
+        } catch (error) {
+            console.warn('Failed to destroy sequence step Sortable instance:', error);
+        }
+        sequenceStepSortables.delete(el);
+    });
+}
+
+function initSequenceBlockSortable() {
+    const container = document.getElementById('flashcardsContainer');
+    if (!container) return;
+    if (sequenceSortable) {
+        try {
+            sequenceSortable.destroy();
+        } catch (error) {
+            console.warn('Failed to destroy sequence Sortable instance:', error);
+        }
+    }
+    sequenceSortable = new Sortable(container, {
+        animation: 150,
+        handle: '.sequence-drag-handle',
+        draggable: '.sequence-editor-block',
+        ghostClass: 'drag-ghost',
+        onEnd: () => {
+            editorRenumberCards();
+        }
+    });
+}
+
+function initSequenceStepSortable(stepsContainer) {
+    if (!stepsContainer) return;
+    const existing = sequenceStepSortables.get(stepsContainer);
+    if (existing) {
+        try {
+            existing.destroy();
+        } catch (error) {
+            console.warn('Failed to destroy existing sequence step Sortable:', error);
+        }
+    }
+    const instance = new Sortable(stepsContainer, {
+        animation: 150,
+        handle: '.sequence-step-drag-handle',
+        draggable: '.sequence-step',
+        ghostClass: 'drag-ghost',
+        onEnd: () => {
+            editorRenumberCards();
+        }
+    });
+    sequenceStepSortables.set(stepsContainer, instance);
+}
+
+function refreshSequenceSortables() {
+    const deckType = document.getElementById('deckTypeHint')?.value;
+    if (deckType !== 'Sequence') return;
+    const container = document.getElementById('flashcardsContainer');
+    if (!container) return;
+    initSequenceBlockSortable();
+    const stepContainers = Array.from(container.querySelectorAll('.sequence-steps'));
+    const active = new Set();
+    stepContainers.forEach(stepsContainer => {
+        active.add(stepsContainer);
+        initSequenceStepSortable(stepsContainer);
+    });
+    Array.from(sequenceStepSortables.keys()).forEach(key => {
+        if (!active.has(key)) {
+            const instance = sequenceStepSortables.get(key);
+            if (instance) {
+                try {
+                    instance.destroy();
+                } catch (error) {
+                    console.warn('Failed to destroy stale sequence step Sortable:', error);
+                }
+            }
+            sequenceStepSortables.delete(key);
+        }
+    });
+}
+
+function toggleSequenceCollapse(block) {
+    if (!block) return;
+    block.classList.toggle('is-collapsed');
+    const btn = block.querySelector('.sequence-collapse-btn');
+    if (btn) {
+        btn.textContent = block.classList.contains('is-collapsed') ? 'Expand' : 'Collapse';
+    }
+}
+
+function moveSequenceBlock(block, direction) {
+    if (!block) return;
+    const container = block.parentElement;
+    if (!container) return;
+    const siblings = Array.from(container.children);
+    const index = siblings.indexOf(block);
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= siblings.length) return;
+    const target = siblings[targetIndex];
+    if (direction < 0) {
+        container.insertBefore(block, target);
+    } else {
+        container.insertBefore(block, target.nextElementSibling);
+    }
+    editorRenumberCards();
+}
+
+function editorAddSequence(sequence = {}) {
+    const sequenceId = sequence.sequenceId || sequence.id || crypto.randomUUID();
+    const title = sequence.title || sequence.sequenceTitle || '';
+    const description = sequence.description || '';
+    const container = document.getElementById('flashcardsContainer');
+
+    const block = document.createElement('div');
+    block.className = 'sequence-editor-block';
+    block.dataset.sequenceId = sequenceId;
+    block.innerHTML = `
+        <div class="sequence-editor-header">
+            <div class="sequence-header-row">
+                <div class="sequence-label">Sequence <span class="sequence-index"></span></div>
+                <div class="sequence-header-actions">
+                    <div class="sequence-drag-handle" title="Drag to reorder"></div>
+                    <div class="sequence-editor-controls">
+                        <button class="btn btn-secondary btn-compact sequence-move-up" type="button" aria-label="Move sequence up">↑</button>
+                        <button class="btn btn-secondary btn-compact sequence-move-down" type="button" aria-label="Move sequence down">↓</button>
+                        <button class="btn btn-secondary btn-compact sequence-collapse-btn" type="button">Collapse</button>
+                        <button class="btn btn-danger btn-compact sequence-delete-btn" type="button">Delete</button>
+                    </div>
+                </div>
+            </div>
+            <div class="sequence-editor-meta">
+                <div class="form-group">
+                    <input type="text" class="sequence-title-input" value="${escapeHtml(String(title))}" placeholder="Sequence title">
+                </div>
+                <div class="form-group">
+                    <input type="text" class="sequence-description-input" value="${escapeHtml(String(description || ''))}" placeholder="Description (optional)">
+                </div>
+            </div>
+        </div>
+        <div class="sequence-steps"></div>
+        <button class="btn btn-secondary add-sequence-step-btn" type="button">+ Add Step</button>
+    `;
+
+    container.appendChild(block);
+    const stepsContainer = block.querySelector('.sequence-steps');
+    const addStepBtn = block.querySelector('.add-sequence-step-btn');
+    if (addStepBtn) {
+        addStepBtn.onclick = () => {
+            editorAddSequenceStep(block);
+        };
+    }
+    const deleteBtn = block.querySelector('.sequence-delete-btn');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => removeSequenceBlock(block);
+    }
+    const collapseBtn = block.querySelector('.sequence-collapse-btn');
+    if (collapseBtn) {
+        collapseBtn.onclick = () => toggleSequenceCollapse(block);
+    }
+    const moveUpBtn = block.querySelector('.sequence-move-up');
+    if (moveUpBtn) moveUpBtn.onclick = () => moveSequenceBlock(block, -1);
+    const moveDownBtn = block.querySelector('.sequence-move-down');
+    if (moveDownBtn) moveDownBtn.onclick = () => moveSequenceBlock(block, 1);
+
+    const steps = sequence.steps || [];
+    if (steps.length > 0) {
+        steps.forEach(step => editorAddSequenceStep(block, step));
+    } else if (stepsContainer) {
+        editorAddSequenceStep(block);
+    }
+}
+
+function editorAddSequenceStep(sequenceBlock, step = {}) {
+    const stepsContainer = sequenceBlock.querySelector('.sequence-steps');
+    if (!stepsContainer) return;
+    const stepEl = document.createElement('div');
+    stepEl.className = 'sequence-step';
+    stepEl.dataset.originalId = step.id || step.cardId || step.cardID || '';
+    stepEl.dataset.order = typeof step.order === 'number' ? step.order : stepsContainer.children.length;
+
+    const question = step.question || step.stepText || '';
+    const answer = step.answer || step.notes || '';
+
+    stepEl.innerHTML = `
+        <div class="sequence-step-header">
+            <div class="sequence-step-number">Step <span class="step-index"></span></div>
+            <div class="sequence-step-actions">
+                <div class="sequence-step-drag-handle" title="Drag to reorder"></div>
+                <div class="sequence-step-controls">
+                    <button class="btn btn-secondary btn-compact step-move-up" type="button" aria-label="Move step up">↑</button>
+                    <button class="btn btn-secondary btn-compact step-move-down" type="button" aria-label="Move step down">↓</button>
+                    <button class="btn btn-danger btn-compact step-delete" type="button">Delete</button>
+                </div>
+            </div>
+        </div>
+        <div class="form-group">
+            <textarea class="sequence-step-question" placeholder="Step">${escapeHtml(String(question))}</textarea>
+        </div>
+        <div class="form-group">
+            <textarea class="sequence-step-notes" placeholder="Notes (optional)">${escapeHtml(String(answer))}</textarea>
+        </div>
+    `;
+
+    const upBtn = stepEl.querySelector('.step-move-up');
+    const downBtn = stepEl.querySelector('.step-move-down');
+    const delBtn = stepEl.querySelector('.step-delete');
+    if (upBtn) upBtn.onclick = () => moveSequenceStep(stepEl, -1);
+    if (downBtn) downBtn.onclick = () => moveSequenceStep(stepEl, 1);
+    if (delBtn) delBtn.onclick = () => removeSequenceStep(stepEl);
+
+    stepsContainer.appendChild(stepEl);
+    refreshSequenceSortables();
+    editorRenumberCards();
+}
+
+function moveSequenceStep(stepEl, direction) {
+    if (!stepEl) return;
+    const parent = stepEl.parentElement;
+    const siblings = Array.from(parent.children);
+    const index = siblings.indexOf(stepEl);
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= siblings.length) return;
+    const target = siblings[targetIndex];
+    if (direction < 0) {
+        parent.insertBefore(stepEl, target);
+    } else {
+        parent.insertBefore(stepEl, target.nextSibling);
+    }
+    editorRenumberCards();
+}
+
+function removeSequenceStep(stepEl) {
+    if (!stepEl) return;
+    const parent = stepEl.parentElement;
+    stepEl.remove();
+    if (!parent.children.length) {
+        editorAddSequenceStep(parent.closest('.sequence-editor-block'));
+    }
+    refreshSequenceSortables();
+    editorRenumberCards();
+}
+
+function removeSequenceBlock(block) {
+    if (!block) return;
+    block.remove();
+    if (!document.querySelectorAll('#editorView .sequence-editor-block').length) {
+        editorAddSequence();
+    }
+    refreshSequenceSortables();
+    editorRenumberCards();
+}
+
+function collectSequenceEditorData(includeEmptySteps = false) {
+    const blocks = Array.from(document.querySelectorAll('#flashcardsContainer .sequence-editor-block'));
+    return blocks.map((block, seqIndex) => {
+        const sequenceId = block.dataset.sequenceId || crypto.randomUUID();
+        const titleInput = block.querySelector('.sequence-title-input');
+        const descriptionInput = block.querySelector('.sequence-description-input');
+        const sequenceTitle = titleInput ? titleInput.value.trim() : `Sequence ${seqIndex + 1}`;
+        const description = descriptionInput ? descriptionInput.value.trim() : '';
+        const steps = Array.from(block.querySelectorAll('.sequence-step')).map((el, stepIndex) => {
+            const question = el.querySelector('.sequence-step-question')?.value.trim() || '';
+            const answer = el.querySelector('.sequence-step-notes')?.value.trim() || '';
+            const originalId = el.dataset.originalId;
+            return {
+                id: originalId || crypto.randomUUID(),
+                question,
+                answer,
+                stepIndex,
+                order: stepIndex,
+                sequenceId,
+                sequenceTitle: sequenceTitle || `Sequence ${seqIndex + 1}`
+            };
+        }).filter(step => includeEmptySteps ? true : Boolean(step.question));
+        return {
+            sequenceId,
+            title: sequenceTitle || `Sequence ${seqIndex + 1}`,
+            description,
+            steps
+        };
+    }).filter(seq => includeEmptySteps ? true : seq.steps.length > 0);
+}
+
+
 function editorAddNewCard(type, card = {}) {
     if (type === 'Sequence') {
-        editorAddNewSequenceCard(card);
+        editorAddSequence(card);
     } else {
         editorAddNewStandardCard(card);
     }
     editorRenumberCards();
 }
-
-function editorAddNewSequenceCard(card = {}) {
-    const { question = '', answer = '', order = 0 } = card;
-    editorCardCounter++;
-    const container = document.getElementById('flashcardsContainer');
-    const cardNumber = document.querySelectorAll('.flashcard-editor-row').length + 1;
-
-    const newRow = document.createElement('div');
-    newRow.className = 'flashcard-editor-row drag-item';
-    newRow.setAttribute('data-card-id', editorCardCounter);
-
-    newRow.innerHTML = `
-            <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text); display: flex; align-items: center; align-self: stretch;">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-                </svg>
-            </div>
-            <div class="flashcard-item" data-original-id="${card.id || ''}" style="flex-grow: 1; display: flex; flex-direction: column; gap: 15px;">
-                
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <div class="flashcard-number" style="
-                        background: var(--primary-color); 
-                        color: white; 
-                        padding: 4px 12px; 
-                        border-radius: 20px; 
-                        font-weight: 600; 
-                        font-size: 0.9rem;
-                    "></div>
-                    <span style="color: var(--secondary-text); font-size: 0.85rem; font-style: italic;">
-                        Drag to reorder
-                    </span>
-                </div>
-                
-                
-                <div>
-                    <label style="
-                        display: block; 
-                        font-size: 0.9rem; 
-                        font-weight: 600; 
-                        color: var(--text-color); 
-                        margin-bottom: 8px;
-                    ">Sequence Term (Required)</label>
-                    <input 
-                        type="text" 
-                        class="sequence-term-input" 
-                        placeholder="e.g., 'Battle of Hastings' or 'Mitosis'" 
-                        value="${escapeHtml(String(answer))}" 
-                        style="
-                            width: 100%; 
-                            padding: 12px 15px; 
-                            border: 2px solid var(--border-color); 
-                            border-radius: 10px; 
-                            font-size: 1.1rem; 
-                            font-weight: 500;
-                            background: var(--input-bg);
-                            color: var(--text-color);
-                            transition: all 0.3s;
-                        "
-                    >
-                </div>
-                
-                
-                <div>
-                    <label style="
-                        display: block; 
-                        font-size: 0.85rem; 
-                        font-weight: 500; 
-                        color: var(--secondary-text); 
-                        margin-bottom: 6px;
-                    ">Description (Optional)</label>
-                    <textarea 
-                        class="sequence-desc-input" 
-                        placeholder="Add context, dates, or additional details..." 
-                        style="
-                            width: 100%; 
-                            padding: 10px 15px; 
-                            border: 2px solid var(--border-color); 
-                            border-radius: 10px; 
-                            font-size: 0.95rem; 
-                            background: var(--input-bg);
-                            color: var(--text-color);
-                            resize: vertical;
-                            min-height: 60px;
-                            transition: all 0.3s;
-                        "
-                    >${escapeHtml(String(question))}</textarea>
-                </div>
-            </div>
-            <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})" style="
-                align-self: flex-start;
-                margin-top: 8px;
-            ">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                </svg>
-            </button>
-        `;
-
-    container.appendChild(newRow);
-
-
-    const termInput = newRow.querySelector('.sequence-term-input');
-    const descInput = newRow.querySelector('.sequence-desc-input');
-
-    [termInput, descInput].forEach(input => {
-        input.addEventListener('focus', function () {
-            this.style.borderColor = 'var(--primary-color)';
-            this.style.backgroundColor = 'var(--input-focus-bg)';
-        });
-        input.addEventListener('blur', function () {
-            this.style.borderColor = 'var(--border-color)';
-            this.style.backgroundColor = 'var(--input-bg)';
-        });
-    });
-
-    if (!answer) termInput.focus();
-}
-
-
 function triggerImageUpload(button) {
     button.closest('.image-controls').nextElementSibling.nextElementSibling.click();
 }
@@ -4379,15 +4956,59 @@ function editorRemoveCard(cardId) {
     }
 }
 
+function updateSequenceMoveButtons(sequenceBlocks) {
+    sequenceBlocks.forEach((block, seqIndex) => {
+        const upBtn = block.querySelector('.sequence-move-up');
+        const downBtn = block.querySelector('.sequence-move-down');
+        setButtonDisabledState(upBtn, seqIndex === 0);
+        setButtonDisabledState(downBtn, seqIndex === sequenceBlocks.length - 1);
+    });
+}
+
+function updateSequenceStepNumbers(stepsContainer) {
+    const steps = Array.from(stepsContainer.querySelectorAll('.sequence-step'));
+    steps.forEach((step, stepIndex) => {
+        const numberSpan = step.querySelector('.step-index');
+        const numberEl = step.querySelector('.sequence-step-number');
+        if (numberSpan) {
+            numberSpan.textContent = stepIndex + 1;
+        } else if (numberEl) {
+            numberEl.textContent = `Step ${stepIndex + 1}`;
+        }
+        const upBtn = step.querySelector('.step-move-up');
+        const downBtn = step.querySelector('.step-move-down');
+        setButtonDisabledState(upBtn, stepIndex === 0);
+        setButtonDisabledState(downBtn, stepIndex === steps.length - 1);
+    });
+}
+
 function editorRenumberCards() {
     const deckType = document.getElementById('deckTypeHint').value;
-    const cardRows = document.querySelectorAll('#editorView .flashcard-editor-row');
-    cardRows.forEach((row, index) => {
-        const numberElement = row.querySelector('.flashcard-number');
-        if (numberElement) {
-            numberElement.textContent = `${index + 1}.`;
-        }
-    });
+    if (deckType === 'Sequence') {
+        const sequenceBlocks = Array.from(document.querySelectorAll('#editorView .sequence-editor-block'));
+        sequenceBlocks.forEach((block, seqIndex) => {
+            const label = block.querySelector('.sequence-label');
+            const labelIndex = block.querySelector('.sequence-index');
+            if (labelIndex) {
+                labelIndex.textContent = seqIndex + 1;
+            } else if (label) {
+                label.textContent = `Sequence ${seqIndex + 1}`;
+            }
+            const stepsContainer = block.querySelector('.sequence-steps');
+            if (stepsContainer) {
+                updateSequenceStepNumbers(stepsContainer);
+            }
+        });
+        updateSequenceMoveButtons(sequenceBlocks);
+    } else {
+        const cardRows = document.querySelectorAll('#editorView .flashcard-editor-row');
+        cardRows.forEach((row, index) => {
+            const numberElement = row.querySelector('.flashcard-number');
+            if (numberElement) {
+                numberElement.textContent = `${index + 1}.`;
+            }
+        });
+    }
 }
 
 async function editorSaveDeck() {
@@ -4410,24 +5031,32 @@ async function editorSaveDeck() {
         }
 
         let cards = [];
+        let sequenceMeta = {};
+
         if (typeHint === 'Sequence') {
-            cards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map((el, index) => {
-                const originalId = el.dataset.originalId;
-                const term = el.querySelector('.sequence-term-input').value.trim();
-                const description = el.querySelector('.sequence-desc-input').value.trim();
-
-                if (!term) return null;
-
-                return {
-                    id: originalId || crypto.randomUUID(),
-                    question: description,
-                    answer: term,
-                    order: index + 1,
-                    isNew: !originalId,
-                    questionImage: '',
-                    answerImage: ''
-                };
-            }).filter(Boolean);
+            const sequences = collectSequenceEditorData(false);
+            if (!sequences.length) {
+                showToast('Please add at least one sequence with steps.', 'error');
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+                return;
+            }
+            sequences.forEach((seq, seqIdx) => {
+                const seqTitle = seq.title || `Sequence ${seqIdx + 1}`;
+                sequenceMeta[seq.sequenceId] = { title: seqTitle, description: seq.description || '' };
+                seq.steps.forEach((step, stepIdx) => {
+                    cards.push({
+                        id: step.id || crypto.randomUUID(),
+                        question: step.question,
+                        answer: step.answer || '',
+                        sequenceId: seq.sequenceId,
+                        sequenceTitle: seqTitle,
+                        stepIndex: typeof step.stepIndex === 'number' ? step.stepIndex : stepIdx,
+                        order: typeof step.order === 'number' ? step.order : stepIdx,
+                        isNew: !step.id
+                    });
+                });
+            });
         } else {
             cards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map(el => {
                 const originalId = el.dataset.originalId;
@@ -4488,7 +5117,7 @@ async function editorSaveDeck() {
             }
         }
 
-        const tempDeck = { name, category, cards, notes, typeHint };
+        const tempDeck = { name, category, cards, notes, typeHint, sequenceMeta };
         showToast("Analysing deck content...", "info", 2000);
         await processDeckContent(tempDeck);
 
@@ -4499,10 +5128,13 @@ async function editorSaveDeck() {
             deck.cards = tempDeck.cards;
             deck.notes = notes;
             deck.typeHint = typeHint;
+            if (typeHint === 'Sequence') {
+                deck.sequenceMeta = sequenceMeta;
+            }
             deck.lastModified = new Date().toISOString();
             await saveDataToDB('decks', deck);
         } else {
-            await createNewDeck(name, category, tempDeck.cards, notes, typeHint);
+            await createNewDeck(name, category, tempDeck.cards, notes, typeHint, typeHint === 'Sequence' ? { sequenceMeta } : {});
         }
         if (isOnline) {
             loadUserDataAndSync();
@@ -4750,6 +5382,115 @@ function configureStudy(mode, deckId) {
     startMode(mode, currentDeckId);
 }
 
+async function buildDeckKnowledgeMap(deck) {
+    const fsrsEngine = await getFsrsEngine();
+    const allKnowledge = await getAllDataFromDB('userKnowledgeState');
+    const knowledgeMap = new Map();
+
+    allKnowledge.forEach(state => {
+        const parsedId = typeof state.id === 'string' ? state.id.split(':').filter(Boolean) : [];
+        const parsedCardId = parsedId.length >= 2 ? parsedId[1] : (parsedId.length === 1 ? parsedId[0] : null);
+        const prepared = fsrsEngine.prepareCard(state.fsrs || state);
+        const snapshot = serializeFsrsCard(prepared);
+        const normalized = {
+            ...state,
+            id: `${state.userID || 'default_user'}:${state.cardID || parsedCardId}`,
+            userID: state.userID || 'default_user',
+            cardID: state.cardID || parsedCardId || state.id,
+            deckID: state.deckID || deck.id,
+            fsrs: snapshot,
+            stability: typeof state.stability === 'number' ? state.stability : snapshot.stability || 0,
+            lastReviewed: state.lastReviewed || snapshot.last_review || null
+        };
+        knowledgeMap.set(normalized.cardID, normalized);
+    });
+
+    for (const card of deck.cards) {
+        let state = knowledgeMap.get(card.id);
+        if (!state) {
+            state = await getOrCreateKnowledgeState('default_user', card.id, deck.id);
+            knowledgeMap.set(card.id, state);
+        }
+        if (state?.fsrs) card.fsrs = state.fsrs;
+    }
+
+    return knowledgeMap;
+}
+
+let evalModulesPromise = null;
+async function getEvalModules() {
+    if (!evalModulesPromise) {
+        evalModulesPromise = Promise.all([
+            import('../core/eval-router.js'),
+            import('../core/eval-probes.js'),
+            import('../core/eval-store.js'),
+            import('../core/eval-integrity.js'),
+            import('../core/eval-summary.js')
+        ]).then(([router, probes, store, integrity, summary]) => ({ router, probes, store, integrity, summary }));
+    }
+    return evalModulesPromise;
+}
+
+let evalExposureDedupePromise = null;
+async function getEvalExposureDedupeModule() {
+    if (!evalExposureDedupePromise) {
+        evalExposureDedupePromise = import('../core/eval-exposure-dedupe.js');
+    }
+    return evalExposureDedupePromise;
+}
+
+let practiceTestModulesPromise = null;
+async function getPracticeTestModules() {
+    if (!practiceTestModulesPromise) {
+        practiceTestModulesPromise = Promise.all([
+            import('../core/exam-blueprint.js'),
+            import('../core/test-form.js')
+        ]).then(([blueprints, testForm]) => ({
+            validateBlueprint: blueprints.validateBlueprint,
+            normaliseBlueprint: blueprints.normaliseBlueprint,
+            DEFAULT_BLUEPRINT_EXAM_INDICATIVE: blueprints.DEFAULT_BLUEPRINT_EXAM_INDICATIVE,
+            DEFAULT_BLUEPRINT_FREE_PRACTICE: blueprints.DEFAULT_BLUEPRINT_FREE_PRACTICE,
+            getMcqDeckWarnings: blueprints.getMcqDeckWarnings,
+            generateTestForm: testForm.generateTestForm
+        }));
+    }
+    return practiceTestModulesPromise;
+}
+
+let practiceTestRuntimeModulesPromise = null;
+async function getPracticeTestRuntimeModules() {
+    if (!practiceTestRuntimeModulesPromise) {
+        practiceTestRuntimeModulesPromise = import('../core/practice-test-runtime.js');
+    }
+    return practiceTestRuntimeModulesPromise;
+}
+
+function getBaselineChoice(candidates, knowledgeMap) {
+    if (!candidates || candidates.length === 0) return null;
+
+    // Baseline v1: FSRS/recency risk ordering
+    const sorted = [...candidates].sort((a, b) => {
+        const stateA = a.knowledgeState;
+        const stateB = b.knowledgeState;
+        
+        const dueA = stateA?.fsrs?.due ? new Date(stateA.fsrs.due).getTime() : null;
+        const dueB = stateB?.fsrs?.due ? new Date(stateB.fsrs.due).getTime() : null;
+        
+        if (dueA && dueB) return dueA - dueB;
+        if (dueA) return -1;
+        if (dueB) return 1;
+        
+        const lastA = stateA?.lastReviewed ? new Date(stateA.lastReviewed).getTime() : 0;
+        const lastB = stateB?.lastReviewed ? new Date(stateB.lastReviewed).getTime() : 0;
+        
+        if (lastA !== lastB) return lastA - lastB;
+        
+        return Math.random() - 0.5;
+    });
+    
+    return sorted[0].card;
+}
+
 async function startLearnMode(deckId) {
     currentMode = 'learn';
     currentDeckId = deckId;
@@ -4773,6 +5514,18 @@ async function startLearnMode(deckId) {
     studyState.currentCardIndex = 0;
     studyState.incorrectInThisRound = [];
 
+    // Initialize Evaluation Session
+    try {
+        const { router, store } = await getEvalModules();
+        studyState.evalSessionId = router.makeSessionId();
+        studyState.evalConfig = await store.loadEvalConfig('default_user');
+        studyState.evalRng = router.makeRng(studyState.evalConfig.router.seed);
+        studyState.pendingProbes = await store.loadPendingProbes('default_user');
+        console.log('[Eval] Session started:', studyState.evalSessionId, studyState.evalConfig);
+    } catch (err) {
+        console.warn('[Eval] Failed to init evaluation session', err);
+    }
+
     // Show/Hide Edit Button based on settings
     const editBtn = document.getElementById('editStudyCardBtn');
     if (globalSettings.enableInStudyEditing) {
@@ -4781,35 +5534,8 @@ async function startLearnMode(deckId) {
         editBtn.classList.add('hidden');
     }
 
-    const fsrsEngine = await getFsrsEngine();
-    const allKnowledge = await getAllDataFromDB('userKnowledgeState');
-    const knowledgeMap = new Map();
-    allKnowledge.forEach(state => {
-        const parsedId = typeof state.id === 'string' ? state.id.split(':').filter(Boolean) : [];
-        const parsedCardId = parsedId.length >= 2 ? parsedId[1] : (parsedId.length === 1 ? parsedId[0] : null);
-        const prepared = fsrsEngine.prepareCard(state.fsrs || state);
-        const snapshot = serializeFsrsCard(prepared);
-        const normalized = {
-            ...state,
-            id: `${state.userID || 'default_user'}:${state.cardID || parsedCardId}`,
-            userID: state.userID || 'default_user',
-            cardID: state.cardID || parsedCardId || state.id,
-            deckID: state.deckID || deck.id,
-            fsrs: snapshot,
-            stability: typeof state.stability === 'number' ? state.stability : snapshot.stability || 0,
-            lastReviewed: state.lastReviewed || snapshot.last_review || null
-        };
-        knowledgeMap.set(normalized.cardID, normalized);
-    });
+    const knowledgeMap = await buildDeckKnowledgeMap(deck);
     studyState.knowledgeStates = knowledgeMap;
-    for (const card of deck.cards) {
-        let state = knowledgeMap.get(card.id);
-        if (!state) {
-            state = await getOrCreateKnowledgeState('default_user', card.id, deck.id);
-            knowledgeMap.set(card.id, state);
-        }
-        if (state?.fsrs) card.fsrs = state.fsrs;
-    }
 
     // Reset learn reps only if starting a fresh session
     if (!restored) {
@@ -4828,6 +5554,11 @@ async function startLearnMode(deckId) {
         return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
     }).filter(entry => {
         const retention = entry.projectedRetention;
+        if (entry.knowledgeState && entry.knowledgeState.mcqStats) {
+            const stats = ensureMcqStats(entry.knowledgeState.mcqStats);
+            const blocked = stats.recognitionDependenceEma > 0.35 || (stats.mcqCorrect > 0 && stats.recallCorrect === 0);
+            if (blocked) return true;
+        }
         if (retention >= 0.9) return false;
         return !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate);
     });
@@ -4906,6 +5637,100 @@ async function startLearnMode(deckId) {
     }
 }
 
+async function startSpacedMode(deckId) {
+    currentMode = 'spaced';
+    currentDeckId = deckId;
+    resetSessionState();
+
+    const deck = decks[deckId];
+    if (!deck) {
+        showToast('Deck not found.', 'error');
+        return;
+    }
+
+    studyAccentModule?.refresh();
+
+    deck.settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
+    studyState.settings = deck.settings;
+
+    const editBtn = document.getElementById('editStudyCardBtn');
+    if (globalSettings.enableInStudyEditing) {
+        editBtn.classList.remove('hidden');
+    } else {
+        editBtn.classList.add('hidden');
+    }
+
+    const knowledgeMap = await buildDeckKnowledgeMap(deck);
+    studyState.knowledgeStates = knowledgeMap;
+
+    const now = new Date();
+    const dueCards = [];
+    const newCards = [];
+    deck.cards.forEach(card => {
+        const state = knowledgeMap.get(card.id);
+        const fsrs = fallbackNormalizeFsrsState(state?.fsrs || state);
+        const isReviewed = fallbackIsKnowledgeStateReviewed(state);
+        const dueDate = fsrs?.due ? new Date(fsrs.due) : null;
+        if (isReviewed && dueDate && dueDate <= now) {
+            dueCards.push(card);
+            return;
+        }
+        if (!isReviewed || (typeof fsrs?.reps === 'number' && fsrs.reps === 0)) {
+            newCards.push(card);
+        }
+    });
+
+    const maxReviews = Number.isFinite(deck.settings.spacedMaxReviewsPerDay)
+        ? deck.settings.spacedMaxReviewsPerDay
+        : DEFAULT_DECK_SETTINGS.spacedMaxReviewsPerDay;
+    const newPerDay = Number.isFinite(deck.settings.spacedNewPerDay)
+        ? deck.settings.spacedNewPerDay
+        : DEFAULT_DECK_SETTINGS.spacedNewPerDay;
+
+    const selectedDue = dueCards.slice(0, Math.max(0, maxReviews));
+    const selectedNew = newCards.slice(0, Math.max(0, newPerDay));
+
+    let sessionQueue = deck.settings.spacedOrder === 'random'
+        ? shuffleArray([...selectedDue, ...selectedNew])
+        : [...selectedDue, ...selectedNew];
+
+    studyState.spacedMeta = new Map();
+    selectedDue.forEach(card => studyState.spacedMeta.set(card.id, { type: 'due', seen: false, requeued: false }));
+    selectedNew.forEach(card => studyState.spacedMeta.set(card.id, { type: 'new', seen: false, requeued: false }));
+
+    studyState.spacedCounts = {
+        dueRemaining: selectedDue.length,
+        newRemaining: selectedNew.length
+    };
+
+    if (sessionQueue.length === 0) {
+        showToast('No cards are due right now.', 'info');
+        return;
+    }
+
+    studyState.roundCards = sessionQueue;
+    studyState.currentCardIndex = 0;
+    studyState.currentRound = 1;
+    studyState.incorrectInThisRound = [];
+    studyState.activeLearningPool = [];
+    studyState.sessionCardIds = sessionQueue.map(c => c.id);
+    studyState.startTime = new Date();
+    studyState.spacedAnswerShown = false;
+
+    transitionView('studyMode');
+    resetStudySubViews();
+    document.getElementById('studyTitle').textContent = 'Spaced Mode (FSRS)';
+    document.getElementById('studySubtitle').textContent = deck.name;
+
+    document.getElementById('pomodoroTimer').classList.add('hidden');
+
+    const progressView = document.getElementById('progressView');
+    const cardView = document.getElementById('cardView');
+    progressView.classList.add('hidden');
+    transitionSubView(progressView, cardView);
+    showNextCard();
+}
+
 
 function setupSessionProgressBar() {
     const infoContainer = document.getElementById('cardRoundInfo');
@@ -4954,7 +5779,7 @@ async function updateSessionProgress() {
         text.innerHTML = '';
         const label = document.createTextNode('Progress: ');
         const percentSpan = document.createElement('span');
-        percentSpan.style.color = 'var(--primary-color)';
+        percentSpan.className = 'session-progress-percent';
         percentSpan.textContent = `${current}%`;
         text.appendChild(label);
         text.appendChild(percentSpan);
@@ -5023,49 +5848,6 @@ function computeRetentionProgressPercent({ cardIds, deck, stateMap, targetDateOv
     return { percent, counts };
 }
 
-async function startSpacedLearning(deckId) {
-    resetStudySubViews();
-    currentMode = 'spaced';
-    currentDeckId = deckId;
-    resetSessionState();
-    const deck = decks[deckId];
-    const now = new Date();
-
-    const allCards = [...deck.cards];
-    const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
-    const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
-
-    const dueCards = allCards.filter(card => {
-        const state = knowledgeMap.get(card.id);
-        const fsrsDue = card.fsrs?.due ? new Date(card.fsrs.due) : null;
-        if (fsrsDue && fsrsDue <= now) return true;
-        if (!state) return true;
-        const pRecall = calculatePRecall(state.stability, state.lastReviewed);
-        return pRecall <= 0.90;
-    });
-
-    studyState.roundCards = shuffleArray(dueCards);
-    studyState.settings = deck.settings;
-    studyState.currentRound = 1;
-    studyState.currentCardIndex = 0;
-    studyState.startTime = new Date();
-
-    transitionView('studyMode');
-    document.getElementById('studyTitle').textContent = 'Spaced Learning';
-    document.getElementById('studySubtitle').textContent = deck.name;
-    const progressView = document.getElementById('progressView');
-    const cardView = document.getElementById('cardView');
-    progressView.classList.remove('hidden');
-
-    if (studyState.roundCards.length > 0) {
-        transitionSubView(progressView, cardView);
-        showNextCard();
-    } else {
-        showProgress();
-        showToast("No cards are due for review right now!");
-    }
-}
-
 async function startReviewMode(deckId) {
     currentMode = 'review';
     currentDeckId = deckId;
@@ -5125,23 +5907,6 @@ async function saveStudyProgress() {
         if (deck.learnState) delete deck.learnState;
     } else if (currentMode === 'review') {
         deck.reviewState = { stillLearning: studyState.stillLearning, correct: studyState.correct, currentRound: studyState.currentRound, lastRoundIncorrect: studyState.lastRoundIncorrect };
-    } else if (currentMode === 'sequence') {
-        deck.sequenceState = {
-            currentChunkIndex: studyState.currentChunkIndex,
-            sequencePhase: studyState.sequencePhase,
-            currentCardIndex: studyState.currentCardIndex,
-            nextPhaseAfterReview: studyState.nextPhaseAfterReview,
-            sequenceMissedInChunk: studyState.sequenceMissedInChunk,
-            weakestLinkIteration: studyState.weakestLinkIteration,
-            sequenceForwardQueue: studyState.sequenceForwardQueue,
-            sequenceChunkSize: studyState.sequenceChunkSize,
-            sequenceMissingEdges: studyState.sequenceMissingEdges,
-            sequenceLinkDrillQueue: (studyState.sequenceLinkDrillQueue || []).map(entry => ({ ...entry })),
-            sequenceLinkDrillAttempts: studyState.sequenceLinkDrillAttempts,
-            sequenceRecentLinkFailures: studyState.sequenceRecentLinkFailures,
-            roundCardIds: (studyState.roundCards || []).map(c => c.id),
-            activeChunkOverrideIds: studyState.sequenceActiveChunkOverride ? studyState.sequenceActiveChunkOverride.map(c => c.id) : null
-        };
     }
     await saveDataToDB('decks', deck);
     await updateDashboard();
@@ -5169,7 +5934,6 @@ async function showProgress() {
     else if (currentMode === 'exam') {
         updateExamProgress();
     }
-    else if (currentMode === 'spaced') updateSpacedProgress();
 }
 
 function getBucketName(index, totalBuckets) {
@@ -5214,7 +5978,7 @@ async function updateLearnProgress() {
     const learningCount = totalCards - masteredCount;
 
     document.getElementById('deckMasteryProgress').style.width = `${deckMasteryPercent}%`;
-    document.getElementById('deckMasteryValue').textContent = `${Math.round(deckMasteryPercent)}%`;
+    renderMetricInto('deckMasteryValue', { label: 'Mastery', value: deckMasteryPercent, kind: 'mastery' }, ['compact']);
     document.getElementById('masteredCardCount').textContent = masteredCount;
     document.getElementById('learningCardCount').textContent = learningCount;
 
@@ -5335,56 +6099,6 @@ function updateReviewProgress() {
         stat2.appendChild(label2);
         statsContainer.appendChild(stat1);
         statsContainer.appendChild(stat2);
-    }
-}
-
-function updateSpacedProgress() {
-    const deck = decks[currentDeckId];
-    const now = new Date();
-    const dueCards = deck.cards.filter(c => {
-        const due = c.fsrs?.due ? new Date(c.fsrs.due) : null;
-        return !due || due <= now;
-    });
-    const total = deck.cards.length;
-
-    document.getElementById('progressTitle').textContent = 'Spaced Learning';
-    document.getElementById('roundInfo').textContent = `${studyState.roundCards.length} cards in this session`;
-    const bucketsContainer2 = document.getElementById('bucketsContainer');
-    if (bucketsContainer2) bucketsContainer2.innerHTML = '';
-    document.getElementById('progressBarFill').style.width = total > 0 ? `${((total - dueCards.length) / total) * 100}%` : '0%';
-    const statsContainer2 = document.getElementById('statsContainer');
-    if (statsContainer2) {
-        statsContainer2.innerHTML = '';
-        const st1 = document.createElement('div');
-        st1.className = 'stat';
-        const st1val = document.createElement('div');
-        st1val.className = 'stat-value';
-        st1val.textContent = String(dueCards.length);
-        const st1label = document.createElement('div');
-        st1label.className = 'stat-label';
-        st1label.textContent = 'Cards Due';
-        st1.appendChild(st1val);
-        st1.appendChild(st1label);
-        const st2 = document.createElement('div');
-        st2.className = 'stat';
-        const st2val = document.createElement('div');
-        st2val.className = 'stat-value';
-        st2val.textContent = String(total);
-        const st2label = document.createElement('div');
-        st2label.className = 'stat-label';
-        st2label.textContent = 'Total Cards';
-        st2.appendChild(st2val);
-        st2.appendChild(st2label);
-        statsContainer2.appendChild(st1);
-        statsContainer2.appendChild(st2);
-    }
-
-    if (studyState.roundCards.length === 0) {
-        document.getElementById('continueBtn').textContent = 'Finish';
-        document.getElementById('continueBtn').onclick = endSession;
-    } else {
-        document.getElementById('continueBtn').textContent = 'Start Round';
-        document.getElementById('continueBtn').onclick = continueStudy;
     }
 }
 
@@ -5569,29 +6283,262 @@ function assignQuestionTypesToCards(cards, deckId = null, modeOverride = current
     });
 }
 
+async function pickNextCardWithEval(cortex, deck) {
+    try {
+        const { router, probes, store, integrity } = await getEvalModules();
+        const now = Date.now();
+        
+        // 1. Check for probes
+        if (studyState.evalConfig?.probes?.enabled) {
+            studyState.pendingProbes = probes.dropExpiredProbes(studyState.pendingProbes || [], now, studyState.evalConfig);
+            
+            let dueProbe = probes.nextDueProbe(studyState.pendingProbes, now, studyState.evalConfig);
+            
+            while (dueProbe) {
+                let probeCard = null;
+                const probeDeck = decks[dueProbe.deckId];
+                if (probeDeck) {
+                    probeCard = probeDeck.cards.find(c => c.id === dueProbe.cardId);
+                }
+                
+                if (probeCard) {
+                    // Check integrity
+                    const { changed } = await integrity.checkAndUpdateFingerprint('default_user', dueProbe.cardId, probeCard);
+                    
+                    if (changed) {
+                        // Invalidate and skip
+                        const result = {
+                            ...dueProbe,
+                            completedAt: Date.now(),
+                            outcome: null,
+                            wasCorrect: null,
+                            invalidated: true,
+                            invalidReason: 'card_changed'
+                        };
+                        await store.appendCompletedProbe('default_user', result, studyState.evalConfig.probes.maxCompleted);
+                        
+                        // Remove from pending
+                        studyState.pendingProbes = studyState.pendingProbes.filter(p => p.id !== dueProbe.id);
+                        await store.savePendingProbes('default_user', studyState.pendingProbes);
+                        
+                        // Try next
+                        dueProbe = probes.nextDueProbe(studyState.pendingProbes, now, studyState.evalConfig);
+                        continue;
+                    }
+
+                    return { 
+                        ...probeCard, 
+                        isProbe: true, 
+                        probeId: dueProbe.id, 
+                        probeDelayHours: dueProbe.delayHours, 
+                        probeSourcePolicy: dueProbe.sourcePolicy, 
+                        probeArm: dueProbe.arm,
+                        probeExperimentId: studyState.evalConfig?.experiment?.experimentId, // Or from probe if stored
+                        probeScheduledAt: dueProbe.scheduledAt,
+                        questionTypeToShow: 'Type'
+                    };
+                } else {
+                    // Card missing? Invalidate
+                    const result = {
+                        ...dueProbe,
+                        completedAt: Date.now(),
+                        outcome: null,
+                        wasCorrect: null,
+                        invalidated: true,
+                        invalidReason: 'card_missing'
+                    };
+                    await store.appendCompletedProbe('default_user', result, studyState.evalConfig.probes.maxCompleted);
+
+                    studyState.pendingProbes = studyState.pendingProbes.filter(p => p.id !== dueProbe.id);
+                    await store.savePendingProbes('default_user', studyState.pendingProbes);
+                    
+                    // Try next
+                    dueProbe = probes.nextDueProbe(studyState.pendingProbes, now, studyState.evalConfig);
+                }
+            }
+        }
+        
+        // 2. Normal selection
+        let selected = null;
+        let policy = null;
+        let meta = {};
+
+        const candidates = studyState.activeLearningPool.map(card => ({
+            card,
+            knowledgeState: studyState.knowledgeStates.get(card.id)
+        }));
+
+        if (studyState.evalConfig?.experiment?.mode === 'CARD_LEVEL_SPLIT') {
+            const experimentId = studyState.evalConfig.experiment.experimentId;
+            // Ensure assignment
+            const cardMetas = studyState.activeLearningPool.map(c => ({
+                cardId: c.id,
+                deckId: c.deckId || 'default',
+                difficulty: computeDifficultyProxy(c, studyState.knowledgeStates.get(c.id))
+            }));
+            const { assignment } = await store.ensureAssignment('default_user', experimentId, cardMetas, studyState.evalRng, {
+                method: studyState.evalConfig.experiment.assignmentMethod || 'stratified_v1'
+            });
+            
+            const groupA = studyState.activeLearningPool.filter(c => assignment[c.id] === 'A');
+            const groupB = studyState.activeLearningPool.filter(c => assignment[c.id] === 'B');
+            
+            const cortexChoice = await cortex.pickNextCard(groupA, studyState.sessionState, deck, studyState.knowledgeStates);
+            
+            const candidatesB = groupB.map(card => ({
+                card,
+                knowledgeState: studyState.knowledgeStates.get(card.id)
+            }));
+            const baselineChoice = getBaselineChoice(candidatesB, studyState.knowledgeStates);
+
+            // Choose arm (proportional balancing)
+            const exposuresA = studyState.sessionState.exposuresA || 0;
+            const exposuresB = studyState.sessionState.exposuresB || 0;
+            
+            let chosenArm = 'A';
+            if (cortexChoice && baselineChoice) {
+                if (exposuresA > exposuresB) chosenArm = 'B';
+                else if (exposuresB > exposuresA) chosenArm = 'A';
+                else chosenArm = studyState.evalRng() < 0.5 ? 'A' : 'B';
+            } else if (cortexChoice) {
+                chosenArm = 'A';
+            } else if (baselineChoice) {
+                chosenArm = 'B';
+            } else {
+                return null;
+            }
+            
+            if (chosenArm === 'A') {
+                selected = cortexChoice;
+                policy = 'cortex';
+                studyState.sessionState.exposuresA = exposuresA + 1;
+            } else {
+                selected = baselineChoice;
+                policy = 'baseline';
+                studyState.sessionState.exposuresB = exposuresB + 1;
+            }
+            
+            meta = {
+                mode: 'CARD_LEVEL_SPLIT',
+                experimentId,
+                chosenArm,
+                candidateCountA: groupA.length,
+                candidateCountB: groupB.length,
+                cortexCardId: cortexChoice?.id,
+                baselineCardId: baselineChoice?.id
+            };
+
+        } else {
+            // STEP_LEVEL_ROUTER
+            const cortexChoice = await cortex.pickNextCard(studyState.activeLearningPool, studyState.sessionState, deck, studyState.knowledgeStates);
+            const baselineChoice = getBaselineChoice(candidates, studyState.knowledgeStates);
+            policy = router.choosePolicy(studyState.sessionState, studyState.evalConfig, studyState.evalRng);
+            selected = policy === 'cortex' ? cortexChoice : baselineChoice;
+            
+            meta = {
+                mode: 'STEP_LEVEL_ROUTER',
+                candidateCount: candidates.length,
+                cortexCardId: cortexChoice?.id,
+                baselineCardId: baselineChoice?.id
+            };
+        }
+        
+        if (selected) {
+            await store.appendEvalEvent('default_user', {
+                t: Date.now(),
+                type: 'decision',
+                sessionId: studyState.evalSessionId,
+                deckId: deck.id,
+                cardId: selected.id,
+                policy: policy,
+                meta: meta
+            }, studyState.evalConfig.logging.maxEvents);
+            
+            selected.policy = policy;
+            if (meta.chosenArm) selected.arm = meta.chosenArm;
+            if (meta.experimentId) selected.experimentId = meta.experimentId;
+        }
+        
+        return selected;
+    } catch (err) {
+        console.warn('[Eval] Error in pickNextCardWithEval, falling back to Cortex', err);
+        return cortex.pickNextCard(studyState.activeLearningPool, studyState.sessionState, deck, studyState.knowledgeStates);
+    }
+}
+
 async function showNextCard() {
     hidePreGenerationViewImmediately();
-    if (currentMode === 'learn' && !studyState.currentCard) {
-        showComplete();
-        return;
-    }
     const cardStatsInfo = document.getElementById('cardStatsInfo');
     if (cardStatsInfo) cardStatsInfo.innerHTML = '';
-    if (studyState.sequenceTimerInterval) {
-        clearInterval(studyState.sequenceTimerInterval);
-        studyState.sequenceTimerInterval = null;
-    }
+
     document.getElementById('flashcardViewContainer').classList.add('hidden');
-    document.getElementById('passiveReviewView').classList.add('hidden');
-    document.getElementById('dragDropView').classList.add('hidden');
     document.getElementById('mcqView').classList.add('hidden');
     document.getElementById('writeAnswerInput').classList.add('hidden');
+    studyState.mcqPipeline = null;
     const simpleButtons = document.getElementById('simpleAnswerButtons');
     simpleButtons.classList.remove('hidden');
     simpleButtons.querySelectorAll('button').forEach(btn => btn.classList.add('hidden'));
 
+    const spacedButtons = document.getElementById('spacedRatingButtons');
+    if (spacedButtons) spacedButtons.classList.add('hidden');
+    studyState.spacedAnswerShown = false;
+
     const checkBtn = document.getElementById('checkAnswerBtn');
     const dontKnowBtn = document.getElementById('dontKnowBtn');
+    checkBtn.onclick = autoCheckAnswer;
+    dontKnowBtn.onclick = dontKnowAnswer;
+
+    if (currentMode !== 'spaced' && shouldShowRemediation(Date.now())) {
+        const task = popNextRemediation();
+        if (task && renderLureRemediation(task)) {
+            return;
+        }
+    }
+
+    if (currentMode === 'learn' && !studyState.currentCard) {
+        showComplete();
+        return;
+    }
+
+    if (currentMode !== 'spaced') {
+        decrementRemediationDelay();
+    }
+
+    if (currentMode === 'spaced') {
+        if (studyState.currentCardIndex >= studyState.roundCards.length) {
+            showToast('Spaced session complete!', 'success');
+            await endSession();
+            return;
+        }
+
+        const card = studyState.roundCards[studyState.currentCardIndex];
+        if (!card) {
+            showComplete();
+            return;
+        }
+
+        startInteractionLog(card.id);
+
+        document.getElementById('flashcardViewContainer').classList.remove('hidden');
+        const cardQuestionEl = document.getElementById('cardQuestion');
+        const cardAnswerEl = document.getElementById('cardAnswer');
+        if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
+        if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+
+        document.getElementById('showAnswerBtn').classList.remove('hidden');
+        document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
+        document.getElementById('cardAnswerContent').classList.add('hidden');
+
+        const info = document.getElementById('cardRoundInfo');
+        const counts = studyState.spacedCounts || { dueRemaining: 0, newRemaining: 0 };
+        const remainingTotal = studyState.roundCards.length - studyState.currentCardIndex;
+        if (info) {
+            info.textContent = `Due: ${counts.dueRemaining} | New: ${counts.newRemaining} | Left: ${remainingTotal}`;
+        }
+
+        await renderSpacedIntervals(card);
+        return;
+    }
 
     if (currentMode === 'review') {
         if (studyState.currentCardIndex >= studyState.roundCards.length) {
@@ -5616,7 +6563,7 @@ async function showNextCard() {
                     masteryDiv.style.fontWeight = '500';
                     masteryDiv.textContent = 'Mastery: ';
                     const masterySpan = document.createElement('span');
-                    masterySpan.style.color = 'var(--primary-color)';
+                    masterySpan.style.color = 'var(--deck-accent)';
                     masterySpan.textContent = `${masteryPercent}%`;
                     masteryDiv.appendChild(masterySpan);
                     const urgencyDiv = document.createElement('div');
@@ -5630,10 +6577,10 @@ async function showNextCard() {
         }
 
         document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                const cardQuestionEl = document.getElementById('cardQuestion');
-                const cardAnswerEl = document.getElementById('cardAnswer');
-                if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
-                if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+        const cardQuestionEl = document.getElementById('cardQuestion');
+        const cardAnswerEl = document.getElementById('cardAnswer');
+        if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
+        if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
 
         document.getElementById('showAnswerBtn').classList.remove('hidden');
 
@@ -5644,424 +6591,13 @@ async function showNextCard() {
         return;
     }
 
-    if (currentMode === 'sequence') {
-        checkBtn.onclick = checkSequenceAnswer;
-        dontKnowBtn.onclick = dontKnowSequenceAnswer;
-    } else {
-        checkBtn.onclick = autoCheckAnswer;
-        dontKnowBtn.onclick = dontKnowAnswer;
-    }
-
-    if (currentMode === 'sequence') {
-        const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
-        if (!currentChunk) {
-            showToast("Sequence chunk not found", "error");
-            endSession();
-            return;
-        }
-        const chunkOffset = studyState.sequenceChunks.slice(0, studyState.currentChunkIndex).reduce((sum, chunk) => sum + chunk.length, 0);
-        const sequencePhasesUsingRoundCards = ['Weakest Link', 'InterChunkReview', 'Passive Review Quiz', 'Post-Drag Recall'];
-        let card = null;
-        let forwardCardIndexInChunk = studyState.currentCardIndex;
-        if (studyState.sequencePhase === 'Forward Chaining') {
-            if (!studyState.sequenceForwardQueue || studyState.sequenceForwardQueue.length === 0) {
-                studyState.sequenceForwardQueue = currentChunk.map(c => c.id);
-            }
-            const forwardCardId = studyState.sequenceForwardQueue[studyState.currentCardIndex];
-            const locatedCard = currentChunk.findIndex(c => c.id === forwardCardId);
-            forwardCardIndexInChunk = locatedCard >= 0 ? locatedCard : studyState.currentCardIndex;
-            card = currentChunk[forwardCardIndexInChunk] || null;
-        } else if (sequencePhasesUsingRoundCards.includes(studyState.sequencePhase)) {
-            card = studyState.roundCards ? studyState.roundCards[studyState.currentCardIndex] : null;
-        } else {
-            card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
-        }
-
-        const roundInfo = document.getElementById('cardRoundInfo');
-        if (studyState.sequencePhase === 'Passive Review Quiz' && studyState.roundCards?.length) {
-            roundInfo.textContent = `Chunk ${studyState.currentChunkIndex + 1} - Quiz Item ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
-        } else if (studyState.sequencePhase === 'InterChunkReview' && studyState.roundCards?.length) {
-            roundInfo.textContent = `Quick Review - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
-        } else if (studyState.sequencePhase === 'Weakest Link' && studyState.roundCards?.length) {
-            roundInfo.textContent = `Weakest Link - Card ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
-        } else if (studyState.sequencePhase === 'Post-Drag Recall' && studyState.roundCards?.length) {
-            roundInfo.textContent = `Chunk ${studyState.currentChunkIndex + 1} - Recall ${studyState.currentCardIndex + 1} of ${studyState.roundCards.length}`;
-        } else if (studyState.sequencePhase === 'Forward Chaining') {
-            roundInfo.textContent = `Chunk ${studyState.currentChunkIndex + 1} - Item ${forwardCardIndexInChunk + 1} of ${currentChunk.length}`;
-        } else {
-            roundInfo.textContent = `Chunk ${studyState.currentChunkIndex + 1} - Item ${studyState.currentCardIndex + 1} of ${currentChunk.length}`;
-        }
-
-        switch (studyState.sequencePhase) {
-            case 'Passive Review':
-                document.getElementById('passiveReviewView').classList.remove('hidden');
-                const list = document.getElementById('passiveReviewList');
-                list.innerHTML = currentChunk.map((c, idx) => `
-                            <li style="
-                                padding: 15px 20px;
-                                margin-bottom: 12px;
-                                background: var(--input-bg);
-                                border-radius: 12px;
-                                border-left: 4px solid var(--primary-color);
-                                transition: all 0.3s;
-                                line-height: 1.6;
-                            ">
-                                <strong style="color: var(--primary-color); font-size: 1.1rem;">${c.answer}</strong>
-                                ${c.question ? `<div style="color: var(--secondary-text); font-size: 0.95rem; margin-top: 8px;">${c.question}</div>` : ''}
-                            </li>
-                        `).join('');
-                break;
-            case 'Passive Review Quiz':
-                if (!studyState.roundCards || studyState.roundCards.length === 0) {
-                    const deck = decks[currentDeckId];
-                    const selectedTargets = selectPassiveReviewTargets(currentChunk, deck);
-                    studyState.roundCards = selectedTargets.length ? selectedTargets : shuffleArray(currentChunk).slice(0, Math.min(currentChunk.length, 3));
-                    studyState.currentCardIndex = 0;
-                }
-                const quizCard = studyState.roundCards[studyState.currentCardIndex];
-                if (quizCard) {
-                    const quizAnswerEl = document.getElementById('cardAnswer');
-                    if (quizAnswerEl) quizAnswerEl.textContent = quizCard.answer || '';
-                }
-                document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('writeAnswerInput').classList.remove('hidden');
-                document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                document.getElementById('dontKnowBtn').classList.remove('hidden');
-                (function renderPassiveReviewPrompt() {
-                    const container = document.getElementById('cardQuestion');
-                    container.innerHTML = '';
-                    const wrapper = document.createElement('div');
-                    wrapper.style.textAlign = 'center';
-                    const header = document.createElement('div');
-                    header.style.color = 'var(--primary-color)';
-                    header.style.fontSize = '1rem';
-                    header.style.fontWeight = 600;
-                    header.style.marginBottom = '12px';
-                    header.textContent = 'Passive Review Quiz';
-                    const prompt = document.createElement('div');
-                    prompt.style.fontSize = '1.1rem';
-                    prompt.textContent = `Quick check: what is step ${chunkOffset + studyState.currentCardIndex + 1} in this sequence?`;
-                    wrapper.appendChild(header);
-                    wrapper.appendChild(prompt);
-                    container.appendChild(wrapper);
-                })();
-                if (quizCard) startInteractionLog(quizCard.id);
-                break;
-            case 'Forward Chaining':
-            case 'Backward Chaining':
-                document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('writeAnswerInput').classList.remove('hidden');
-                document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                document.getElementById('dontKnowBtn').classList.remove('hidden');
-
-                const qElement = document.getElementById('cardQuestion');
-
-                if (studyState.sequencePhase === 'Forward Chaining') {
-                    if (forwardCardIndexInChunk === 0) {
-                        qElement.innerHTML = '';
-                        (function renderForwardFirst() {
-                            const wrapper = document.createElement('div');
-                            wrapper.style.textAlign = 'center';
-                            const header = document.createElement('div');
-                            header.style.color = 'var(--primary-color)';
-                            header.style.fontSize = '1rem';
-                            header.style.fontWeight = 600;
-                            header.style.marginBottom = '15px';
-                            header.textContent = 'Forward Chaining';
-                            const prompt = document.createElement('div');
-                            prompt.style.fontSize = '1.3rem';
-                            prompt.innerHTML = 'What is the <strong>first item</strong> in this sequence?';
-                            wrapper.appendChild(header);
-                            wrapper.appendChild(prompt);
-                            qElement.appendChild(wrapper);
-                        })();
-                    } else {
-                        const prevCard = currentChunk[forwardCardIndexInChunk - 1];
-                        const usePositionPrompt = forwardCardIndexInChunk % 4 === 0;
-                        if (usePositionPrompt) {
-                            qElement.innerHTML = '';
-                            (function renderForwardPosition() {
-                                const wrapper = document.createElement('div');
-                                wrapper.style.textAlign = 'center';
-                                const header = document.createElement('div');
-                                header.style.color = 'var(--primary-color)';
-                                header.style.fontSize = '1rem';
-                                header.style.fontWeight = 600;
-                                header.style.marginBottom = '15px';
-                                header.textContent = 'Forward Chaining';
-                                const prompt = document.createElement('div');
-                                prompt.style.fontSize = '1.2rem';
-                                const strong = document.createElement('strong');
-                                strong.textContent = `${chunkOffset + forwardCardIndexInChunk + 1}`;
-                                prompt.appendChild(document.createTextNode('What is step '));
-                                prompt.appendChild(strong);
-                                prompt.appendChild(document.createTextNode(' in this sequence?'));
-                                wrapper.appendChild(header);
-                                wrapper.appendChild(prompt);
-                                qElement.appendChild(wrapper);
-                            })();
-                        } else {
-                            qElement.innerHTML = '';
-                            (function renderForwardAfter() {
-                                const wrapper = document.createElement('div');
-                                wrapper.style.textAlign = 'center';
-                                const header = document.createElement('div');
-                                header.style.color = 'var(--primary-color)';
-                                header.style.fontSize = '1rem';
-                                header.style.fontWeight = 600;
-                                header.style.marginBottom = '15px';
-                                header.textContent = 'Forward Chaining';
-                                const prompt = document.createElement('div');
-                                prompt.style.fontSize = '1.1rem';
-                                prompt.style.marginBottom = '20px';
-                                prompt.innerHTML = 'What comes <strong>after</strong>:';
-                                const answerBox = document.createElement('div');
-                                answerBox.style.background = 'var(--input-bg)';
-                                answerBox.style.padding = '20px';
-                                answerBox.style.borderRadius = '12px';
-                                answerBox.style.borderLeft = '4px solid var(--primary-color)';
-                                answerBox.style.fontSize = '1.3rem';
-                                answerBox.style.fontWeight = 600;
-                                answerBox.textContent = prevCard.answer;
-                                wrapper.appendChild(header);
-                                wrapper.appendChild(prompt);
-                                wrapper.appendChild(answerBox);
-                                if (prevCard.question) {
-                                    const qEl = document.createElement('div');
-                                    qEl.style.color = 'var(--secondary-text)';
-                                    qEl.style.marginTop = '10px';
-                                    qEl.style.fontSize = '0.95rem';
-                                    qEl.textContent = prevCard.question;
-                                    wrapper.appendChild(qEl);
-                                }
-                                qElement.appendChild(wrapper);
-                            })();
-                        }
-                    }
-                } else {
-                    if (studyState.currentCardIndex === currentChunk.length - 1) {
-                        qElement.innerHTML = '';
-                        (function renderBackwardLast() {
-                            const wrapper = document.createElement('div');
-                            wrapper.style.textAlign = 'center';
-                            const header = document.createElement('div');
-                            header.style.color = 'var(--primary-color)';
-                            header.style.fontSize = '1rem';
-                            header.style.fontWeight = 600;
-                            header.style.marginBottom = '15px';
-                            header.textContent = 'Backward Chaining';
-                            const prompt = document.createElement('div');
-                            prompt.style.fontSize = '1.3rem';
-                            prompt.innerHTML = 'What is the <strong>last item</strong> in this sequence?';
-                            wrapper.appendChild(header);
-                            wrapper.appendChild(prompt);
-                            qElement.appendChild(wrapper);
-                        })();
-                    } else {
-                        const nextCard = currentChunk[studyState.currentCardIndex + 1];
-                        const usePositionPrompt = studyState.currentCardIndex % 3 === 0;
-                        if (usePositionPrompt) {
-                            qElement.innerHTML = '';
-                            (function renderBackwardPosition() {
-                                const wrapper = document.createElement('div');
-                                wrapper.style.textAlign = 'center';
-                                const header = document.createElement('div');
-                                header.style.color = 'var(--primary-color)';
-                                header.style.fontSize = '1rem';
-                                header.style.fontWeight = 600;
-                                header.style.marginBottom = '15px';
-                                header.textContent = 'Backward Chaining';
-                                const prompt = document.createElement('div');
-                                prompt.style.fontSize = '1.2rem';
-                                const strong = document.createElement('strong');
-                                strong.textContent = `${chunkOffset + studyState.currentCardIndex + 1}`;
-                                prompt.appendChild(document.createTextNode('Which item sits at position '));
-                                prompt.appendChild(strong);
-                                prompt.appendChild(document.createTextNode('?'));
-                                wrapper.appendChild(header);
-                                wrapper.appendChild(prompt);
-                                qElement.appendChild(wrapper);
-                            })();
-                        } else {
-                            qElement.innerHTML = '';
-                            (function renderBackwardBefore() {
-                                const wrapper = document.createElement('div');
-                                wrapper.style.textAlign = 'center';
-                                const header = document.createElement('div');
-                                header.style.color = 'var(--primary-color)';
-                                header.style.fontSize = '1rem';
-                                header.style.fontWeight = 600;
-                                header.style.marginBottom = '15px';
-                                header.textContent = 'Backward Chaining';
-                                const prompt = document.createElement('div');
-                                prompt.style.fontSize = '1.1rem';
-                                prompt.style.marginBottom = '20px';
-                                prompt.innerHTML = 'What comes <strong>before</strong>:';
-                                const answerBox = document.createElement('div');
-                                answerBox.style.background = 'var(--input-bg)';
-                                answerBox.style.padding = '20px';
-                                answerBox.style.borderRadius = '12px';
-                                answerBox.style.borderLeft = '4px solid var(--primary-color)';
-                                answerBox.style.fontSize = '1.3rem';
-                                answerBox.style.fontWeight = 600;
-                                answerBox.textContent = nextCard.answer;
-                                wrapper.appendChild(header);
-                                wrapper.appendChild(prompt);
-                                wrapper.appendChild(answerBox);
-                                if (nextCard.question) {
-                                    const qEl = document.createElement('div');
-                                    qEl.style.color = 'var(--secondary-text)';
-                                    qEl.style.marginTop = '10px';
-                                    qEl.style.fontSize = '0.95rem';
-                                    qEl.textContent = nextCard.question;
-                                    wrapper.appendChild(qEl);
-                                }
-                                qElement.appendChild(wrapper);
-                            })();
-                        }
-                    }
-                }
-                startInteractionLog(card.id);
-                break;
-            case 'Drag and Drop':
-                document.getElementById('dragDropView').classList.remove('hidden');
-                setupDragDropView(currentChunk);
-                document.getElementById('cardRoundInfo').textContent = `Chunk ${studyState.currentChunkIndex + 1} - Arrange in Order`;
-                simpleButtons.classList.add('hidden');
-                break;
-            case 'Link Drill':
-                checkBtn.onclick = checkSequenceAnswer;
-                dontKnowBtn.onclick = dontKnowSequenceAnswer;
-                document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('writeAnswerInput').classList.remove('hidden');
-                document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                document.getElementById('dontKnowBtn').classList.remove('hidden');
-                const linkItem = studyState.sequenceLinkDrillQueue?.[0];
-                if (!linkItem) {
-                    studyState.sequencePhase = 'Post-Drag Recall';
-                    moveToNextSequencePhase();
-                    return;
-                }
-                const cueCard = studyState.sequenceCards.find(c => c.id === linkItem.cueId);
-                const cueText = cleanStepText(cueCard || linkItem.cueId);
-                const promptText = linkItem.direction === 'before'
-                    ? `What comes just before ${cueText}?`
-                    : `What comes next after ${cueText}?`;
-                const promptContainer = document.getElementById('cardQuestion');
-                if (promptContainer) {
-                    promptContainer.innerHTML = `
-                        <div style="text-align: center;">
-                            <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 12px;">Link Drill</div>
-                            <div style="font-size: 1.1rem;">${promptText}</div>
-                        </div>
-                    `;
-                }
-                const answerPlaceholder = document.getElementById('cardAnswer');
-                if (answerPlaceholder) {
-                    answerPlaceholder.textContent = '';
-                }
-                const expectedCard = studyState.sequenceCards.find(c => c.id === linkItem.expectedId);
-                startInteractionLog(expectedCard?.id || linkItem.expectedId);
-                break;
-            case 'Weakest Link':
-                checkBtn.onclick = checkSequenceAnswer;
-                dontKnowBtn.onclick = dontKnowSequenceAnswer;
-                document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('writeAnswerInput').classList.remove('hidden');
-                document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                document.getElementById('dontKnowBtn').classList.remove('hidden');
-                const weakestCard = studyState.roundCards[studyState.currentCardIndex];
-                if (!weakestCard) {
-                    moveToNextSequencePhase();
-                    return;
-                }
-                const weakestQEl = document.getElementById('cardQuestion');
-                const weakestAEl = document.getElementById('cardAnswer');
-                if (weakestQEl) weakestQEl.textContent = weakestCard.question || '';
-                if (weakestAEl) weakestAEl.textContent = weakestCard.answer || '';
-                startInteractionLog(weakestCard.id);
-                break;
-            case 'InterChunkReview':
-                checkBtn.onclick = checkSequenceAnswer;
-                dontKnowBtn.onclick = dontKnowSequenceAnswer;
-                document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('writeAnswerInput').classList.remove('hidden');
-                document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                document.getElementById('dontKnowBtn').classList.remove('hidden');
-                const reviewCard = studyState.roundCards[studyState.currentCardIndex];
-                if (!reviewCard) {
-                    moveToNextSequencePhase();
-                    return;
-                }
-                const reviewQEl = document.getElementById('cardQuestion');
-                const reviewAEl = document.getElementById('cardAnswer');
-                if (reviewQEl) reviewQEl.textContent = reviewCard.question || '';
-                if (reviewAEl) reviewAEl.textContent = reviewCard.answer || '';
-                startInteractionLog(reviewCard.id);
-                break;
-            case 'Post-Drag Recall':
-                if (!card) {
-                    studyState.sequencePhase = 'Drag and Drop';
-                    moveToNextSequencePhase();
-                    return;
-                }
-                document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                document.getElementById('writeAnswerInput').classList.remove('hidden');
-                document.getElementById('checkAnswerBtn').classList.remove('hidden');
-                document.getElementById('dontKnowBtn').classList.remove('hidden');
-                const postDragQEl = document.getElementById('cardQuestion');
-                if (postDragQEl) postDragQEl.innerHTML = `
-                            <div style="text-align: center;">
-                                <div style="color: var(--primary-color); font-size: 1rem; font-weight: 600; margin-bottom: 12px;">Post-Drag Recall</div>
-                                <div style="font-size: 1.1rem;">What is step <strong>${chunkOffset + studyState.currentCardIndex + 1}</strong> in this sequence?</div>
-                            </div>
-                        `;
-                startInteractionLog(card?.id);
-                break;
-
-        }
-        document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
-        if (card) {
-            const answerEl = document.getElementById('cardAnswer');
-            if (answerEl) answerEl.textContent = card.answer || '';
-        }
-        document.getElementById('cardAnswerContent').classList.add('hidden');
-        const writeInput = document.getElementById('writeAnswerInput');
-        writeInput.value = '';
-        writeInput.disabled = false;
-        writeInput.classList.remove('correct', 'incorrect');
-        if (!writeInput.classList.contains('hidden')) setTimeout(() => writeInput.focus(), 100);
-        const timedSequencePhases = ['Forward Chaining', 'Backward Chaining', 'InterChunkReview', 'Weakest Link', 'Passive Review Quiz', 'Post-Drag Recall', 'Link Drill'];
-        if (timedSequencePhases.includes(studyState.sequencePhase)) {
-            studyState.sequenceQuestionStartTime = Date.now();
-            if (cardStatsInfo) {
-                cardStatsInfo.innerHTML = '';
-                    const seqTimer = document.createElement('div');
-                    seqTimer.id = 'sequenceTimer';
-                    seqTimer.style.color = 'var(--secondary-text)';
-                    seqTimer.style.fontSize = '0.85rem';
-                    seqTimer.textContent = 'Time: 0.0s';
-                    cardStatsInfo.appendChild(seqTimer);
-                    const timerLabel = seqTimer;
-                if (timerLabel) {
-                    studyState.sequenceTimerInterval = setInterval(() => {
-                        const elapsed = (Date.now() - studyState.sequenceQuestionStartTime) / 1000;
-                        timerLabel.textContent = `Time: ${elapsed.toFixed(1)}s`;
-                    }, 200);
-                }
-            }
-        } else {
-            studyState.sequenceQuestionStartTime = null;
-        }
-        return;
-    }
-
     if (currentMode === 'learn') {
         const card = studyState.currentCard;
         if (!card) {
             showComplete();
             return;
         }
+        await resetEvalExposureFlagForNewCard(card.id);
         studyState.isRetypingIncorrect = false;
         const questionType = card.questionTypeToShow || selectOptimalQuestionType(card, decks[currentDeckId], 'learn');
         card.questionTypeToShow = questionType;
@@ -6069,8 +6605,10 @@ async function showNextCard() {
         switch (questionType) {
             case 'MultipleChoice':
                 document.getElementById('mcqView').classList.remove('hidden');
-                const mcqQEl = document.getElementById('mcqQuestion');
-                if (mcqQEl) mcqQEl.textContent = card.question || '';
+                {
+                    const mcqQEl = document.getElementById('mcqQuestion');
+                    if (mcqQEl) mcqQEl.textContent = card.question || '';
+                }
                 generateAndDisplayMCQ(card);
                 simpleButtons.classList.add('hidden');
                 break;
@@ -6081,7 +6619,7 @@ async function showNextCard() {
                 if (clozeText.includes('___')) {
                     clozeText = clozeText.replace(/___/g, '___________');
                 } else if (clozeText.includes('...')) {
-                    clozeText = clozeText.replace(/\.\.\./g, '___________');
+                    clozeText = clozeText.replace(/\.{3}/g, '___________');
                 } else {
                     clozeText = clozeText.replace(new RegExp(escapeRegExp(escapeHtml(String(card.answer || ''))), 'ig'), '___________');
                 }
@@ -6100,8 +6638,10 @@ async function showNextCard() {
 
             case 'Type':
                 document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                const typeQEl = document.getElementById('cardQuestion');
-                if (typeQEl) typeQEl.textContent = card.question || '';
+                {
+                    const typeQEl = document.getElementById('cardQuestion');
+                    if (typeQEl) typeQEl.textContent = card.question || '';
+                }
 
                 document.getElementById('writeAnswerInput').classList.remove('hidden');
                 document.getElementById('checkAnswerBtn').classList.remove('hidden');
@@ -6114,8 +6654,10 @@ async function showNextCard() {
 
             default:
                 document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                const defQEl = document.getElementById('cardQuestion');
-                if (defQEl) defQEl.textContent = card.question || '';
+                {
+                    const defQEl = document.getElementById('cardQuestion');
+                    if (defQEl) defQEl.textContent = card.question || '';
+                }
                 document.getElementById('showAnswerBtn').classList.remove('hidden');
                 break;
         }
@@ -6127,6 +6669,7 @@ async function showNextCard() {
         document.getElementById('cardAnswerContent').classList.add('hidden');
 
         const writeInput = document.getElementById('writeAnswerInput');
+        setActiveStudyInput(writeInput);
         writeInput.value = '';
         writeInput.disabled = false;
         writeInput.classList.remove('correct', 'incorrect');
@@ -6153,32 +6696,50 @@ async function showNextCard() {
     const card = studyState.roundCards[studyState.currentCardIndex];
     const questionType = card.questionTypeToShow;
 
-
-    switch (questionType) {
-        case 'MultipleChoice':
-            document.getElementById('mcqView').classList.remove('hidden');
-            const mqEl = document.getElementById('mcqQuestion');
-            if (mqEl) mqEl.textContent = card.question || '';
-            generateAndDisplayMCQ(card);
-            simpleButtons.classList.add('hidden');
-            break;
+        switch (questionType) {
+            case 'MultipleChoice':
+                document.getElementById('mcqView').classList.remove('hidden');
+                {
+                    const mqEl = document.getElementById('mcqQuestion');
+                    if (mqEl) mqEl.textContent = card.question || '';
+                }
+                document.getElementById('writeAnswerInput').classList.remove('hidden');
+                document.getElementById('checkAnswerBtn').classList.remove('hidden');
+                document.getElementById('dontKnowBtn').classList.remove('hidden');
+                {
+                    const optionsContainer = document.getElementById('mcqOptions');
+                    if (optionsContainer) {
+                        optionsContainer.innerHTML = '';
+                        optionsContainer.classList.add('hidden');
+                    }
+                }
+                {
+                    const feedbackMessage = document.getElementById('feedbackMessage');
+                    if (feedbackMessage) feedbackMessage.innerHTML = '';
+                }
+                checkBtn.onclick = submitMcqRecallAttempt;
+                dontKnowBtn.onclick = skipMcqRecallAttempt;
+                startInteractionLog(card.id);
+                startMcqPipeline(card);
+                simpleButtons.classList.add('hidden');
+                break;
 
         case 'Cloze':
             document.getElementById('flashcardViewContainer').classList.remove('hidden');
             let clozeText = card.question;
 
-            // Handle explicit blanks
             if (clozeText.includes('___')) {
                 clozeText = clozeText.replace(/___/g, '___________');
             } else if (clozeText.includes('...')) {
-                clozeText = clozeText.replace(/\.\.\./g, '___________');
+                clozeText = clozeText.replace(/\.{3}/g, '___________');
             } else {
-                // Standard Cloze: remove answer from question
                 clozeText = clozeText.replace(new RegExp(escapeRegExp(card.answer), 'ig'), '___________');
             }
 
-            const cardQuestionEl = document.getElementById('cardQuestion');
-            if (cardQuestionEl) cardQuestionEl.textContent = clozeText;
+            {
+                const cardQuestionEl = document.getElementById('cardQuestion');
+                if (cardQuestionEl) cardQuestionEl.textContent = clozeText;
+            }
 
             document.getElementById('writeAnswerInput').classList.remove('hidden');
             document.getElementById('checkAnswerBtn').classList.remove('hidden');
@@ -6191,8 +6752,10 @@ async function showNextCard() {
 
         case 'Type':
             document.getElementById('flashcardViewContainer').classList.remove('hidden');
-            const typeQEl2 = document.getElementById('cardQuestion');
-            if (typeQEl2) typeQEl2.textContent = card.question || '';
+            {
+                const typeQEl2 = document.getElementById('cardQuestion');
+                if (typeQEl2) typeQEl2.textContent = card.question || '';
+            }
 
             document.getElementById('writeAnswerInput').classList.remove('hidden');
             document.getElementById('checkAnswerBtn').classList.remove('hidden');
@@ -6205,8 +6768,10 @@ async function showNextCard() {
 
         default:
             document.getElementById('flashcardViewContainer').classList.remove('hidden');
-            const defQEl2 = document.getElementById('cardQuestion');
-            if (defQEl2) defQEl2.textContent = card.question || '';
+            {
+                const defQEl2 = document.getElementById('cardQuestion');
+                if (defQEl2) defQEl2.textContent = card.question || '';
+            }
             document.getElementById('showAnswerBtn').classList.remove('hidden');
             break;
     }
@@ -6218,6 +6783,7 @@ async function showNextCard() {
     document.getElementById('cardAnswerContent').classList.add('hidden');
 
     const writeInput = document.getElementById('writeAnswerInput');
+    setActiveStudyInput(writeInput);
     writeInput.value = '';
     writeInput.disabled = false;
     writeInput.classList.remove('correct', 'incorrect');
@@ -6228,201 +6794,63 @@ async function showNextCard() {
     }
 }
 
-async function moveToNextSequencePhase() {
-    const currentChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
-    if (!currentChunk || currentChunk.length === 0) {
-        showToast("No more items in this sequence", "info");
-        const deckToClear = decks[currentDeckId];
-        if (deckToClear?.sequenceState) delete deckToClear.sequenceState;
-        if (deckToClear) await saveDataToDB('decks', deckToClear);
-        if (studyState.sequenceTimerInterval) {
-            clearInterval(studyState.sequenceTimerInterval);
-            studyState.sequenceTimerInterval = null;
-        }
-        showComplete();
-        return;
+async function renderSpacedIntervals(card) {
+    const intervalEls = {
+        Again: document.getElementById('spacedAgainInterval'),
+        Hard: document.getElementById('spacedHardInterval'),
+        Good: document.getElementById('spacedGoodInterval'),
+        Easy: document.getElementById('spacedEasyInterval')
+    };
+
+    Object.values(intervalEls).forEach(el => { if (el) el.textContent = ''; });
+
+    const settings = { ...DEFAULT_DECK_SETTINGS, ...(decks[currentDeckId]?.settings || {}), ...(studyState.settings || {}) };
+    if (!settings.spacedShowIntervals) return;
+
+    try {
+        const engine = await getFsrsEngine();
+        const prepared = await prepareFsrsCard(card);
+        const repeatResult = await engine.repeat(prepared, new Date());
+        const ratings = engine.getRatings();
+        const ratingMap = [
+            ['Again', ratings.Again],
+            ['Hard', ratings.Hard],
+            ['Good', ratings.Good],
+            ['Easy', ratings.Easy]
+        ];
+
+        ratingMap.forEach(([label, value]) => {
+            const target = intervalEls[label];
+            if (!target) return;
+            const outcome = Array.isArray(repeatResult)
+                ? repeatResult[value]
+                : (repeatResult?.[value] || repeatResult?.[label] || null);
+            const dueRaw = outcome?.card?.due || outcome?.due || outcome?.log?.due || null;
+            const intervalText = dueRaw ? formatIntervalFromNow(new Date(dueRaw)) : '';
+            target.textContent = intervalText ? `(${intervalText})` : '';
+        });
+    } catch (error) {
+        console.warn('Failed to compute spaced intervals preview', error);
     }
-    const previousPhase = studyState.sequencePhase;
-    studyState.sequenceLastActivity = previousPhase;
-    let nextPhase = null;
-
-
-    const isShortSequence = currentChunk.length <= 2;
-
-    switch (studyState.sequencePhase) {
-        case null:
-            studyState.currentCardIndex = 0;
-            studyState.sequenceMissedInChunk = [];
-            studyState.sequenceActiveChunkOverride = null;
-            studyState.weakestLinkIteration = 0;
-            studyState.sequenceForwardQueue = [];
-            studyState.sequenceChunkStartTime = Date.now();
-            const ctxStart = buildSequenceActivityContext(currentChunk);
-            const startChoice = chooseNextSequenceActivity(ctxStart);
-            nextPhase = startChoice.activity;
-            break;
-        case 'Passive Review':
-            nextPhase = 'Passive Review Quiz';
-            if (!studyState.roundCards || studyState.roundCards.length === 0) {
-                studyState.roundCards = [];
-            }
-            studyState.sequenceForwardQueue = [];
-            studyState.currentCardIndex = 0;
-            break;
-        case 'Passive Review Quiz':
-            if (isShortSequence) {
-                nextPhase = 'Drag and Drop';
-            } else {
-                nextPhase = 'Forward Chaining';
-                studyState.currentCardIndex = 0;
-                studyState.sequenceForwardQueue = currentChunk.map(c => c.id);
-            }
-            break;
-        case 'Forward Chaining':
-            nextPhase = 'Backward Chaining';
-            studyState.sequenceMissedInChunk = [];
-            studyState.sequenceActiveChunkOverride = null;
-            const knowledgeMapForward = studyState.knowledgeStates || new Map();
-            const deckForward = decks[currentDeckId];
-            const targetDateForward = deckForward?.settings?.examDate ? new Date(deckForward.settings.examDate) : new Date();
-            let startIndex = currentChunk.length - 1;
-            const targetRetentionForward = deckForward?.settings?.targetRetention || studyState.targetRetention || 0.8;
-            while (startIndex > 0) {
-                const state = knowledgeMapForward.get(currentChunk[startIndex].id);
-                const retention = calculateRetentionAtDate(state, targetDateForward);
-                if (!(retention >= Math.max(0.9, targetRetentionForward + 0.05))) break;
-                startIndex--;
-            }
-            studyState.currentCardIndex = startIndex;
-            break;
-        case 'Backward Chaining':
-            if (isShortSequence) {
-                const deckToClear = decks[currentDeckId];
-                if (deckToClear?.sequenceState) delete deckToClear.sequenceState;
-                if (deckToClear) await saveDataToDB('decks', deckToClear);
-                if (studyState.sequenceTimerInterval) {
-                    clearInterval(studyState.sequenceTimerInterval);
-                    studyState.sequenceTimerInterval = null;
-                }
-                showComplete();
-                return;
-            } else {
-                nextPhase = 'Drag and Drop';
-            }
-            break;
-        case 'Drag and Drop':
-            if (studyState.currentChunkIndex > 0) {
-                const reviewPool = studyState.sequenceChunks.slice(0, studyState.currentChunkIndex).flat();
-                const reviewKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
-                const reviewKnowledgeMap = new Map(reviewKnowledgeStates.map(item => [item.cardID, item]));
-                const dragDeck = decks[currentDeckId];
-                const targetDate = dragDeck?.settings?.examDate ? new Date(dragDeck.settings.examDate) : new Date();
-                const scoredPool = reviewPool.map(card => {
-                    const state = studyState.knowledgeStates?.get(card.id) || reviewKnowledgeMap.get(card.id);
-                    const retention = calculateRetentionAtDate(state, targetDate);
-                    return { card, retention: typeof retention === 'number' ? retention : 0 };
-                }).sort((a, b) => (a.retention ?? 0) - (b.retention ?? 0));
-                const selectionWindow = scoredPool.slice(0, Math.min(5, scoredPool.length));
-                const shuffledWindow = shuffleArray(selectionWindow);
-                const reviewCount = selectionWindow.length >= 2 ? Math.min(3, selectionWindow.length) : selectionWindow.length;
-                const selectedCards = shuffledWindow.slice(0, reviewCount).map(item => item.card);
-
-                if (selectedCards.length === 0) {
-                    studyState.currentChunkIndex++;
-                    nextPhase = (studyState.currentChunkIndex < studyState.sequenceChunks.length) ? 'Passive Review' : 'CheckWeakest';
-                    break;
-                }
-
-                nextPhase = 'InterChunkReview';
-                studyState.roundCards = selectedCards;
-                studyState.currentCardIndex = 0;
-                studyState.nextPhaseAfterReview = (studyState.currentChunkIndex + 1 < studyState.sequenceChunks.length) ? 'Passive Review' : 'CheckWeakest';
-
-                showToast(`Chunk ${studyState.currentChunkIndex + 1} complete! Quick checkup on earlier steps...`, "success");
-                studyState.currentChunkIndex++;
-                break;
-            }
-
-            studyState.currentChunkIndex++;
-            if (studyState.currentChunkIndex < studyState.sequenceChunks.length) {
-                const nextChunk = studyState.sequenceChunks[studyState.currentChunkIndex];
-                studyState.sequenceChunkStartTime = Date.now();
-                const ctxNext = buildSequenceActivityContext(nextChunk);
-                const nextChoice = chooseNextSequenceActivity(ctxNext);
-                nextPhase = nextChoice.activity;
-                showToast(`Chunk ${studyState.currentChunkIndex} complete! ${nextPhase} next.`, "success");
-            } else {
-                nextPhase = 'CheckWeakest';
-            }
-            break;
-
-        case 'InterChunkReview':
-            nextPhase = studyState.nextPhaseAfterReview;
-            studyState.nextPhaseAfterReview = null;
-            break;
-        case 'Link Drill':
-            nextPhase = 'Post-Drag Recall';
-            studyState.currentCardIndex = 0;
-            break;
-
-        case 'CheckWeakest':
-            const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
-            const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
-            const deck = decks[currentDeckId];
-            const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
-            const weakestCards = studyState.sequenceCards
-                .map(card => {
-                    const state = studyState.knowledgeStates?.get(card.id) || knowledgeMap.get(card.id);
-                    const retention = calculateRetentionAtDate(state, targetDate);
-                    if (globalSettings.devMode) {
-                        console.log("[FSRS insights] retention used:", retention);
-                    }
-                    return { ...card, retention };
-                })
-                .filter(card => (card.retention ?? 0) < 0.4)
-                .sort((a, b) => (a.retention ?? 0) - (b.retention ?? 0));
-
-            if (studyState.weakestLinkIteration == null) studyState.weakestLinkIteration = 0;
-            const maxIterations = studyState.maxWeakestLinkIterations || 3;
-
-            if (weakestCards.length > 0 && studyState.weakestLinkIteration < maxIterations) {
-                nextPhase = 'Weakest Link';
-                const subset = weakestCards.slice(0, Math.min(5, weakestCards.length));
-                studyState.roundCards = subset;
-                studyState.currentCardIndex = 0;
-                studyState.weakestLinkIteration++;
-                showToast("All chunks practiced! Quick focused review of tricky items.", "info");
-            } else {
-                if (deck?.sequenceState) delete deck.sequenceState;
-                if (deck) await saveDataToDB('decks', deck);
-                if (studyState.sequenceTimerInterval) {
-                    clearInterval(studyState.sequenceTimerInterval);
-                    studyState.sequenceTimerInterval = null;
-                }
-                showComplete();
-                return;
-            }
-            break;
-
-        case 'Weakest Link':
-            nextPhase = 'CheckWeakest';
-            break;
-    }
-
-    studyState.sequencePhase = nextPhase;
-    showNextCard();
 }
 
 function showAnswer() {
     document.querySelector('#cardView .flashcard').classList.add('is-flipped');
     document.getElementById('cardAnswerContent').classList.remove('hidden');
 
-    if (currentMode === 'sequence') {
-        return;
-    }
-
     document.getElementById('showAnswerBtn').classList.add('hidden');
     document.getElementById('checkAnswerBtn').classList.add('hidden');
+
+    if (currentMode === 'spaced') {
+        studyState.spacedAnswerShown = true;
+        document.getElementById('showQuestionBtn').classList.add('hidden');
+        document.getElementById('correctBtn').classList.add('hidden');
+        document.getElementById('incorrectBtn').classList.add('hidden');
+        document.getElementById('dontKnowBtn').classList.add('hidden');
+        const spacedButtons = document.getElementById('spacedRatingButtons');
+        if (spacedButtons) spacedButtons.classList.remove('hidden');
+        return;
+    }
 
     document.getElementById('correctBtn').classList.remove('hidden');
     document.getElementById('incorrectBtn').classList.remove('hidden');
@@ -6476,7 +6904,6 @@ function showQuestion() {
     document.getElementById('showQuestionBtn').classList.add('hidden');
     document.getElementById('correctBtn').classList.add('hidden');
     document.getElementById('incorrectBtn').classList.add('hidden');
-    document.getElementById('advancedAnswerButtons').classList.add('hidden');
 
     const isWriteMode = (currentMode === 'learn' && studyState.settings.learnMode === 'write') || (currentMode === 'review' && studyState.settings.reviewMode === 'write');
 
@@ -6485,6 +6912,69 @@ function showQuestion() {
         document.getElementById('dontKnowBtn').classList.toggle('hidden', studyState.isRetypingIncorrect);
     } else {
         document.getElementById('showAnswerBtn').classList.remove('hidden');
+    }
+}
+
+async function resetEvalExposureFlagForNewCard(cardId) {
+    if (!cardId) return;
+    const { resetEvalExposureState } = await getEvalExposureDedupeModule();
+    studyState.evalExposureLogged = resetEvalExposureState(studyState.evalExposureLogged, cardId);
+}
+
+async function logEvalExposureOnce(card, wasCorrect, latencyMs, extraMeta = null) {
+    if (currentMode !== 'learn' || !card || card.isProbe) return;
+    if (studyState.mcqRemediation?.activeTask?.cardId === card.id) return;
+    const { applyEvalExposureLog } = await getEvalExposureDedupeModule();
+    const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const decision = applyEvalExposureLog(studyState.evalExposureLogged, card.id, token);
+    studyState.evalExposureLogged = decision.state;
+    if (!decision.shouldLog) return;
+    await logAndScheduleProbe(card, wasCorrect, latencyMs, extraMeta);
+}
+
+async function logAndScheduleProbe(card, wasCorrect, latencyMs, extraMeta = null) {
+    try {
+        const { probes, store, integrity } = await getEvalModules();
+        
+        // Update fingerprint on exposure
+        await integrity.checkAndUpdateFingerprint('default_user', card.id, card);
+
+        const policy = card.policy || 'cortex';
+        let arm = card.arm;
+        if (!arm) {
+            arm = policy === 'cortex' ? 'A' : 'B';
+        }
+        
+        await store.appendEvalEvent('default_user', {
+            t: Date.now(),
+            type: 'exposure',
+            sessionId: studyState.evalSessionId,
+            deckId: card.deckId || currentDeckId,
+            cardId: card.id,
+            policy: policy,
+            arm: arm,
+            experimentId: card.experimentId || studyState.evalConfig?.experiment?.experimentId,
+            meta: { wasCorrect, latencyMs, ...(extraMeta || {}) }
+        }, studyState.evalConfig.logging.maxEvents);
+        
+        const probe = probes.scheduleProbeForExposure({
+            userID: 'default_user',
+            cardId: card.id,
+            deckId: card.deckId || currentDeckId,
+            policy: policy,
+            arm: arm,
+            now: Date.now(),
+            config: studyState.evalConfig,
+            rng: studyState.evalRng,
+            pendingProbes: studyState.pendingProbes
+        });
+        
+        if (probe) {
+            studyState.pendingProbes.push(probe);
+            await store.savePendingProbes('default_user', studyState.pendingProbes);
+        }
+    } catch (err) {
+        console.warn('[Eval] Failed to log/schedule probe', err);
     }
 }
 
@@ -6531,6 +7021,56 @@ async function autoCheckAnswer() {
     const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck?.settings || {}), ...(studyState.settings || {}) };
     const checkResult = checkAnswerForgivingly(userAnswer, correctAnswer, settings);
 
+    // Handle Probe
+    if (card.isProbe) {
+        const wasCorrect = checkResult.result === 'CORRECT' || checkResult.result === 'TYPO';
+        try {
+            const { store } = await getEvalModules();
+            const probeResult = {
+                id: card.probeId,
+                userID: 'default_user',
+                cardId: card.id,
+                deckId: card.deckId || currentDeckId,
+                delayHours: card.probeDelayHours,
+                sourcePolicy: card.probeSourcePolicy,
+                arm: card.probeArm,
+                experimentId: card.probeExperimentId,
+                scheduledAt: card.probeScheduledAt,
+                answeredAt: Date.now(),
+                wasCorrect: wasCorrect,
+                latencyMs: recallLatency
+            };
+            
+            await store.appendCompletedProbe('default_user', probeResult, studyState.evalConfig.probes.maxCompleted);
+            
+            studyState.pendingProbes = studyState.pendingProbes.filter(p => p.id !== card.probeId);
+            await store.savePendingProbes('default_user', studyState.pendingProbes);
+            
+            await store.appendEvalEvent('default_user', {
+                t: Date.now(),
+                type: 'probe',
+                sessionId: studyState.evalSessionId,
+                deckId: card.deckId || currentDeckId,
+                cardId: card.id,
+                policy: null,
+                meta: { probeId: card.probeId, wasCorrect }
+            }, studyState.evalConfig.logging.maxEvents);
+            
+            showToast(wasCorrect ? "Probe recorded!" : "Probe recorded.", wasCorrect ? "success" : "info");
+        } catch (err) {
+            console.warn('[Eval] Failed to record probe', err);
+        }
+
+        userInput.value = '';
+        userInput.disabled = false;
+        userInput.classList.remove('correct', 'incorrect');
+        document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
+        document.getElementById('cardAnswerContent').classList.add('hidden');
+        
+        showNextCard();
+        return;
+    }
+
     userInput.disabled = true;
     document.querySelector('#cardView .flashcard').classList.add('is-flipped');
     document.getElementById('cardAnswerContent').classList.remove('hidden');
@@ -6543,15 +7083,20 @@ async function autoCheckAnswer() {
             userInput.classList.add('correct');
             showToast("Correct!", "success");
             logInteraction({ cardID: card.id, wasCorrect: true, userAnswer, recallLatency, answerFluency, totalCorrections: 0, attemptCount: 1, questionType: questionTypeForLog });
+            
+            await logEvalExposureOnce(card, true, recallLatency);
+
             setTimeout(() => moveCard(card, true, questionTypeForLog), 1200);
             break;
 
         case 'TYPO':
             userInput.classList.add('correct');
             feedbackMessage.textContent = `So close! The correct answer is: ${correctAnswer}`;
-            feedbackMessage.style.color = 'var(--primary-color)';
+            feedbackMessage.style.color = 'var(--deck-accent)';
 
             logInteraction({ cardID: card.id, wasCorrect: true, userAnswer, recallLatency, answerFluency, totalCorrections: checkResult.distance, attemptCount: 1, questionType: questionTypeForLog });
+
+            await logEvalExposureOnce(card, true, recallLatency);
 
             setTimeout(() => {
                 feedbackMessage.textContent = '';
@@ -6562,6 +7107,8 @@ async function autoCheckAnswer() {
         case 'INCORRECT':
             userInput.classList.add('incorrect');
             logInteraction({ cardID: card.id, wasCorrect: false, userAnswer, recallLatency, answerFluency, totalCorrections: 0, attemptCount: 1, questionType: questionTypeForLog });
+
+            await logEvalExposureOnce(card, false, recallLatency);
 
             const diffHtml = generateDiffHTML(userAnswer, correctAnswer);
             feedbackMessage.innerHTML = `<strong>Your answer:</strong> ${diffHtml}`;
@@ -6588,7 +7135,9 @@ async function autoCheckAnswer() {
             }
             break;
     }
-} async function updateUserBaseline() {
+}
+
+async function updateUserBaseline() {
     const allLogs = await getAllDataFromDB('interactionLogs');
     if (!allLogs || allLogs.length === 0) return;
 
@@ -6668,7 +7217,7 @@ async function autoCheckAnswer() {
     }
 }
 
-async function moveCard(card, correct, questionType = 'Flashcard') {
+async function moveCard(card, correct, questionType = 'Flashcard', reviewOptions = {}) {
     const deckIdForThisCard = card.deckId || currentDeckId;
     const deck = decks[deckIdForThisCard];
 
@@ -6692,29 +7241,14 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
         attemptCount: lastLog.attemptCount || 1
     }, userBaseline);
 
-    let fsrsResult;
-    if (currentMode === 'sequence') {
-        fsrsResult = await applySequenceFsrsUpdate(
-            card.id,
-            correct ? 'Good' : 'Hard',
-            new Date().toISOString(),
-            {
-                interactionLog: { ...lastLog, questionType },
-                iqs,
-                correct,
-                questionType
-            }
-        );
-    } else {
-        fsrsResult = await applyFsrsReviewUpdate(
-            cardInDeck || card,
-            deckIdForThisCard,
-            correct,
-            { ...lastLog, questionType },
-            iqs,
-            { questionType }
-        );
-    }
+    const fsrsResult = await applyFsrsReviewUpdate(
+        cardInDeck || card,
+        deckIdForThisCard,
+        correct,
+        { ...lastLog, questionType },
+        iqs,
+        { ...reviewOptions, questionType }
+    );
     const fsrsSnapshot = fsrsResult?.fsrsSnapshot || null;
     const implicitRating = fsrsResult?.rating ?? null;
     const newStability = fsrsResult?.state?.stability ?? null;
@@ -6739,163 +7273,6 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
         answerFluency: lastLog.answerFluency
     });
 
-    if (currentMode === 'sequence') {
-        const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
-        if (!currentChunk) {
-            showToast("Sequence chunk not found", "error");
-            return;
-        }
-        const deckSettings = decks[currentDeckId]?.settings || {};
-        const targetDate = deckSettings.examDate ? new Date(deckSettings.examDate) : new Date();
-        const knowledgeMap = studyState.knowledgeStates || new Map();
-        const retentionState = updatedKnowledgeState || knowledgeMap.get(card.id);
-        const retentionScore = calculateRetentionAtDate(retentionState, targetDate);
-        if (globalSettings.devMode) {
-            console.log('[Sequence] retention estimate:', retentionScore);
-        }
-
-        if (studyState.sequencePhase === 'Passive Review Quiz') {
-            studyState.currentCardIndex++;
-            if (studyState.currentCardIndex >= (studyState.roundCards?.length || 0)) {
-                studyState.roundCards = [];
-                moveToNextSequencePhase();
-            } else {
-                showNextCard();
-            }
-        } else if (studyState.sequencePhase === 'Forward Chaining') {
-            if (!studyState.sequenceForwardQueue || studyState.sequenceForwardQueue.length === 0) {
-                studyState.sequenceForwardQueue = currentChunk.map(c => c.id);
-            }
-            const queue = [...studyState.sequenceForwardQueue];
-            if (correct) {
-                studyState.currentCardIndex++;
-                if (studyState.currentCardIndex >= queue.length) {
-                    studyState.sequenceForwardQueue = [];
-                    moveToNextSequencePhase();
-                } else {
-                    studyState.sequenceForwardQueue = queue;
-                    showNextCard();
-                }
-            } else {
-                const currentId = queue[studyState.currentCardIndex];
-                queue.splice(studyState.currentCardIndex, 1);
-                queue.push(currentId);
-                studyState.sequenceForwardQueue = queue;
-                showToast("We'll circle back to that item soon.", "error");
-                showNextCard();
-            }
-        } else if (studyState.sequencePhase === 'Backward Chaining') {
-            if (!Array.isArray(studyState.sequenceMissedInChunk)) studyState.sequenceMissedInChunk = [];
-            if (!correct && card && !studyState.sequenceMissedInChunk.includes(card.id)) {
-                studyState.sequenceMissedInChunk.push(card.id);
-            }
-            studyState.currentCardIndex--;
-            if (studyState.currentCardIndex < 0) {
-                if (studyState.sequenceActiveChunkOverride) {
-                    studyState.sequenceActiveChunkOverride = null;
-                    studyState.sequenceMissedInChunk = [];
-                    moveToNextSequencePhase();
-                } else if (studyState.sequenceMissedInChunk.length > 0) {
-                    const backlog = (currentChunk || []).filter(c => studyState.sequenceMissedInChunk.includes(c.id));
-                    studyState.sequenceActiveChunkOverride = backlog;
-                    studyState.currentCardIndex = backlog.length - 1;
-                    showToast("Quick retry on the tricky ones.", "info");
-                    showNextCard();
-                } else {
-                    moveToNextSequencePhase();
-                }
-            } else {
-                showNextCard();
-            }
-        } else if (studyState.sequencePhase === 'Post-Drag Recall') {
-            studyState.currentCardIndex++;
-            if (studyState.currentCardIndex >= (studyState.roundCards?.length || 0)) {
-                studyState.roundCards = [];
-                studyState.sequencePhase = 'Drag and Drop';
-                moveToNextSequencePhase();
-            } else {
-                showNextCard();
-            }
-        } else if (studyState.sequencePhase === 'InterChunkReview') {
-            studyState.currentCardIndex++;
-            const reviewLength = studyState.roundCards ? studyState.roundCards.length : 0;
-            if (reviewLength === 0 || studyState.currentCardIndex >= reviewLength) {
-                studyState.sequencePhase = studyState.nextPhaseAfterReview;
-                studyState.nextPhaseAfterReview = null;
-                studyState.currentCardIndex = 0;
-                moveToNextSequencePhase();
-            } else {
-                showNextCard();
-            }
-        } else if (studyState.sequencePhase === 'Weakest Link') {
-            studyState.currentCardIndex++;
-            const weakestLength = studyState.roundCards ? studyState.roundCards.length : 0;
-            if (weakestLength === 0 || studyState.currentCardIndex >= weakestLength) {
-                studyState.currentCardIndex = 0;
-                studyState.sequencePhase = 'CheckWeakest';
-                moveToNextSequencePhase();
-            } else {
-                showNextCard();
-            }
-        }
-        await saveDataToDB('decks', decks[currentDeckId]);
-        return;
-    }
-
-    if (currentMode === 'learn') {
-        const knowledgeMap = studyState.knowledgeStates || new Map();
-        const updatedState = updatedKnowledgeState || knowledgeMap.get(card.id);
-        if (updatedState) knowledgeMap.set(card.id, updatedState);
-        const nowTime = new Date();
-        const cortex = await getCortexEngine();
-        const targetDate = cortex.buildTargetDate(deck, nowTime);
-        logLearnTargetSource(deck, nowTime, targetDate);
-        const activePool = Array.isArray(studyState.activeLearningPool) ? studyState.activeLearningPool : [];
-        const filteredPool = activePool.filter(c => !isCardMasteredForLearn(knowledgeMap.get(c.id), deck, targetDate));
-        studyState.activeLearningPool = filteredPool;
-        studyState.sessionCardIds = filteredPool.map(c => c.id);
-        if (filteredPool.length === 0) {
-            await updateSessionProgress();
-            showComplete();
-            await saveDataToDB('decks', decks[deckIdForThisCard]);
-            return;
-        }
-
-        studyState.currentCard = await cortex.pickNextCard(filteredPool, studyState.sessionState, deck, knowledgeMap);
-        if (!studyState.currentCard) {
-            await updateSessionProgress();
-            showComplete();
-            await saveDataToDB('decks', decks[deckIdForThisCard]);
-            return;
-        }
-
-        assignQuestionTypesToCards([studyState.currentCard], deckIdForThisCard, 'learn');
-        await updateSessionProgress();
-        showNextCard();
-        updateFocusMeter();
-        await saveDataToDB('decks', decks[deckIdForThisCard]);
-        return;
-    }
-
-
-    if (currentMode === 'exam') {
-        const stateForRetention = updatedKnowledgeState || await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
-        const planExamDate = studyState.examDate ? new Date(studyState.examDate) : null;
-        const deckExamDate = deck.settings?.examDate ? new Date(deck.settings.examDate) : null;
-        const examTargetDate = planExamDate || deckExamDate || new Date();
-        const cardTargetRetention = deck.settings?.targetRetention || studyState.targetRetention || 0.8;
-        const retention = calculateRetentionAtDate(stateForRetention, examTargetDate);
-
-        if (retention < cardTargetRetention) {
-            const queuedCard = { ...(cardInDeck || card), deckId: deckIdForThisCard, projectedRetention: retention };
-            dailyPriorityQueue.push(queuedCard);
-            dailyPriorityQueue.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
-        } else {
-            studyState.roundCards.splice(studyState.currentCardIndex, 1);
-            studyState.currentCardIndex--;
-        }
-    }
-
     if (currentMode === 'review') {
         if (correct) {
             const index = studyState.stillLearning.findIndex(c => c.id === card.id);
@@ -6919,244 +7296,7 @@ async function moveCard(card, correct, questionType = 'Flashcard') {
     await saveDataToDB('decks', decks[deckIdForThisCard]);
 }
 
-function ensureSequenceLinks(state) {
-    if (!state) return;
-    if (!state.sequenceLinks || typeof state.sequenceLinks !== 'object') {
-        state.sequenceLinks = { after: {}, before: {} };
-    } else {
-        state.sequenceLinks.after = state.sequenceLinks.after || {};
-        state.sequenceLinks.before = state.sequenceLinks.before || {};
-    }
-}
-
-function incrementLinkStat(bucket, targetId, correct, timestamp) {
-    if (!bucket[targetId]) {
-        bucket[targetId] = { correct: 0, wrong: 0, last: null };
-    }
-    bucket[targetId].correct += correct ? 1 : 0;
-    bucket[targetId].wrong += correct ? 0 : 1;
-    bucket[targetId].last = timestamp;
-}
-
-async function recordLinkResult({ direction = 'after', cueId, expectedId, correct = false, nowIso = null }) {
-    if (!cueId || !expectedId || cueId === expectedId) return;
-    const timestamp = nowIso || new Date().toISOString();
-    const knowledgeMap = studyState.knowledgeStates || new Map();
-    const cueState = knowledgeMap.get(cueId) || await getOrCreateKnowledgeState('default_user', cueId);
-    const expectedState = knowledgeMap.get(expectedId) || await getOrCreateKnowledgeState('default_user', expectedId);
-    ensureSequenceLinks(cueState);
-    ensureSequenceLinks(expectedState);
-    if (direction === 'after') {
-        incrementLinkStat(cueState.sequenceLinks.after, expectedId, correct, timestamp);
-        incrementLinkStat(expectedState.sequenceLinks.before, cueId, correct, timestamp);
-    } else {
-        incrementLinkStat(cueState.sequenceLinks.before, expectedId, correct, timestamp);
-        incrementLinkStat(expectedState.sequenceLinks.after, cueId, correct, timestamp);
-    }
-    knowledgeMap.set(cueId, cueState);
-    knowledgeMap.set(expectedId, expectedState);
-    await upsertKnowledgeState(cueState);
-    await upsertKnowledgeState(expectedState);
-    if (studyState.cortexDebugEnabled) {
-        console.log(`[Sequence] Link result ${correct ? 'correct' : 'wrong'} ${direction} ${cueId}->${expectedId}`);
-    }
-}
-
-function getWorstLinksInChunk(chunkIds, knowledgeStates = studyState.knowledgeStates, limit = 3) {
-    if (!Array.isArray(chunkIds) || chunkIds.length === 0) return [];
-    const entries = [];
-    const statesMap = knowledgeStates || new Map();
-    chunkIds.forEach(cardId => {
-        const state = statesMap.get(cardId);
-        if (!state || !state.sequenceLinks) return;
-        const { after = {}, before = {} } = state.sequenceLinks;
-        Object.entries(after).forEach(([nextId, stats]) => {
-            const total = (stats.correct || 0) + (stats.wrong || 0);
-            if (!total) return;
-            const weight = (stats.wrong || 0) / total;
-            entries.push({ direction: 'after', cueId: cardId, expectedId: nextId, weight });
-        });
-        Object.entries(before).forEach(([prevId, stats]) => {
-            const total = (stats.correct || 0) + (stats.wrong || 0);
-            if (!total) return;
-            const weight = (stats.wrong || 0) / total;
-            entries.push({ direction: 'before', cueId: cardId, expectedId: prevId, weight });
-        });
-    });
-    entries.sort((a, b) => (b.weight || 0) - (a.weight || 0));
-    return entries.slice(0, limit);
-}
-
-function computeMedian(values = []) {
-    const nums = values.filter(v => typeof v === 'number' && Number.isFinite(v)).sort((a, b) => a - b);
-    if (!nums.length) return 0;
-    const mid = Math.floor(nums.length / 2);
-    if (nums.length % 2 === 0) {
-        return (nums[mid - 1] + nums[mid]) / 2;
-    }
-    return nums[mid];
-}
-
-function buildSequenceActivityContext(chunkOverride = null) {
-    const deck = decks[currentDeckId];
-    const knowledgeMap = studyState.knowledgeStates || new Map();
-    const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
-    const chunk = chunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex] || [];
-    const projectedRetentions = chunk.map(card => {
-        const state = knowledgeMap.get(card.id);
-        const retention = calculateRetentionAtDate(state, targetDate);
-        return { stepId: card.id, retention: typeof retention === 'number' ? retention : 0 };
-    });
-    const medianRetention = computeMedian(projectedRetentions.map(entry => entry.retention));
-    const targetRetention = deck?.settings?.targetRetention || studyState.targetRetention || 0.8;
-    const missingEdgesCount = (studyState.sequenceMissingEdges?.length) || 0;
-    const recentLinkFailures = studyState.sequenceRecentLinkFailures || 0;
-    const timeSpent = studyState.sequenceChunkStartTime ? (Date.now() - studyState.sequenceChunkStartTime) / 1000 : 0;
-    return {
-        chunkIds: chunk.map(card => card.id),
-        projectedRetentions,
-        medianRetention,
-        targetRetention,
-        missingEdgesCount,
-        recentLinkFailures,
-        timeSpent,
-        lastActivity: studyState.sequenceLastActivity
-    };
-}
-
-function chooseNextSequenceActivity(ctx) {
-    if (!ctx) return { activity: 'Passive Review', reason: 'default fallback' };
-    const lastActivity = ctx.lastActivity === 'Link Drill' ? 'Drag and Drop' : ctx.lastActivity;
-    if (ctx.missingEdgesCount > 0 || ctx.recentLinkFailures >= 2) {
-        const reason = `link trouble (${ctx.missingEdgesCount} missing edges, ${ctx.recentLinkFailures} failures)`;
-        if (studyState.cortexDebugEnabled) {
-            console.log(`[Sequence Activity] Choosing LINK_DRILL because ${reason}`);
-        }
-        return { activity: 'Link Drill', reason };
-    }
-    if (ctx.medianRetention < (ctx.targetRetention || 0.8)) {
-        const reason = `median retention low (${ctx.medianRetention.toFixed(2)} < ${ctx.targetRetention.toFixed(2)})`;
-        if (studyState.cortexDebugEnabled) {
-            console.log(`[Sequence Activity] Choosing PASSIVE_REVIEW because ${reason}`);
-        }
-        return { activity: 'Passive Review', reason };
-    }
-    if (lastActivity === 'Passive Review') {
-        const reason = 'progressing to forward chaining';
-        if (studyState.cortexDebugEnabled) {
-            console.log(`[Sequence Activity] Choosing FORWARD_CHAIN because ${reason}`);
-        }
-        return { activity: 'Forward Chaining', reason };
-    }
-    if (lastActivity === 'Forward Chaining') {
-        const reason = 'progressing to backward chaining';
-        if (studyState.cortexDebugEnabled) {
-            console.log(`[Sequence Activity] Choosing BACKWARD_CHAIN because ${reason}`);
-        }
-        return { activity: 'Backward Chaining', reason };
-    }
-    if (lastActivity === 'Backward Chaining') {
-        const reason = 'progressing to drag & drop';
-        if (studyState.cortexDebugEnabled) {
-            console.log(`[Sequence Activity] Choosing DRAG_DROP because ${reason}`);
-        }
-        return { activity: 'Drag and Drop', reason };
-    }
-    const fallback = lastActivity === 'Drag and Drop' ? 'Passive Review' : 'Forward Chaining';
-    if (studyState.cortexDebugEnabled) {
-        console.log(`[Sequence Activity] Choosing ${fallback} as fallback`);
-    }
-    return { activity: fallback, reason: 'fallback cycle' };
-}
-
-function selectPassiveReviewTargets(chunk, deck = decks[currentDeckId]) {
-    if (!Array.isArray(chunk) || chunk.length === 0) return [];
-    const chunkSize = studyState.sequenceChunkSize || chunk.length;
-    let targetCount = Math.min(3, chunkSize);
-    if (targetCount < 2 && chunkSize >= 2) targetCount = 2;
-    targetCount = Math.min(targetCount, chunk.length);
-    const knowledgeMap = studyState.knowledgeStates || new Map();
-    const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
-    const entries = chunk.map(card => {
-        const state = knowledgeMap.get(card.id);
-        const retention = calculateRetentionAtDate(state, targetDate);
-        return {
-            card,
-            retention: typeof retention === 'number' ? retention : null
-        };
-    });
-    const priorityIds = new Set([
-        ...(studyState.sequenceMissedInChunk || []),
-        ...(studyState.sequenceMissingEdges || []).flatMap(edge => [edge.cueId, edge.expectedId]),
-        ...(studyState.sequenceLinkDrillQueue || []).flatMap(entry => [entry.cueId, entry.expectedId])
-    ]);
-    const prioritized = entries.filter(entry => priorityIds.has(entry.card.id));
-    const nonPrioritized = entries.filter(entry => !priorityIds.has(entry.card.id));
-    prioritized.sort((a, b) => (a.retention ?? 0) - (b.retention ?? 0));
-    nonPrioritized.sort((a, b) => (a.retention ?? 0) - (b.retention ?? 0));
-    const selected = [];
-    prioritized.forEach(entry => {
-        if (selected.length < targetCount) selected.push(entry);
-    });
-    nonPrioritized.forEach(entry => {
-        if (selected.length < targetCount) selected.push(entry);
-    });
-    if (selected.length < targetCount) {
-        const fallback = shuffleArray(chunk).filter(entry => !selected.some(selectedEntry => selectedEntry.card.id === entry.id));
-        for (const card of fallback) {
-            if (selected.length >= targetCount) break;
-            selected.push({ card, retention: null });
-        }
-    }
-    const retentions = selected.map(entry => [entry.card.id, entry.retention]);
-    if (studyState.cortexDebugEnabled) {
-        console.log('[Sequence Passive Review] targets', retentions);
-    }
-    return selected.map(entry => entry.card);
-}
-
-function buildLinkDrillQueue(options = {}) {
-    const queue = [];
-    const seen = new Set();
-    const addItem = (item) => {
-        if (!item || !item.cueId || !item.expectedId) return;
-        const key = `${item.direction}:${item.cueId}:${item.expectedId}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        queue.push(item);
-    };
-    (options.missingEdges || []).forEach(edge => addItem({ direction: edge.direction || 'after', cueId: edge.cueId, expectedId: edge.expectedId }));
-    const weakLinks = getWorstLinksInChunk(options.chunkIds || [], options.knowledgeStates, options.weakLimit || 3);
-    weakLinks.forEach(link => addItem(link));
-    if (options.boundaryLink) {
-        addItem(options.boundaryLink);
-    }
-    (options.previousQueue || []).forEach(item => addItem(item));
-    return queue;
-}
-
-function determineSequenceChunkSize(configuredSize, persistedSize, deck, sequenceCards, knowledgeStates) {
-    const normalizedPersisted = Number(persistedSize);
-    if (Number.isFinite(normalizedPersisted) && normalizedPersisted >= 3 && normalizedPersisted <= 10) {
-        return normalizedPersisted;
-    }
-    const normalizedConfigured = Number(configuredSize);
-    if (Number.isFinite(normalizedConfigured) && normalizedConfigured >= 3 && normalizedConfigured <= 10) {
-        return normalizedConfigured;
-    }
-    const targetDate = deck?.settings?.examDate ? new Date(deck.settings.examDate) : new Date();
-    const retentionValues = (sequenceCards || []).map(card => {
-        const state = (knowledgeStates || studyState.knowledgeStates || new Map()).get(card.id);
-        const retention = calculateRetentionAtDate(state, targetDate);
-        return typeof retention === 'number' && Number.isFinite(retention) ? retention : 0;
-    });
-    const median = computeMedian(retentionValues);
-    if (median < 0.55) return 3;
-    if (median < 0.75) return 5;
-    return 7;
-}
-
-function dontKnowAnswer() {
+async function dontKnowAnswer() {
     const card = getActiveCard();
     if (!card) return;
 
@@ -7169,6 +7309,10 @@ function dontKnowAnswer() {
         attemptCount: 1,
         userAnswer: "[Don't Know]"
     });
+    const recallLatency = (typeof currentInteractionLog?.questionLoadTime === 'number')
+        ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
+        : null;
+    await logEvalExposureOnce(card, false, recallLatency, { action: 'dont_know' });
 
     const deck = decks[currentDeckId];
     const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck?.settings || {}), ...(studyState.settings || {}) };
@@ -7204,63 +7348,20 @@ function dontKnowAnswer() {
         nextBtn.focus();
     }
 }
-
-
-
-
-async function markSpaced(quality) {
-    if (!isActionAllowed()) return;
-    const card = studyState.roundCards[studyState.currentCardIndex];
-    const cardInDeck = decks[currentDeckId].cards.find(c => c.id === card.id);
-    if (cardInDeck) {
-        await getFsrsEngine();
-        const fsrsRating = mapQualityToFsrsRating(quality);
-        const fsrsResult = await applyFsrsReviewUpdate(
-            cardInDeck,
-            currentDeckId,
-            quality >= 3,
-            {
-                recallLatency: null,
-                answerFluency: null,
-                totalCorrections: 0,
-                attemptCount: 1,
-                questionType: 'Spaced'
-            },
-            0.5,
-            { explicitFsrsRating: fsrsRating, questionType: 'Spaced' }
-        );
-        const fsrsSnapshot = fsrsResult?.fsrsSnapshot || cardInDeck.fsrs;
-        cardInDeck.fsrs = fsrsSnapshot;
-        await saveDataToDB('decks', decks[currentDeckId]);
-
-        if (analyticsManager) {
-            analyticsManager.trackSystemMetric('fsrs_review', fsrsResult?.rating ?? fsrsRating, {
-                deckId: currentDeckId,
-                due: fsrsSnapshot?.due || null,
-                stability: fsrsResult?.state?.stability || null,
-                questionType: 'Spaced'
-            }, 'info');
-        }
-    }
-    updateSessionStateMetrics(card.id, quality >= 3, { recallLatency: null, totalCorrections: 0, answerFluency: 0 });
-    studyState.currentCardIndex++;
-    showNextCard();
-}
-
 function markCorrect(isAutomated = false) {
     if (!isAutomated && !isActionAllowed()) return;
 
     const btn = document.getElementById('correctBtn');
     btn.classList.add('feedback-correct');
-    setTimeout(() => {
+    setTimeout(async () => {
         btn.classList.remove('feedback-correct');
         const card = getActiveCard();
         if (!card) return;
-        if (currentMode === 'spaced') {
-            markSpaced(4);
-        } else {
-            moveCard(card, true);
-        }
+        const responseLatency = (typeof currentInteractionLog?.questionLoadTime === 'number')
+            ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
+            : null;
+        await logEvalExposureOnce(card, true, responseLatency, { action: 'manual_grade' });
+        moveCard(card, true);
     }, 200);
 }
 function markIncorrect(isAutomated = false) {
@@ -7286,20 +7387,131 @@ function markIncorrect(isAutomated = false) {
 
     const btn = document.getElementById('incorrectBtn');
     btn.classList.add('feedback-incorrect');
-    setTimeout(() => {
+    setTimeout(async () => {
         btn.classList.remove('feedback-incorrect');
         const card = getActiveCard();
         if (!card) return;
-        if (currentMode === 'spaced') {
-            markSpaced(1);
-        } else {
-            moveCard(card, false);
-        }
+        const responseLatency = (typeof currentInteractionLog?.questionLoadTime === 'number')
+            ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
+            : null;
+        await logEvalExposureOnce(card, false, responseLatency, { action: 'manual_grade' });
+        moveCard(card, false);
     }, 200);
+}
+
+async function gradeSpaced(ratingLabel) {
+    if (currentMode !== 'spaced') return;
+    const card = studyState.roundCards?.[studyState.currentCardIndex];
+    if (!card) return;
+
+    if (!studyState.spacedAnswerShown) {
+        showAnswer();
+        return;
+    }
+
+    const deckId = currentDeckId;
+    const deck = decks[deckId];
+    const spacedButtons = document.getElementById('spacedRatingButtons');
+    if (spacedButtons) spacedButtons.classList.add('hidden');
+
+    const engine = await getFsrsEngine();
+    const ratings = engine.getRatings();
+    const ratingValue = typeof ratingLabel === 'number' ? ratingLabel : (ratings?.[ratingLabel] ?? ratings?.Good ?? 2);
+    const ratingName = typeof ratingLabel === 'string'
+        ? ratingLabel
+        : (Object.keys(ratings || {}).find(key => ratings[key] === ratingValue) || 'Good');
+
+    const now = new Date();
+    const recallLatency = typeof currentInteractionLog?.questionLoadTime === 'number'
+        ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
+        : null;
+    const totalCorrections = (currentInteractionLog?.backspaceCount || 0) + (currentInteractionLog?.deleteCount || 0);
+    const baseLog = {
+        ...currentInteractionLog,
+        recallLatency,
+        answerFluency: currentInteractionLog?.answerFluency || null,
+        totalCorrections,
+        attemptCount: currentInteractionLog?.attemptCount || 1,
+        questionType: 'Spaced'
+    };
+
+    await logInteraction({
+        cardID: card.id,
+        wasCorrect: ratingName !== 'Again',
+        recallLatency,
+        answerFluency: baseLog.answerFluency,
+        totalCorrections,
+        attemptCount: baseLog.attemptCount,
+        questionType: 'Spaced',
+        fsrsRating: ratingName
+    });
+
+    const userBaseline = getFsrsBaseline();
+    const iqs = calculateIQS({
+        recallLatency: baseLog.recallLatency || 2000,
+        answerFluency: baseLog.answerFluency || 5,
+        totalCorrections,
+        attemptCount: baseLog.attemptCount
+    }, userBaseline);
+
+    const fsrsResult = await applyFsrsReviewUpdate(
+        card,
+        deckId,
+        ratingName !== 'Again',
+        baseLog,
+        iqs,
+        { explicitFsrsRating: ratingValue, nowOverride: now, questionType: 'Spaced' }
+    );
+
+    const fsrsSnapshot = fsrsResult?.fsrsSnapshot || null;
+    const stability = fsrsResult?.state?.stability ?? null;
+    if (deck?.cards) {
+        const inDeck = deck.cards.find(c => c.id === card.id);
+        if (inDeck && fsrsSnapshot) {
+            inDeck.fsrs = fsrsSnapshot;
+        }
+    }
+    if (fsrsResult?.state) {
+        studyState.knowledgeStates?.set(card.id, fsrsResult.state);
+    }
+
+    if (analyticsManager) {
+        analyticsManager.trackSystemMetric('fsrs_review', ratingName, {
+            deckId,
+            due: fsrsSnapshot?.due || null,
+            stability,
+            questionType: 'Spaced'
+        }, 'info');
+    }
+
+    const meta = studyState.spacedMeta.get(card.id) || { type: 'due', seen: false, requeued: false };
+    const counts = studyState.spacedCounts || { dueRemaining: 0, newRemaining: 0 };
+    if (!meta.seen) {
+        if (meta.type === 'new') counts.newRemaining = Math.max(0, counts.newRemaining - 1);
+        else counts.dueRemaining = Math.max(0, counts.dueRemaining - 1);
+        meta.seen = true;
+    }
+
+    const shouldRequeue = ratingName === 'Again' && studyState.settings?.spacedRequeueAgain;
+    if (shouldRequeue) {
+        studyState.roundCards.push(card);
+        if (meta.type === 'new') counts.newRemaining += 1; else counts.dueRemaining += 1;
+        meta.requeued = true;
+    }
+    studyState.spacedMeta.set(card.id, meta);
+    studyState.spacedCounts = counts;
+
+    studyState.currentCardIndex++;
+    studyState.spacedAnswerShown = false;
+    if (deck) {
+        await saveDataToDB('decks', deck);
+    }
+    showNextCard();
 }
 
 let studyAccentModule = null;
 let testAccentModule = null;
+let activeStudyInput = null;
 
 function insertCharacterAtCursor(input, char) {
     if (!input || input.disabled) return;
@@ -7319,13 +7531,18 @@ function AccentModule(config) {
     this.moduleEl = document.getElementById(config.moduleId);
     this.toggleBtn = document.getElementById(config.toggleId);
     this.buttonsContainer = document.getElementById(config.buttonsId);
-    this.inputEl = document.getElementById(config.inputId);
     this.getDeck = config.getDeck;
+    this.getInputEl = typeof config.getInputEl === 'function'
+        ? () => config.getInputEl()
+        : () => (config.inputId ? document.getElementById(config.inputId) : null);
     this.priorityBase = null;
     this.isExpanded = false;
     this.lastDeckId = null;
     this.lastRenderedHtml = '';
-    this.isReady = Boolean(this.moduleEl && this.toggleBtn && this.buttonsContainer && this.inputEl && this.getDeck);
+    this.inputEl = null;
+    this.inputChangeListener = null;
+    this.visibilityObserver = null;
+    this.isReady = Boolean(this.moduleEl && this.toggleBtn && this.buttonsContainer && this.getDeck);
     if (!this.isReady) {
         return;
     }
@@ -7337,13 +7554,7 @@ function AccentModule(config) {
         this.toggle();
     });
     this.buttonsContainer.addEventListener('click', (event) => this.handleAccentClick(event));
-    this.inputEl.addEventListener('input', () => this.handleInputChange());
-    const observer = new MutationObserver(() => {
-        const shouldShow = !this.inputEl.classList.contains('hidden');
-        this.updateVisibility(shouldShow);
-    });
-    observer.observe(this.inputEl, { attributes: true, attributeFilter: ['class'] });
-    this.updateVisibility(!this.inputEl.classList.contains('hidden'));
+    this.setInputEl(this.getInputEl());
 }
 
 AccentModule.prototype.getAccentUtils = function () {
@@ -7381,6 +7592,38 @@ AccentModule.prototype.handleInputChange = function () {
         this.priorityBase = baseKey;
         this.renderButtonsForCurrentDeck();
     }
+};
+
+AccentModule.prototype.setInputEl = function (inputEl) {
+    if (this.inputEl === inputEl) {
+        this.updateVisibility(this.shouldShowForInput(inputEl));
+        return;
+    }
+    if (this.inputEl && this.inputChangeListener) {
+        this.inputEl.removeEventListener('input', this.inputChangeListener);
+    }
+    if (this.visibilityObserver) {
+        this.visibilityObserver.disconnect();
+    }
+    this.inputEl = inputEl || null;
+    if (this.inputEl) {
+        this.inputChangeListener = () => this.handleInputChange();
+        this.inputEl.addEventListener('input', this.inputChangeListener);
+        this.visibilityObserver = new MutationObserver(() => {
+            this.updateVisibility(this.shouldShowForInput(this.inputEl));
+        });
+        this.visibilityObserver.observe(this.inputEl, { attributes: true, attributeFilter: ['class', 'disabled'] });
+    } else {
+        this.inputChangeListener = null;
+        this.visibilityObserver = null;
+    }
+    this.updateVisibility(this.shouldShowForInput(this.inputEl));
+};
+
+AccentModule.prototype.shouldShowForInput = function (inputEl) {
+    if (!inputEl) return false;
+    if (inputEl.disabled) return false;
+    return !inputEl.classList.contains('hidden');
 };
 
 AccentModule.prototype.toggle = function () {
@@ -7438,11 +7681,14 @@ AccentModule.prototype.renderButtonsForCurrentDeck = function () {
 };
 
 AccentModule.prototype.updateVisibility = function (shouldShow) {
+    if (!this.inputEl && typeof this.getInputEl === 'function') {
+        this.setInputEl(this.getInputEl());
+    }
     const accentUtils = this.getAccentUtils();
     const deck = this.getDeck?.();
     const accentData = deck && accentUtils?.ensureDeckAccentMetadata ? accentUtils.ensureDeckAccentMetadata(deck) : { accents: [], baseMap: {} };
     const hasAccents = Array.isArray(accentData.accents) && accentData.accents.length > 0;
-    const displayModule = shouldShow && hasAccents;
+    const displayModule = shouldShow && hasAccents && !!this.inputEl;
     this.moduleEl.classList.toggle('hidden', !displayModule);
     if (!displayModule) {
         this.collapse();
@@ -7461,7 +7707,7 @@ AccentModule.prototype.updateVisibility = function (shouldShow) {
 
 AccentModule.prototype.refresh = function () {
     this.lastDeckId = null;
-    this.updateVisibility(!this.inputEl.classList.contains('hidden'));
+    this.setInputEl(this.getInputEl());
 };
 
 function initializeAccentModules() {
@@ -7471,7 +7717,7 @@ function initializeAccentModules() {
             moduleId: 'deckAccentModule',
             toggleId: 'deckAccentToggle',
             buttonsId: 'deckAccentButtons',
-            inputId: 'writeAnswerInput',
+            getInputEl: () => activeStudyInput || document.getElementById('writeAnswerInput'),
             ariaLabel: 'Deck accent characters',
             getDeck: () => decks[currentDeckId]
         });
@@ -7479,6 +7725,10 @@ function initializeAccentModules() {
     } else {
         studyAccentModule.refresh();
     }
+    if (!activeStudyInput) {
+        activeStudyInput = document.getElementById('writeAnswerInput');
+    }
+    studyAccentModule?.setInputEl(activeStudyInput);
     if (!testAccentModule || !testAccentModule.isReady) {
         const module = new AccentModule({
             moduleId: 'testAccentModule',
@@ -7492,6 +7742,15 @@ function initializeAccentModules() {
     } else {
         testAccentModule.refresh();
     }
+}
+
+function setActiveStudyInput(inputEl) {
+    activeStudyInput = inputEl || null;
+    if (studyAccentModule?.setInputEl) {
+        const fallbackInput = document.getElementById('writeAnswerInput');
+        studyAccentModule.setInputEl(activeStudyInput || fallbackInput);
+    }
+    updateAccentButtonsVisibility();
 }
 
 let currentAutocompleteSuggestion = null;
@@ -7757,11 +8016,17 @@ async function endSession() {
     if (studyState.startTime) {
         const duration = Math.round((new Date() - studyState.startTime) / 1000);
         analyticsData.totalStudyTime += duration;
+        let sessionAccuracy = null;
+        if (currentMode === 'sequence' && studyState.sequenceSession?.accuracyLog?.length) {
+            const accArr = studyState.sequenceSession.accuracyLog;
+            sessionAccuracy = accArr.reduce((a, b) => a + b, 0) / accArr.length;
+        }
         analyticsData.sessions.unshift({
             date: new Date().toISOString(),
             deckName: decks[currentDeckId]?.name || 'Unknown Deck',
             mode: currentMode,
-            duration: duration
+            duration: duration,
+            accuracy: sessionAccuracy
         });
         if (analyticsData.sessions.length > 50) analyticsData.sessions.pop();
         await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
@@ -7833,17 +8098,12 @@ async function restartStudy() {
         } else if (currentMode === 'review') {
             deck.reviewState = { stillLearning: [...deck.cards], correct: [], currentRound: 1, lastRoundIncorrect: [] };
             await saveDataToDB('decks', deck);
-        } else if (currentMode === 'spaced') {
-            const fsrsEngine = await getFsrsEngine();
-            deck.cards.forEach(card => card.fsrs = serializeFsrsCard(fsrsEngine.prepareCard()));
-            await saveDataToDB('decks', deck);
         }
 
         showToast("Progress has been reset.", "success");
 
         if (currentMode === 'learn') startLearnMode(currentDeckId);
         else if (currentMode === 'review') startReviewMode(currentDeckId);
-        else if (currentMode === 'spaced') startSpacedLearning(currentDeckId);
 
     } catch (error) {
         console.error("Failed to reset knowledge state:", error);
@@ -7855,30 +8115,55 @@ function isActionAllowed() {
     if (activeView !== 'studyMode' || document.getElementById('cardView').classList.contains('hidden')) {
         return false;
     }
-    const correctBtnHidden = document.getElementById('correctBtn').classList.contains('hidden');
-    const advancedBtnsHidden = document.getElementById('advancedAnswerButtons').classList.contains('hidden');
-    return !correctBtnHidden || !advancedBtnsHidden;
+    const correctBtn = document.getElementById('correctBtn');
+    const incorrectBtn = document.getElementById('incorrectBtn');
+    const correctBtnVisible = correctBtn && !correctBtn.classList.contains('hidden');
+    const incorrectBtnVisible = incorrectBtn && !incorrectBtn.classList.contains('hidden');
+    return correctBtnVisible || incorrectBtnVisible;
 }
 
 function setupKeyboardControls() {
     document.addEventListener('keydown', (e) => {
         if (document.querySelector('.modal.show')) return;
-
-        // If the user is typing in a generic input/textarea or a contentEditable element,
-        // don't intercept keys like Space — but allow handling when the focused element
-        // is the sequence answer field (`writeAnswerInput`) so Enter can submit there.
-        try {
-            const active = document.activeElement;
-            if (active) {
-                const tag = (active.tagName || '').toUpperCase();
-                const type = (active.type || '').toLowerCase();
-                const isTextInput = tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'search', 'email', 'password', 'tel', 'url'].includes(type));
-                const isAnswerField = active.id === 'writeAnswerInput';
-                if ((isTextInput || active.isContentEditable) && !isAnswerField) return;
-            }
-        } catch (err) {
-            // ignore errors and continue with existing logic
+        const active = document.activeElement;
+        const tag = (active?.tagName || '').toUpperCase();
+        const type = (active?.type || '').toLowerCase();
+        const isTextInput = tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'search', 'email', 'password', 'tel', 'url'].includes(type));
+        const isContentEditable = active?.isContentEditable;
+        const isSequenceAnswer = active?.id === 'writeAnswerInput';
+        const isPracticeAnswer = active?.id === 'testAnswerInput';
+        const isTyping = isTextInput || isContentEditable;
+        const allowWhileTyping = isSequenceAnswer || isPracticeAnswer;
+        if (isTyping && !allowWhileTyping) {
+            if (e.key === 'Escape') active?.blur();
+            return;
         }
+
+        const practiceTestView = document.getElementById('practiceTestView');
+        if (practiceTestView && !practiceTestView.classList.contains('hidden')) {
+            if (e.key === 'Enter' || e.key === 'ArrowUp') {
+                const nextBtn = document.getElementById('testNextBtn');
+                const checkBtn = document.getElementById('testCheckAnswerBtn');
+                const showBtn = document.getElementById('testShowAnswerBtn');
+                if (nextBtn && !nextBtn.classList.contains('hidden')) {
+                    e.preventDefault();
+                    nextBtn.click();
+                    return;
+                }
+                if (checkBtn && !checkBtn.classList.contains('hidden')) {
+                    if (isPracticeAnswer) e.preventDefault();
+                    checkBtn.click();
+                    return;
+                }
+                if (showBtn && !showBtn.classList.contains('hidden')) {
+                    e.preventDefault();
+                    showBtn.click();
+                    return;
+                }
+            }
+            return;
+        }
+
         if (activeView === 'studyMode' && !document.getElementById('progressView').classList.contains('hidden')) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -7889,43 +8174,33 @@ function setupKeyboardControls() {
 
         if (activeView !== 'studyMode' || document.getElementById('cardView').classList.contains('hidden')) return;
 
-        if (currentMode === 'sequence' && (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === ' ')) {
-            const writeInput = document.getElementById('writeAnswerInput');
-            const dragDropBtn = document.getElementById('checkDragDropBtn');
-            const passiveReviewView = document.getElementById('passiveReviewView');
+        const writeInput = document.getElementById('writeAnswerInput');
 
-            if (!writeInput.classList.contains('hidden') && !writeInput.disabled) {
-                e.preventDefault();
-                checkSequenceAnswer();
-                return;
-            }
-
-            if (dragDropBtn && !dragDropBtn.classList.contains('hidden')) {
-                e.preventDefault();
-                checkDragDropOrder();
-                return;
-            }
-
-            if (passiveReviewView && !passiveReviewView.classList.contains('hidden') && (e.key === 'Enter' || e.key === ' ')) {
-                e.preventDefault();
-                moveToNextSequencePhase();
-                return;
-            }
-        }
-
-        const advancedButtons = document.getElementById('advancedAnswerButtons');
-        const simpleCorrectBtn = document.getElementById('correctBtn');
-        const showAnswerBtn = document.getElementById('showAnswerBtn');
-
-        if (!advancedButtons.classList.contains('hidden')) {
+        const canSubmitAnswer = writeInput && !writeInput.classList.contains('hidden') && !writeInput.disabled;
+        if (canSubmitAnswer && ((e.key === 'Enter' && !e.shiftKey) || e.key === 'ArrowUp')) {
             e.preventDefault();
-            switch (e.key) {
-                case '1': markSpaced(1); break;
-                case '2': markSpaced(2); break;
-                case '3': markSpaced(3); break;
-                case '4': markSpaced(4); break;
+            if (writeInput.value.trim() === '') {
+                showToast('Please enter an answer', 'error');
+            } else {
+                autoCheckAnswer();
             }
             return;
+        }
+        if (isTyping) return;
+
+        const simpleCorrectBtn = document.getElementById('correctBtn');
+        const showAnswerBtn = document.getElementById('showAnswerBtn');
+        const spacedButtons = document.getElementById('spacedRatingButtons');
+        const spacedVisible = currentMode === 'spaced' && spacedButtons && !spacedButtons.classList.contains('hidden');
+
+        if (spacedVisible) {
+            const ratingKeyMap = { '1': 'Again', 'a': 'Again', '2': 'Hard', 'h': 'Hard', '3': 'Good', 'g': 'Good', '4': 'Easy', 'e': 'Easy' };
+            const key = (e.key || '').toLowerCase();
+            if (ratingKeyMap[key]) {
+                e.preventDefault();
+                gradeSpaced(ratingKeyMap[key]);
+                return;
+            }
         }
 
         if (!simpleCorrectBtn.classList.contains('hidden')) {
@@ -7936,7 +8211,6 @@ function setupKeyboardControls() {
         }
 
         if (!showAnswerBtn.classList.contains('hidden')) {
-            if (document.activeElement.tagName === 'TEXTAREA') return;
             if (e.key === ' ' || e.key === 'Enter') {
                 e.preventDefault();
                 showAnswer();
@@ -7977,6 +8251,11 @@ function openDeckSettingsModal(deckId) {
     if (!deck) return;
 
     const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
+    const isSequenceDeck = deck.typeHint === 'Sequence';
+    const sequenceSection = document.getElementById('deckSettingsSequenceSection');
+    if (sequenceSection) {
+        sequenceSection.classList.toggle('hidden', !isSequenceDeck);
+    }
 
     const hasExamDate = !!settings.examDate;
     document.getElementById('deckSettingsExamModeToggle').checked = hasExamDate;
@@ -8020,6 +8299,28 @@ function openDeckSettingsModal(deckId) {
     document.getElementById('punctuationToggle').checked = settings.punctuation || false;
     document.getElementById('reviewOrder').value = settings.reviewOrder || 'random';
     document.getElementById('enablePomodoroToggle').checked = settings.enablePomodoro || false;
+
+    document.getElementById('deckSettingsSpacedNewPerDay').value = Number.isFinite(settings.spacedNewPerDay)
+        ? settings.spacedNewPerDay
+        : DEFAULT_DECK_SETTINGS.spacedNewPerDay;
+    document.getElementById('deckSettingsSpacedMaxReviews').value = Number.isFinite(settings.spacedMaxReviewsPerDay)
+        ? settings.spacedMaxReviewsPerDay
+        : DEFAULT_DECK_SETTINGS.spacedMaxReviewsPerDay;
+    document.getElementById('deckSettingsSpacedOrder').value = settings.spacedOrder || DEFAULT_DECK_SETTINGS.spacedOrder;
+    document.getElementById('deckSettingsSpacedRequeueAgain').checked = settings.spacedRequeueAgain ?? DEFAULT_DECK_SETTINGS.spacedRequeueAgain;
+    document.getElementById('deckSettingsSpacedShowIntervals').checked = settings.spacedShowIntervals ?? DEFAULT_DECK_SETTINGS.spacedShowIntervals;
+    if (isSequenceDeck) {
+        const seqMinInput = document.getElementById('deckSettingsSequenceChunkMin');
+        const seqMaxInput = document.getElementById('deckSettingsSequenceChunkMax');
+        const seqStartInput = document.getElementById('deckSettingsSequenceStartChunk');
+        const seqMixInput = document.getElementById('deckSettingsSequenceMixingThreshold');
+        const seqAllowInput = document.getElementById('deckSettingsSequenceAllowMixed');
+        if (seqMinInput) seqMinInput.value = settings.sequenceChunkMin ?? DEFAULT_DECK_SETTINGS.sequenceChunkMin;
+        if (seqMaxInput) seqMaxInput.value = settings.sequenceChunkMax ?? DEFAULT_DECK_SETTINGS.sequenceChunkMax;
+        if (seqStartInput) seqStartInput.value = settings.sequenceStartChunk ?? DEFAULT_DECK_SETTINGS.sequenceStartChunk;
+        if (seqMixInput) seqMixInput.value = settings.sequenceMixingThreshold ?? DEFAULT_DECK_SETTINGS.sequenceMixingThreshold;
+        if (seqAllowInput) seqAllowInput.checked = settings.sequenceAllowMixed !== false;
+    }
 
     document.getElementById('deckSettingsModal').classList.add('show');
 
@@ -8074,6 +8375,58 @@ async function completeSaveDeckSettings(deck) {
     deck.settings.punctuation = document.getElementById('punctuationToggle').checked;
 
     deck.settings.reviewOrder = document.getElementById('reviewOrder').value;
+
+    const spacedNewPerDay = parseDeckNumericInput(
+        document.getElementById('deckSettingsSpacedNewPerDay').value,
+        DEFAULT_DECK_SETTINGS.spacedNewPerDay,
+        0,
+        500
+    );
+    const spacedMaxReviewsPerDay = parseDeckNumericInput(
+        document.getElementById('deckSettingsSpacedMaxReviews').value,
+        DEFAULT_DECK_SETTINGS.spacedMaxReviewsPerDay,
+        1,
+        10000
+    );
+    deck.settings.spacedNewPerDay = spacedNewPerDay;
+    deck.settings.spacedMaxReviewsPerDay = spacedMaxReviewsPerDay;
+    deck.settings.spacedOrder = document.getElementById('deckSettingsSpacedOrder').value || DEFAULT_DECK_SETTINGS.spacedOrder;
+    deck.settings.spacedRequeueAgain = document.getElementById('deckSettingsSpacedRequeueAgain').checked;
+    deck.settings.spacedShowIntervals = document.getElementById('deckSettingsSpacedShowIntervals').checked;
+    if (deck.typeHint === 'Sequence') {
+        const seqMin = parseDeckNumericInput(
+            document.getElementById('deckSettingsSequenceChunkMin')?.value,
+            deck.settings.sequenceChunkMin ?? DEFAULT_DECK_SETTINGS.sequenceChunkMin,
+            1,
+            999
+        );
+        const seqMaxRaw = parseDeckNumericInput(
+            document.getElementById('deckSettingsSequenceChunkMax')?.value,
+            deck.settings.sequenceChunkMax ?? DEFAULT_DECK_SETTINGS.sequenceChunkMax,
+            seqMin,
+            999
+        );
+        const seqMax = Math.max(seqMin, seqMaxRaw);
+        const seqStartRaw = parseDeckNumericInput(
+            document.getElementById('deckSettingsSequenceStartChunk')?.value,
+            deck.settings.sequenceStartChunk ?? DEFAULT_DECK_SETTINGS.sequenceStartChunk,
+            seqMin,
+            seqMax
+        );
+        const seqStart = Math.min(Math.max(seqStartRaw, seqMin), seqMax);
+        const thresholdInput = document.getElementById('deckSettingsSequenceMixingThreshold');
+        const thresholdRaw = thresholdInput ? parseFloat(thresholdInput.value) : Number.NaN;
+        const sequenceMixingThreshold = Number.isFinite(thresholdRaw)
+            ? Math.min(1, Math.max(0, thresholdRaw))
+            : (deck.settings.sequenceMixingThreshold ?? DEFAULT_DECK_SETTINGS.sequenceMixingThreshold);
+        const allowMixedInput = document.getElementById('deckSettingsSequenceAllowMixed');
+
+        deck.settings.sequenceChunkMin = seqMin;
+        deck.settings.sequenceChunkMax = seqMax;
+        deck.settings.sequenceStartChunk = seqStart;
+        deck.settings.sequenceMixingThreshold = sequenceMixingThreshold;
+        deck.settings.sequenceAllowMixed = allowMixedInput ? allowMixedInput.checked : deck.settings.sequenceAllowMixed;
+    }
 
     const selectedMode = document.querySelector('input[name="deckSettingsStudyMode"]:checked');
     if (selectedMode) {
@@ -8136,6 +8489,13 @@ async function importData() {
                     if (importedData.deck && importedData.knowledgeStateData) {
                         const deckData = importedData.deck;
                         const knowledgeData = importedData.knowledgeStateData;
+                        const resolvedType = deckData.typeHint || typeHint;
+                        const extraFields = resolvedType === 'Sequence'
+                            ? { sequenceMeta: deckData.sequenceMeta || {} }
+                            : {};
+                        if (resolvedType === 'Sequence') {
+                            normalizeSequenceDeck(deckData);
+                        }
 
                         const oldIdToNewIdMap = new Map();
                         deckData.cards.forEach((card, index) => {
@@ -8144,52 +8504,136 @@ async function importData() {
                             card.id = newId;
                             oldIdToNewIdMap.set(oldId, newId);
 
-                            if (typeHint === 'Sequence' && typeof card.order !== 'number') {
+                            if (resolvedType === 'Sequence' && typeof card.order !== 'number') {
                                 card.order = index + 1;
                             }
                         });
 
-                        const newDeckId = await createNewDeck(name, category, deckData.cards, deckData.notes || '', typeHint);
+                        const newDeckId = await createNewDeck(name, category, deckData.cards, deckData.notes || '', resolvedType, extraFields);
 
                         const transaction = db.transaction(['userKnowledgeState'], 'readwrite');
                         const store = transaction.objectStore('userKnowledgeState');
-                        knowledgeData.forEach(state => {
-                            const newCardId = oldIdToNewIdMap.get(state.cardID || state.cardId);
-                            if (newCardId) {
+                        let sequenceGraphModule = null;
+                        const loadSequenceGraphModule = async () => {
+                            if (sequenceGraphModule) return sequenceGraphModule;
+                            sequenceGraphModule = await import('../core/sequence-graph.js');
+                            return sequenceGraphModule;
+                        };
+                        const getSequenceSteps = (sequenceId) => {
+                            const id = String(sequenceId || '');
+                            const steps = (deckData.cards || []).filter(c => String(c.sequenceId || '') === id);
+                            steps.sort((a, b) => {
+                                const aIdx = typeof a.stepIndex === 'number' ? a.stepIndex : (a.order || 0);
+                                const bIdx = typeof b.stepIndex === 'number' ? b.stepIndex : (b.order || 0);
+                                return aIdx - bIdx;
+                            });
+                            return steps;
+                        };
+                        const mapSequenceGraphRecord = async (graph, idMap, newSteps) => {
+                            if (!graph || typeof graph !== 'object') return null;
+                            const module = await loadSequenceGraphModule();
+                            const mappedEdges = {};
+                            const mappedNodes = {};
+                            const edges = graph.edges && typeof graph.edges === 'object' ? graph.edges : {};
+                            const nodes = graph.nodes && typeof graph.nodes === 'object' ? graph.nodes : {};
+                            Object.entries(edges).forEach(([key, value]) => {
+                                if (typeof key !== 'string' || !key) return;
+                                const parts = key.split('->');
+                                if (parts.length !== 2) {
+                                    mappedEdges[key] = value;
+                                    return;
+                                }
+                                const from = idMap.get(parts[0]) || parts[0];
+                                const to = idMap.get(parts[1]) || parts[1];
+                                mappedEdges[`${from}->${to}`] = value;
+                            });
+                            Object.entries(nodes).forEach(([key, value]) => {
+                                if (typeof key !== 'string' || !key) return;
+                                const mapped = idMap.get(key) || key;
+                                mappedNodes[mapped] = value;
+                            });
+                            const stepsHash = module.hashSequenceSteps(newSteps);
+                            return {
+                                ...graph,
+                                version: 1,
+                                stepsHash,
+                                edges: mappedEdges,
+                                nodes: mappedNodes,
+                                updatedAt: Date.now()
+                            };
+                        };
+
+                        for (const state of knowledgeData) {
+                            if (state && state.sequenceGraph && typeof state.sequenceGraph === 'object') {
+                                const sequenceId = state.sequenceId || state.sequenceID || null;
+                                const steps = getSequenceSteps(sequenceId);
+                                const mappedGraph = steps.length
+                                    ? await mapSequenceGraphRecord(state.sequenceGraph, oldIdToNewIdMap, steps)
+                                    : null;
+                                const graphCardId = `sequenceGraph:${newDeckId}:${String(sequenceId || 'default')}`;
                                 const normalizedState = prepareKnowledgeRecord({
                                     ...state,
-                                    cardID: newCardId,
-                                    deckID: newDeckId || state.deckID || state.deckId || null
+                                    cardID: graphCardId,
+                                    deckID: newDeckId,
+                                    sequenceId: String(sequenceId || 'default'),
+                                    kind: 'sequenceGraph',
+                                    sequenceGraph: mappedGraph || state.sequenceGraph,
+                                    fsrs: null,
+                                    lastModified: new Date().toISOString()
                                 });
                                 if (normalizedState) {
                                     store.put(normalizedState);
                                 } else {
-                                    console.warn('[IMPORT] Skipped malformed knowledge state', state);
+                                    console.warn('[IMPORT] Skipped malformed sequence graph state', state);
                                 }
+                                continue;
                             }
-                        });
+
+                            const newCardId = oldIdToNewIdMap.get(state.cardID || state.cardId);
+                            if (!newCardId) continue;
+                            const normalizedState = prepareKnowledgeRecord({
+                                ...state,
+                                cardID: newCardId,
+                                deckID: newDeckId || state.deckID || state.deckId || null
+                            });
+                            if (normalizedState) {
+                                store.put(normalizedState);
+                            } else {
+                                console.warn('[IMPORT] Skipped malformed knowledge state', state);
+                            }
+                        }
 
                         showToast(`Deck "${name}" and its learning progress restored!`, 'success');
 
+                    } else if (importedData.type === 'sequence' && Array.isArray(importedData.sequences)) {
+                        const converted = convertExternalSequenceJson(importedData);
+                        const newDeckId = await createNewDeck(
+                            name || importedData.title || 'Sequence Deck',
+                            category,
+                            converted.cards,
+                            importedData.deckNotes || '',
+                            'Sequence',
+                            { sequenceMeta: converted.sequenceMeta }
+                        );
+                        const deckRecord = decks[newDeckId];
+                        if (deckRecord) {
+                            deckRecord.sequenceMeta = converted.sequenceMeta;
+                            await saveDataToDB('decks', deckRecord);
+                        }
+                        showToast(`Sequence deck "${name || importedData.title || 'New Sequence'}" imported!`, 'success');
                     } else {
                         if (!importedData.name || !Array.isArray(importedData.cards)) throw new Error('Invalid JSON format.');
-
-                        if (typeHint === 'Sequence') {
-                            importedData.cards.forEach((card, index) => {
-                                if (typeof card.order !== 'number') {
-                                    card.order = index + 1;
-                                }
-                            });
-                        }
 
                         await createNewDeck(name, category, importedData.cards, importedData.notes || '', typeHint);
                         showToast(`Deck "${name}" imported successfully with ${importedData.cards.length} cards!`);
                     }
 
                 } else if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
-                    const cards = parseTextData(e.target.result, file.name.endsWith('.csv') ? ',' : '\t', typeHint);
-                    if (cards.length > 0) {
-                        await createNewDeck(name, category, cards, '', typeHint);
+                    const parsed = parseTextData(e.target.result, file.name.endsWith('.csv') ? ',' : '\t', typeHint);
+                    const cards = Array.isArray(parsed) ? parsed : parsed.cards;
+                    const sequenceMeta = parsed.sequenceMeta || {};
+                    if (cards && cards.length > 0) {
+                        await createNewDeck(name, category, cards, '', typeHint, typeHint === 'Sequence' ? { sequenceMeta } : {});
                         showToast(`Deck "${name}" imported successfully with ${cards.length} cards!`);
                     } else { throw new Error('No valid cards found in file.'); }
                 }
@@ -8200,9 +8644,11 @@ async function importData() {
         reader.readAsText(file);
     } else if (pastedText.trim()) {
         try {
-            const cards = parseTextData(pastedText.trim(), '\t', typeHint);
-            if (cards.length > 0) {
-                await createNewDeck(name, category, cards, '', typeHint);
+            const parsed = parseTextData(pastedText.trim(), '\t', typeHint);
+            const cards = Array.isArray(parsed) ? parsed : parsed.cards;
+            const sequenceMeta = parsed.sequenceMeta || {};
+            if (cards && cards.length > 0) {
+                await createNewDeck(name, category, cards, '', typeHint, typeHint === 'Sequence' ? { sequenceMeta } : {});
                 showToast(`Deck "${name}" created successfully with ${cards.length} cards!`);
                 closeImportModal();
                 updateDashboard();
@@ -8220,7 +8666,77 @@ function switchImportTab(tabName) {
     document.getElementById('importTabFile').classList.toggle('active', tabName === 'file');
 }
 
+function convertExternalSequenceJson(payload) {
+    const title = typeof payload.title === 'string' ? payload.title.trim() : 'Sequence Deck';
+    const sequences = Array.isArray(payload.sequences) ? payload.sequences : [];
+    const cards = [];
+    const sequenceMeta = {};
+
+    sequences.forEach((seq, seqIndex) => {
+        const seqTitle = (seq.title || `Sequence ${seqIndex + 1}`).toString().trim() || `Sequence ${seqIndex + 1}`;
+        const steps = Array.isArray(seq.steps) ? seq.steps : [];
+        const sequenceId = crypto.randomUUID();
+        sequenceMeta[sequenceId] = { title: seqTitle, description: seq.description || seq.notes || '' };
+
+        steps.forEach((stepText, stepIndex) => {
+            const text = (typeof stepText === 'string'
+                ? stepText
+                : (stepText?.text || stepText?.question || stepText?.prompt || '')).toString().trim();
+            const notes = stepText?.notes || stepText?.answer || seq.notes || '';
+            if (!text) return;
+            cards.push({
+                id: crypto.randomUUID(),
+                question: text,
+                answer: notes || '',
+                sequenceId,
+                sequenceTitle: seqTitle,
+                stepIndex,
+                order: stepIndex,
+                isNew: true
+            });
+        });
+    });
+
+    return { title, cards, sequenceMeta };
+}
+
 function parseTextData(text, separator, typeHint = 'General') {
+    if (typeHint === 'Sequence') {
+        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+        const sequenceMap = new Map();
+        lines.forEach((line) => {
+            const parts = line.split(separator);
+            if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
+                const seqTitle = parts[0].trim();
+                const stepText = parts[1].trim();
+                const notes = parts[2] ? parts[2].trim() : '';
+                if (!stepText) return;
+                if (!sequenceMap.has(seqTitle)) {
+                    sequenceMap.set(seqTitle, { id: crypto.randomUUID(), steps: [] });
+                }
+                sequenceMap.get(seqTitle).steps.push({ question: stepText, answer: notes });
+            }
+        });
+        const cards = [];
+        const sequenceMeta = {};
+        Array.from(sequenceMap.entries()).forEach(([title, data], seqIdx) => {
+            sequenceMeta[data.id] = { title: title || `Sequence ${seqIdx + 1}` };
+            data.steps.forEach((step, stepIdx) => {
+                cards.push({
+                    id: crypto.randomUUID(),
+                    question: step.question,
+                    answer: step.answer || '',
+                    sequenceId: data.id,
+                    sequenceTitle: sequenceMeta[data.id].title,
+                    stepIndex: stepIdx,
+                    order: stepIdx,
+                    isNew: true
+                });
+            });
+        });
+        return { cards, sequenceMeta };
+    }
+
     return text.split('\n').map((line, index) => {
         const parts = line.split(separator);
         if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
@@ -8231,11 +8747,7 @@ function parseTextData(text, separator, typeHint = 'General') {
                 isNew: true
             };
 
-            if (typeHint === 'Sequence') {
-                card.order = index + 1;
-            } else {
-                card.order = 0;
-            }
+            card.order = 0;
 
             return card;
         }
@@ -8310,54 +8822,250 @@ function cancelAction() {
 function openPracticeTestModal(deckId) {
     practiceTestState.deckId = deckId;
     testAccentModule?.refresh();
-    document.getElementById('numQuestions').max = decks[deckId].cards.length;
-    document.getElementById('numQuestions').value = Math.min(10, decks[deckId].cards.length);
+    const deck = decks[deckId];
+    const maxQ = deck?.cards?.length || 0;
+    
+    // Default to Exam Mode
+    selectTestPreset('exam_indicative');
+
+    const qInput = document.getElementById('testQuestionCount');
+    if (qInput) {
+        qInput.max = maxQ;
+        qInput.value = Math.min(20, maxQ || 20);
+    }
+    
+    const deckTag = document.querySelector('#testDeckSelection .tag');
+    if (deckTag) deckTag.textContent = deck?.name || 'Current Deck';
+
     document.getElementById('practiceTestModal').classList.add('show');
+    clearTestValidityWarning();
+
+    // Attach listeners for validation
+    ['testDuration', 'testTotalMarks', 'testQuestionCount', 'optAllowBack', 'optShowTimer', 'optStrictMarking', 'optConfidence'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.onchange = validateCurrentConfig;
+    });
+    validateCurrentConfig();
 }
 
 function closePracticeTestModal() {
     document.getElementById('practiceTestModal').classList.remove('show');
 }
 
-function startPracticeTestInternal() {
-    const deckId = practiceTestState.deckId;
-    testAccentModule?.refresh();
-    const deck = decks[deckId];
-    const testType = document.getElementById('testType').value;
-    const numQuestions = parseInt(document.getElementById('numQuestions').value);
-
-    if (numQuestions > deck.cards.length) {
-        showToast("Not enough cards in deck", "error");
-        return;
+function selectTestPreset(mode) {
+    const isExam = mode === 'exam_indicative';
+    practiceTestState.mode = isExam ? 'exam_indicative' : 'free_practice';
+    
+    const presetExam = document.getElementById('presetExam');
+    const presetFree = document.getElementById('presetFree');
+    const presetDescription = document.getElementById('presetDescription');
+    
+    if (presetExam) presetExam.classList.toggle('active', isExam);
+    if (presetFree) presetFree.classList.toggle('active', !isExam);
+    if (presetDescription) {
+        presetDescription.textContent = isExam 
+            ? "Strict exam conditions. No feedback during test. Timed."
+            : "Relaxed practice. Feedback allowed. Flexible timing.";
     }
 
+    const durationInput = document.getElementById('testDuration');
+    const marksInput = document.getElementById('testTotalMarks');
+    const strictInput = document.getElementById('optStrictMarking');
+    const confidenceInput = document.getElementById('optConfidence');
+    
+    if (durationInput) durationInput.value = isExam ? 60 : 30;
+    if (marksInput) marksInput.value = 100;
+    if (strictInput) strictInput.checked = isExam;
+    if (confidenceInput) confidenceInput.checked = isExam;
+    validateCurrentConfig();
+}
 
-    if (testType === 'sequence') {
-        if (deck.typeHint !== 'Sequence') {
-            showToast("This deck is not marked as a sequence deck", "error");
+function validateCurrentConfig() {
+    const startButton = getPracticeTestStartButton();
+    buildPracticeTestValidation().then(result => {
+        const errors = result.validation?.errors || [];
+        const warnings = result.warnings || [];
+        const message = formatTestValidityMessage(errors, warnings);
+        if (message) {
+            showTestValidityWarning(message);
+        } else {
+            clearTestValidityWarning();
+        }
+        if (startButton) startButton.disabled = errors.length > 0;
+    }).catch(error => {
+        console.error('Failed to validate practice test config', error);
+    });
+}
+
+function clearTestValidityWarning() {
+    const warningEl = document.getElementById('testValidityWarning');
+    if (warningEl) warningEl.classList.add('hidden');
+}
+
+function showTestValidityWarning(messages) {
+    const warningEl = document.getElementById('testValidityWarning');
+    const messageEl = document.getElementById('validityMessage');
+    if (!warningEl || !messageEl) return;
+    const content = Array.isArray(messages)
+        ? messages.filter(Boolean).join(' ')
+        : String(messages || '');
+    messageEl.textContent = content;
+    warningEl.classList.toggle('hidden', !content);
+}
+
+function parseNumberInput(id, fallback = null) {
+    const value = Number(document.getElementById(id)?.value);
+    return Number.isFinite(value) ? value : fallback;
+}
+
+function getSelectedTestPresetMode() {
+    const presetExam = document.getElementById('presetExam');
+    if (presetExam && presetExam.classList.contains('active')) return 'exam_indicative';
+    return 'free_practice';
+}
+
+function getPracticeTestUiSettings() {
+    return {
+        mode: getSelectedTestPresetMode(),
+        durationMinutes: parseNumberInput('testDuration', 60),
+        totalMarks: parseNumberInput('testTotalMarks', 100),
+        questionCount: parseNumberInput('testQuestionCount', null),
+        allowBack: document.getElementById('optAllowBack')?.checked ?? true,
+        showTimer: document.getElementById('optShowTimer')?.checked ?? true,
+        strictMarking: document.getElementById('optStrictMarking')?.checked ?? true,
+        confidenceIntervalEnabled: document.getElementById('optConfidence')?.checked ?? true
+    };
+}
+
+function getPracticeTestStartButton() {
+    return document.querySelector('#practiceTestModal .modal-actions .btn.btn-success');
+}
+
+function formatTestValidityMessage(errors, warnings) {
+    const parts = [];
+    if (errors.length) {
+        parts.push(`Errors: ${errors.join(' ')}`);
+    }
+    if (warnings.length) {
+        parts.push(`Warnings: ${warnings.join(' ')}`);
+    }
+    return parts.join(' ');
+}
+
+async function buildPracticeTestValidation(seedOverride = null) {
+    const settings = getPracticeTestUiSettings();
+    if (seedOverride !== null) {
+        settings.seed = seedOverride;
+    }
+    settings.deckId = practiceTestState.deckId;
+    const { buildPracticeTestBlueprint } = await getPracticeTestRuntimeModules();
+    const { validateBlueprint, normaliseBlueprint, getMcqDeckWarnings } = await getPracticeTestModules();
+    const blueprint = buildPracticeTestBlueprint(settings);
+    const normalizedBlueprint = normaliseBlueprint(blueprint);
+    const validation = validateBlueprint(normalizedBlueprint);
+    const mcqWarnings = typeof getMcqDeckWarnings === 'function'
+        ? getMcqDeckWarnings(normalizedBlueprint, decks)
+        : [];
+    return {
+        blueprint: normalizedBlueprint,
+        validation,
+        warnings: [...validation.warnings, ...mcqWarnings]
+    };
+}
+
+function createPracticeTestAttemptId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createPracticeTestSeed() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `seed_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function resolvePracticeTestUserId() {
+    const session = getStoredSession();
+    const userId = session?.user?.sub || session?.user?.id || session?.user?.user_id;
+    if (userId) return String(userId);
+    return getGuestIdFromSession();
+}
+
+async function startPracticeTestInternal() {
+    try {
+        const deckId = practiceTestState.deckId;
+        testAccentModule?.refresh();
+        const deck = decks[deckId];
+        if (deck) {
+            document.documentElement.setAttribute('data-deck-category', deck.category || 'Other');
+        }
+        if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) {
+            showToast('Deck has no cards.', 'error');
             return;
         }
-        practiceTestState.cards = [...deck.cards];
-    } else {
-        practiceTestState.cards = shuffleArray([...deck.cards]).slice(0, numQuestions);
+
+        const attemptId = createPracticeTestAttemptId();
+        const seed = createPracticeTestSeed();
+
+        const { flattenTestForm, getPracticeTestModeFlags } = await getPracticeTestRuntimeModules();
+        const { generateTestForm } = await getPracticeTestModules();
+        const { blueprint: normalizedBlueprint, validation, warnings } = await buildPracticeTestValidation(seed);
+
+        if (!validation.ok) {
+            showTestValidityWarning(validation.errors);
+            showToast('Test configuration is invalid.', 'error');
+            return;
+        }
+        if (warnings.length) {
+            showTestValidityWarning(warnings);
+        } else {
+            clearTestValidityWarning();
+        }
+
+        const knowledgeState = studyState.knowledgeStates || {};
+        const userId = resolvePracticeTestUserId();
+        const form = await generateTestForm(normalizedBlueprint, decks, knowledgeState, userId);
+        const flatItems = flattenTestForm(form);
+
+        if (!flatItems.length) {
+            showToast('Unable to generate test items.', 'error');
+            return;
+        }
+
+        practiceTestState.attemptId = attemptId;
+        practiceTestState.startedAt = null;
+        practiceTestState.finishedAt = null;
+        practiceTestState.blueprint = normalizedBlueprint;
+        practiceTestState.form = form;
+        practiceTestState.flatItems = flatItems;
+        practiceTestState.responses = new Array(flatItems.length).fill(null);
+        practiceTestState.currentIndex = 0;
+        practiceTestState.mode = normalizedBlueprint.mode;
+        practiceTestState.showTimer = normalizedBlueprint.navigation?.showTimer ?? true;
+        practiceTestState.allowBack = normalizedBlueprint.navigation?.allowBack ?? true;
+        practiceTestState.strictMarking = normalizedBlueprint.scoring?.strictMarking ?? true;
+        practiceTestState.confidenceIntervalEnabled = normalizedBlueprint.scoring?.confidenceInterval?.enabled ?? true;
+        practiceTestState.modeFlags = getPracticeTestModeFlags(normalizedBlueprint.mode);
+        practiceTestState.itemStartTime = null;
+        practiceTestState.applyLearningInProgress = false;
+
+        closePracticeTestModal();
+
+        transitionView('practiceTestView');
+        document.getElementById('testSubtitle').textContent = deck.name;
+
+        resetPracticeTestCompletionUI();
+        updateTestProgress();
+        document.getElementById('testProgressView').classList.remove('hidden');
+        document.getElementById('testCardView').classList.add('hidden');
+        document.getElementById('testCompleteView').classList.add('hidden');
+    } catch (error) {
+        console.error('Failed to start practice test', error);
+        showToast('Unable to start practice test.', 'error');
     }
-
-    practiceTestState.testType = testType;
-    practiceTestState.numQuestions = testType === 'sequence' ? 1 : numQuestions;
-    practiceTestState.currentCardIndex = 0;
-    practiceTestState.correctCount = 0;
-    practiceTestState.incorrectCount = 0;
-    practiceTestState.startTime = new Date();
-
-    closePracticeTestModal();
-
-    transitionView('practiceTestView');
-    document.getElementById('testSubtitle').textContent = deck.name;
-
-    updateTestProgress();
-    document.getElementById('testProgressView').classList.remove('hidden');
-    document.getElementById('testCardView').classList.add('hidden');
-    document.getElementById('testCompleteView').classList.add('hidden');
 }
 
 function startPracticeTest() {
@@ -8369,6 +9077,10 @@ function startPracticeTest() {
 }
 
 function startMode(mode, deckId) {
+    const deck = decks[deckId];
+    if (deck) {
+        document.documentElement.setAttribute('data-deck-category', deck.category || 'Other');
+    }
     const adapter = window.modeRegistry?.get && window.modeRegistry.get(mode);
     if (adapter && typeof adapter.start === 'function') {
         return adapter.start(deckId);
@@ -8377,9 +9089,9 @@ function startMode(mode, deckId) {
     const fallback = {
         'learn': startLearnMode,
         'review': startReviewMode,
-        'sequence': startSequenceSessionInternal,
+        'spaced': startSpacedMode,
         'practice-test': startPracticeTestInternal,
-        'spaced': startSpacedLearning
+        'sequence': startSequenceMode
     };
 
     const fn = fallback[mode];
@@ -8388,19 +9100,98 @@ function startMode(mode, deckId) {
     }
 }
 
+function getPracticeTestCounts() {
+    const responses = Array.isArray(practiceTestState.responses) ? practiceTestState.responses : [];
+    let correct = 0;
+    let incorrect = 0;
+    let answered = 0;
+    responses.forEach(response => {
+        if (!response || typeof response.wasCorrect !== 'boolean') return;
+        answered += 1;
+        if (response.wasCorrect) correct += 1;
+        else incorrect += 1;
+    });
+    return { correct, incorrect, answered };
+}
+
+function getCurrentPracticeTestItem() {
+    return practiceTestState.flatItems[practiceTestState.currentIndex] || null;
+}
+
+function resolvePracticeTestItemType(item) {
+    const rawType = String(item?.type || '').toLowerCase();
+    if (rawType.includes('mcq') || rawType.includes('multiple')) return 'mcq';
+    if (rawType.includes('type') || rawType.includes('short') || rawType.includes('long') || rawType.includes('write')) return 'type';
+    if (Array.isArray(item?.options) && item.options.length) return 'mcq';
+    return 'type';
+}
+
+function resetPracticeTestCompletionUI() {
+    const applyBtn = document.getElementById('testApplyLearningBtn');
+    if (applyBtn) {
+        applyBtn.classList.add('hidden');
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply Learning Updates';
+        applyBtn.onclick = applyPracticeTestLearningUpdates;
+    }
+    const ciEl = document.getElementById('testConfidenceInterval');
+    if (ciEl) {
+        ciEl.textContent = '';
+        const stat = ciEl.closest('.stat');
+        if (stat) stat.classList.add('hidden');
+    }
+}
+
+function resetTestCardUI() {
+    const flashcard = document.querySelector('#testCardView .flashcard');
+    const answerContent = document.getElementById('testAnswerContent');
+    const options = document.getElementById('testOptions');
+    const answerInput = document.getElementById('testAnswerInput');
+    const showAnswerBtn = document.getElementById('testShowAnswerBtn');
+    const checkAnswerBtn = document.getElementById('testCheckAnswerBtn');
+    const correctBtn = document.getElementById('testCorrectBtn');
+    const incorrectBtn = document.getElementById('testIncorrectBtn');
+    const nextBtn = document.getElementById('testNextBtn');
+
+    if (flashcard) flashcard.classList.remove('is-flipped');
+    if (answerContent) answerContent.classList.add('hidden');
+    if (options) {
+        options.innerHTML = '';
+        options.classList.add('hidden');
+    }
+    if (answerInput) {
+        answerInput.value = '';
+        answerInput.disabled = false;
+        answerInput.classList.add('hidden');
+        answerInput.classList.remove('correct', 'incorrect');
+    }
+    if (showAnswerBtn) showAnswerBtn.classList.add('hidden');
+    if (checkAnswerBtn) checkAnswerBtn.classList.add('hidden');
+    if (correctBtn) correctBtn.classList.add('hidden');
+    if (incorrectBtn) incorrectBtn.classList.add('hidden');
+    if (nextBtn) nextBtn.classList.add('hidden');
+}
+
 function updateTestProgress() {
-    const total = practiceTestState.numQuestions;
-    const current = practiceTestState.currentCardIndex;
-    const correct = practiceTestState.correctCount;
-    const incorrect = practiceTestState.incorrectCount;
+    const total = practiceTestState.flatItems.length;
+    const current = practiceTestState.currentIndex;
+    const { correct, incorrect } = getPracticeTestCounts();
 
     document.getElementById('testInfo').textContent = `${current} of ${total} questions`;
     document.getElementById('testProgressBar').style.width = total > 0 ? `${(current / total) * 100}%` : '0%';
-    document.getElementById('testCorrectCount').textContent = correct;
-    document.getElementById('testIncorrectCount').textContent = incorrect;
+    const statsEl = document.querySelector('#testProgressView .stats');
+    const showRunningScore = practiceTestState.modeFlags?.showRunningScore ?? true;
+    if (statsEl) statsEl.classList.toggle('hidden', !showRunningScore);
+    if (showRunningScore) {
+        document.getElementById('testCorrectCount').textContent = correct;
+        document.getElementById('testIncorrectCount').textContent = incorrect;
+    }
 }
 
 function startTest() {
+    if (!practiceTestState.startedAt) {
+        practiceTestState.startedAt = Date.now();
+    }
     transitionSubView(
         document.getElementById('testProgressView'),
         document.getElementById('testCardView')
@@ -8409,73 +9200,65 @@ function startTest() {
 }
 
 function showNextTestQuestion() {
-    if (practiceTestState.currentCardIndex >= practiceTestState.cards.length) {
+    if (practiceTestState.currentIndex >= practiceTestState.flatItems.length) {
         finishTest();
         return;
     }
 
-    const testType = practiceTestState.testType;
+    const regularView = document.getElementById('testRegularView');
+    if (regularView) regularView.classList.remove('hidden');
 
+    const item = getCurrentPracticeTestItem();
+    const itemType = resolvePracticeTestItemType(item);
+    const modeFlags = practiceTestState.modeFlags || {};
 
-    if (testType === 'sequence') {
-        initSequenceTest(practiceTestState.cards);
-        return;
-    }
+    resetTestCardUI();
 
-
-    document.getElementById('testSequenceView').classList.add('hidden');
-    document.getElementById('testRegularView').classList.remove('hidden');
-
-    const testAnswerInputEl = document.getElementById('testAnswerInput');
-
-    const card = practiceTestState.cards[practiceTestState.currentCardIndex];
-    let currentTestType = testType;
-    if (testType === 'mixed') {
-        currentTestType = Math.random() > 0.5 ? 'multiple_choice' : 'type';
-    }
-
-    document.querySelector('#testCardView .flashcard').classList.remove('is-flipped');
     const testQuestionEl = document.getElementById('testQuestion');
     const testAnswerEl = document.getElementById('testAnswer');
-    if (testQuestionEl) testQuestionEl.textContent = card.question || '';
-    if (testAnswerEl) testAnswerEl.textContent = card.answer || '';
-    document.getElementById('testAnswerContent').classList.add('hidden');
-    document.getElementById('testOptions').classList.add('hidden');
-    document.getElementById('testAnswerInput').classList.add('hidden');
-    document.getElementById('testShowAnswerBtn').classList.add('hidden');
-    document.getElementById('testCheckAnswerBtn').classList.add('hidden');
-    document.getElementById('testCorrectBtn').classList.add('hidden');
-    document.getElementById('testIncorrectBtn').classList.add('hidden');
-    document.getElementById('testNextBtn').classList.add('hidden');
-    if (testAnswerInputEl) {
-        testAnswerInputEl.classList.remove('correct', 'incorrect');
-    }
+    if (testQuestionEl) testQuestionEl.textContent = item?.question || '';
+    if (testAnswerEl) testAnswerEl.textContent = item?.answer || '';
+
     document.getElementById('testCardInfo').textContent =
-        `Question ${practiceTestState.currentCardIndex + 1} of ${practiceTestState.numQuestions}`;
+        `Question ${practiceTestState.currentIndex + 1} of ${practiceTestState.flatItems.length}`;
 
-    if (currentTestType === 'multiple_choice') {
-        const options = generateMultipleChoiceOptions(card, practiceTestState.cards);
+    const answerInput = document.getElementById('testAnswerInput');
+    const checkAnswerBtn = document.getElementById('testCheckAnswerBtn');
+
+    if (itemType === 'mcq') {
+        const options = generateMultipleChoiceOptions(item, practiceTestState.flatItems);
         displayMultipleChoiceOptions(options);
-    } else if (currentTestType === 'type') {
-        document.getElementById('testAnswerInput').classList.remove('hidden');
-        document.getElementById('testAnswerInput').value = '';
-        document.getElementById('testAnswerInput').disabled = false;
-        document.getElementById('testCheckAnswerBtn').classList.remove('hidden');
-        document.getElementById('testAnswerInput').focus();
-
-
     } else {
-        document.getElementById('testShowAnswerBtn').classList.remove('hidden');
+        if (answerInput) {
+            answerInput.classList.remove('hidden');
+            answerInput.focus();
+        }
+        if (checkAnswerBtn) {
+            checkAnswerBtn.textContent = modeFlags.submitLabel || 'Check Answer';
+            checkAnswerBtn.classList.remove('hidden');
+        }
     }
+
+    practiceTestState.itemStartTime = Date.now();
 }
 
-function generateMultipleChoiceOptions(correctCard, allCards) {
-    const options = new Set([correctCard.answer]);
-    const wrongAnswers = shuffleArray(allCards.filter(card => card.id !== correctCard.id));
-
-    for (const wrongCard of wrongAnswers) {
+function generateMultipleChoiceOptions(item, allItems) {
+    const options = new Set();
+    const answer = item?.answer ?? '';
+    if (answer) options.add(answer);
+    if (Array.isArray(item?.options)) {
+        item.options.forEach(option => {
+            if (option) options.add(option);
+        });
+    }
+    const wrongAnswers = shuffleArray(
+        allItems
+            .filter(candidate => candidate.cardId !== item.cardId && candidate.answer)
+            .map(candidate => candidate.answer)
+    );
+    for (const wrongAnswer of wrongAnswers) {
         if (options.size < 4) {
-            options.add(wrongCard.answer);
+            options.add(wrongAnswer);
         } else {
             break;
         }
@@ -8493,21 +9276,66 @@ function displayMultipleChoiceOptions(options) {
         button.className = 'btn btn-secondary';
         button.textContent = option;
         button.onclick = () => {
-            checkTestAnswer(option);
-            document.querySelectorAll('#testOptions button').forEach(btn => btn.disabled = true);
+            if (practiceTestState.modeFlags?.submitOnSelect) {
+                submitTestAnswer(option);
+            } else {
+                checkTestAnswer(option);
+                document.querySelectorAll('#testOptions button').forEach(btn => btn.disabled = true);
+            }
         };
         optionsContainer.appendChild(button);
     });
 }
 
-function checkTestAnswer(selectedOption = null) {
-    const card = practiceTestState.cards[practiceTestState.currentCardIndex];
+function evaluatePracticeTestAnswer(selectedOption = null) {
+    const item = getCurrentPracticeTestItem();
     const isMultipleChoice = selectedOption !== null;
+    const userInput = isMultipleChoice
+        ? String(selectedOption)
+        : String(document.getElementById('testAnswerInput')?.value || '').trim();
+    const correctAnswer = String(item?.answer || '').trim();
+    const strictMarking = practiceTestState.strictMarking;
+    const normalizedInput = strictMarking ? userInput : userInput.toLowerCase();
+    const normalizedAnswer = strictMarking ? correctAnswer : correctAnswer.toLowerCase();
+    const isCorrect = normalizedInput === normalizedAnswer;
+    return { userInput, correctAnswer, isCorrect, isMultipleChoice };
+}
 
-    const userInput = isMultipleChoice ? selectedOption : document.getElementById('testAnswerInput').value.trim();
-    const correctAnswer = card.answer.trim();
+function recordPracticeTestResponse({ response, wasCorrect }) {
+    const item = getCurrentPracticeTestItem();
+    if (!item) return null;
+    const index = practiceTestState.currentIndex;
+    if (practiceTestState.responses[index]) return practiceTestState.responses[index];
+    const latencyMs = practiceTestState.itemStartTime ? Date.now() - practiceTestState.itemStartTime : null;
+    const marksAvailable = Number.isFinite(item.marksAvailable) ? item.marksAvailable : 1;
+    const entry = {
+        cardId: item.cardId,
+        deckId: item.deckId,
+        sectionId: item.sectionId,
+        response,
+        wasCorrect,
+        marksAwarded: wasCorrect ? marksAvailable : 0,
+        latencyMs
+    };
+    practiceTestState.responses[index] = entry;
+    return entry;
+}
 
-    const isCorrect = userInput.toLowerCase() === correctAnswer.toLowerCase();
+function submitTestAnswer(selectedOption = null) {
+    if (practiceTestState.responses[practiceTestState.currentIndex]) return;
+    const { userInput, isCorrect } = evaluatePracticeTestAnswer(selectedOption);
+    recordPracticeTestResponse({ response: userInput, wasCorrect: isCorrect });
+    nextTestQuestion();
+}
+
+function checkTestAnswer(selectedOption = null) {
+    if (!practiceTestState.modeFlags?.allowFeedback) {
+        submitTestAnswer(selectedOption);
+        return;
+    }
+    if (practiceTestState.responses[practiceTestState.currentIndex]) return;
+    const { userInput, correctAnswer, isCorrect, isMultipleChoice } = evaluatePracticeTestAnswer(selectedOption);
+    recordPracticeTestResponse({ response: userInput, wasCorrect: isCorrect });
 
     if (isMultipleChoice) {
         document.querySelectorAll('#testOptions button').forEach(btn => {
@@ -8519,21 +9347,22 @@ function checkTestAnswer(selectedOption = null) {
             }
         });
     } else {
-        document.getElementById('testAnswerInput').classList.toggle('correct', isCorrect);
-        document.getElementById('testAnswerInput').classList.toggle('incorrect', !isCorrect);
-        document.getElementById('testAnswerInput').disabled = true;
+        const inputEl = document.getElementById('testAnswerInput');
+        if (inputEl) {
+            inputEl.classList.toggle('correct', isCorrect);
+            inputEl.classList.toggle('incorrect', !isCorrect);
+            inputEl.disabled = true;
+        }
     }
 
     document.getElementById('testCheckAnswerBtn').classList.add('hidden');
     document.getElementById('testAnswerContent').classList.remove('hidden');
     document.querySelector('#testCardView .flashcard').classList.add('is-flipped');
     document.getElementById('testNextBtn').classList.remove('hidden');
-
-    if (isCorrect) practiceTestState.correctCount++;
-    else practiceTestState.incorrectCount++;
 }
 
 function showTestAnswer() {
+    if (!practiceTestState.modeFlags?.allowFeedback) return;
     document.querySelector('#testCardView .flashcard').classList.add('is-flipped');
     document.getElementById('testAnswerContent').classList.remove('hidden');
     document.getElementById('testShowAnswerBtn').classList.add('hidden');
@@ -8542,33 +9371,139 @@ function showTestAnswer() {
 }
 
 function markTestCorrect() {
-    practiceTestState.correctCount++;
+    if (!practiceTestState.modeFlags?.allowFeedback) return;
+    if (practiceTestState.responses[practiceTestState.currentIndex]) return;
+    recordPracticeTestResponse({ response: null, wasCorrect: true });
     nextTestQuestion();
 }
 
 function markTestIncorrect() {
-    practiceTestState.incorrectCount++;
+    if (!practiceTestState.modeFlags?.allowFeedback) return;
+    if (practiceTestState.responses[practiceTestState.currentIndex]) return;
+    recordPracticeTestResponse({ response: null, wasCorrect: false });
     nextTestQuestion();
 }
 
 function nextTestQuestion() {
-    practiceTestState.currentCardIndex++;
+    practiceTestState.currentIndex++;
     updateTestProgress();
     showNextTestQuestion();
 }
 
-async function finishTest() {
-    const endTime = new Date();
-    const timeTaken = Math.round((endTime - practiceTestState.startTime) / 1000);
-    const totalAnswered = practiceTestState.correctCount + practiceTestState.incorrectCount;
-    const accuracy = totalAnswered > 0 ? Math.round((practiceTestState.correctCount / totalAnswered) * 100) : 0;
-    const score = practiceTestState.numQuestions > 0 ? Math.round((practiceTestState.correctCount / practiceTestState.numQuestions) * 100) : 0;
+function computeWilsonInterval(correctCount, totalCount, zScore) {
+    if (!totalCount || !Number.isFinite(zScore)) return null;
+    const phat = correctCount / totalCount;
+    const z2 = zScore * zScore;
+    const denom = 1 + (z2 / totalCount);
+    const center = (phat + (z2 / (2 * totalCount))) / denom;
+    const margin = (zScore * Math.sqrt((phat * (1 - phat) + (z2 / (4 * totalCount))) / totalCount)) / denom;
+    return {
+        lower: Math.max(0, center - margin),
+        upper: Math.min(1, center + margin)
+    };
+}
 
-    document.getElementById('testScore').textContent = score;
-    document.getElementById('testCorrectFinal').textContent = practiceTestState.correctCount;
-    document.getElementById('testTotalFinal').textContent = practiceTestState.numQuestions;
+async function persistPracticeTestAttempt(attempt) {
+    try {
+        const existing = await getDataFromDB('appData', 'practiceTestAttempts');
+        const { appendPracticeTestAttempt } = await getPracticeTestRuntimeModules();
+        const updated = appendPracticeTestAttempt(existing, attempt, 50);
+        await saveDataToDB('appData', updated);
+    } catch (error) {
+        console.error('Failed to save practice test attempt', error);
+    }
+}
+
+async function applyPracticeTestLearningUpdates() {
+    if (practiceTestState.applyLearningInProgress) return;
+    const responses = Array.isArray(practiceTestState.responses)
+        ? practiceTestState.responses.filter(response => response && typeof response.wasCorrect === 'boolean')
+        : [];
+    if (!responses.length) {
+        showToast('No responses to apply.', 'info');
+        return;
+    }
+    const applyBtn = document.getElementById('testApplyLearningBtn');
+    practiceTestState.applyLearningInProgress = true;
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Applying...';
+    }
+    try {
+        const userBaseline = getFsrsBaseline();
+        const updatedDeckIds = new Set();
+        for (const response of responses) {
+            const deckId = response.deckId || practiceTestState.deckId;
+            const deck = decks[deckId];
+            const card = deck?.cards?.find(c => c.id === response.cardId);
+            if (!deck || !card) continue;
+            const interaction = {
+                recallLatency: response.latencyMs,
+                attemptCount: 1,
+                userAnswer: response.response,
+                questionType: 'Practice Test'
+            };
+            const iqs = calculateIQS({ recallLatency: response.latencyMs, attemptCount: 1 }, userBaseline);
+            await applyFsrsReviewUpdate(card, deckId, response.wasCorrect, interaction, iqs, { questionType: 'Practice Test' });
+            updatedDeckIds.add(deckId);
+        }
+        for (const deckId of updatedDeckIds) {
+            if (decks[deckId]) {
+                await saveDataToDB('decks', decks[deckId]);
+            }
+        }
+        if (applyBtn) {
+            applyBtn.textContent = 'Learning Applied';
+            applyBtn.disabled = true;
+        }
+        showToast('Learning updates applied.', 'success');
+    } catch (error) {
+        console.error('Failed to apply learning updates', error);
+        showToast('Failed to apply learning updates.', 'error');
+        if (applyBtn) {
+            applyBtn.textContent = 'Apply Learning Updates';
+            applyBtn.disabled = false;
+        }
+    } finally {
+        practiceTestState.applyLearningInProgress = false;
+    }
+}
+
+async function finishTest() {
+    practiceTestState.finishedAt = Date.now();
+    const startedAt = practiceTestState.startedAt || practiceTestState.finishedAt;
+    const timeTaken = Math.round((practiceTestState.finishedAt - startedAt) / 1000);
+    const responses = Array.isArray(practiceTestState.responses) ? practiceTestState.responses : [];
+    const answeredResponses = responses.filter(response => response && typeof response.wasCorrect === 'boolean');
+    const correctCount = answeredResponses.filter(response => response.wasCorrect).length;
+    const answeredCount = answeredResponses.length;
+    const accuracy = answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0;
+    const marksTotal = practiceTestState.form?.totalMarks
+        ?? practiceTestState.flatItems.reduce((sum, item) => sum + (Number.isFinite(item.marksAvailable) ? item.marksAvailable : 1), 0);
+    const marksCorrect = answeredResponses.reduce((sum, response) => sum + (Number.isFinite(response.marksAwarded) ? response.marksAwarded : 0), 0);
+    const scorePct = marksTotal > 0 ? Math.round((marksCorrect / marksTotal) * 100) : 0;
+
+    renderMetricInto('testScore', { label: 'Score', value: scorePct, kind: 'score' }, ['compact']);
+    document.getElementById('testCorrectFinal').textContent = marksCorrect;
+    document.getElementById('testTotalFinal').textContent = marksTotal;
     document.getElementById('testTime').textContent = `${timeTaken}s`;
-    document.getElementById('testAccuracy').textContent = `${accuracy}%`;
+    renderMetricInto('testAccuracy', { label: 'Accuracy', value: accuracy, kind: 'accuracy' }, ['compact']);
+
+    const ciEnabled = Boolean(practiceTestState.blueprint?.scoring?.confidenceInterval?.enabled)
+        && Boolean(practiceTestState.confidenceIntervalEnabled);
+    let confidenceInterval = null;
+    if (ciEnabled) {
+        const zScore = Number(practiceTestState.blueprint?.scoring?.confidenceInterval?.z) || 1.64;
+        confidenceInterval = computeWilsonInterval(correctCount, answeredCount, zScore);
+        const ciEl = document.getElementById('testConfidenceInterval');
+        if (ciEl && confidenceInterval) {
+            const lower = Math.round(confidenceInterval.lower * 100);
+            const upper = Math.round(confidenceInterval.upper * 100);
+            ciEl.textContent = `${lower}% - ${upper}%`;
+            const stat = ciEl.closest('.stat');
+            if (stat) stat.classList.remove('hidden');
+        }
+    }
 
     analyticsData.totalStudyTime += timeTaken;
     analyticsData.sessions.unshift({
@@ -8581,6 +9516,38 @@ async function finishTest() {
     if (analyticsData.sessions.length > 50) analyticsData.sessions.pop();
     await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
 
+    const attempt = {
+        attemptId: practiceTestState.attemptId,
+        startedAt,
+        finishedAt: practiceTestState.finishedAt,
+        deckId: practiceTestState.deckId,
+        blueprint: practiceTestState.blueprint,
+        form: practiceTestState.form,
+        responses: practiceTestState.responses,
+        scoreSummary: {
+            scorePct,
+            marksCorrect,
+            marksTotal,
+            ...(confidenceInterval ? {
+                confidenceInterval: {
+                    lower: confidenceInterval.lower,
+                    upper: confidenceInterval.upper,
+                    z: practiceTestState.blueprint?.scoring?.confidenceInterval?.z
+                }
+            } : {})
+        }
+    };
+
+    await persistPracticeTestAttempt(attempt);
+
+    const applyBtn = document.getElementById('testApplyLearningBtn');
+    if (applyBtn) {
+        applyBtn.classList.remove('hidden');
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply Learning Updates';
+        applyBtn.onclick = applyPracticeTestLearningUpdates;
+    }
+
     transitionSubView(
         document.getElementById('testCardView'),
         document.getElementById('testCompleteView')
@@ -8588,15 +9555,20 @@ async function finishTest() {
 }
 
 function restartTest() {
-    practiceTestState.currentCardIndex = 0;
-    practiceTestState.correctCount = 0;
-    practiceTestState.incorrectCount = 0;
-    practiceTestState.startTime = new Date();
+    practiceTestState.attemptId = createPracticeTestAttemptId();
+    practiceTestState.startedAt = null;
+    practiceTestState.finishedAt = null;
+    practiceTestState.responses = new Array(practiceTestState.flatItems.length).fill(null);
+    practiceTestState.currentIndex = 0;
+    practiceTestState.itemStartTime = null;
+    practiceTestState.applyLearningInProgress = false;
+    resetPracticeTestCompletionUI();
 
     transitionSubView(
         document.getElementById('testCompleteView'),
         document.getElementById('testProgressView')
     );
+    updateTestProgress();
 }
 
 function endTest() {
@@ -8657,17 +9629,43 @@ function registerReviewModeAdapter() {
     }
 }
 
-function registerSequenceModeAdapter() {
-    const factory = sequenceModeAdapterFactory || (window.lagiote && window.lagiote.createSequenceModeAdapter);
-    if (!factory) return;
-    const adapter = factory({
-        startSequenceSession: startSequenceSessionInternal,
-        showNextCard,
-        markAnswerCorrect,
-        markAnswerIncorrect,
+function registerSpacedModeAdapter() {
+    const adapter = {
+        start: startSpacedMode,
+        showNext: showNextCard,
+        grade: gradeSpaced,
         endSession,
         getStudyState: () => ({ ...studyState })
-    });
+    };
+
+    window.spacedModeController = adapter;
+    if (window.modeRegistry && typeof window.modeRegistry.register === 'function') {
+        window.modeRegistry.register('spaced', adapter);
+    }
+}
+
+function registerSequenceModeAdapter() {
+    const factory = window.createSequenceModeAdapter || (window.lagiote && window.lagiote.createSequenceModeAdapter);
+    let adapter = null;
+    if (factory) {
+        adapter = factory({
+            startSequenceSession: startSequenceMode,
+            startMode,
+            showNextCard,
+            markAnswerCorrect,
+            markAnswerIncorrect,
+            endSession,
+            getStudyState: () => ({ ...studyState })
+        });
+    } else {
+        adapter = {
+            start: startSequenceMode,
+            showNext: continueSequenceTask,
+            grade: submitSequenceTask,
+            endSession,
+            getStudyState: () => ({ ...studyState })
+        };
+    }
     if (!adapter) return;
     window.sequenceModeController = adapter;
     if (window.modeRegistry && typeof window.modeRegistry.register === 'function') {
@@ -8694,6 +9692,390 @@ async function updateStreak() {
 
     analyticsData.lastUsed = new Date(today).toISOString();
     await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
+}
+
+function formatModeLabel(mode) {
+    if (!mode) return 'Session';
+    const map = {
+        learn: 'Learn',
+        review: 'Review',
+        spaced: 'Spaced',
+        practiceTest: 'Practice Test',
+        exam: 'Exam',
+        sequence: 'Sequence'
+    };
+    if (map[mode]) return map[mode];
+    return mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
+function wilson(k, n, z = 1.645) {
+    if (n === 0) return [0, 0];
+    const p = k / n;
+    const denom = 1 + z * z / n;
+    const center = (p + z * z / (2 * n)) / denom;
+    const halfWidth = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n) / denom;
+    return [Math.max(0, center - halfWidth), Math.min(1, center + halfWidth)];
+}
+
+function computeDifficultyProxy(card, knowledgeState) {
+    if (knowledgeState && knowledgeState.pLower !== undefined) {
+        return knowledgeState.pLower;
+    }
+    if (knowledgeState && knowledgeState.fsrs) {
+        const now = Date.now();
+        const last = knowledgeState.last_review ? new Date(knowledgeState.last_review).getTime() : (now - 1000 * 60 * 60 * 24 * 30);
+        const next = knowledgeState.due ? new Date(knowledgeState.due).getTime() : now;
+        
+        const interval = Math.max(1, next - last);
+        const elapsed = now - last;
+        const ratio = elapsed / interval;
+        return 1 / (1 + ratio); // 1 if just reviewed, 0.5 if due now, < 0.5 if overdue
+    }
+    return 0.5;
+}
+
+async function renderEvalPanel(container) {
+    try {
+        const { store, summary, integrity } = await getEvalModules();
+        const config = await store.loadEvalConfig('default_user');
+        
+        // Ensure header exists if we have an experiment ID
+        let header = null;
+        if (config.experiment?.experimentId) {
+            header = await store.ensureExperimentHeader('default_user', config, { version: '1.0.0' }); // Mock version for now
+        }
+
+        const completed = await store.loadCompletedProbes('default_user');
+        const delaysHours = config.probes?.delaysHours || [6, 24, 72];
+        
+        const stats = summary.summariseProbes(completed, delaysHours);
+        
+        const isLocked = !!header;
+        const mode = header ? header.mode : (config.experiment?.mode || 'STEP_LEVEL_ROUTER');
+        
+        let html = `
+            <h3 class="section-title" style="font-size: 1.3rem; margin-bottom: 20px;">Evaluation Framework</h3>
+            
+            <div style="margin-bottom: 15px; padding: 10px; background: var(--bg-secondary); border-radius: 8px;">
+                <div style="margin-bottom: 10px;">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="evalEnabledCheckbox" ${config.enabled ? 'checked' : ''}>
+                        <span class="checkmark"></span>
+                        Enable Evaluation
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 10px;">
+                    <label>Mode: 
+                        <select id="evalModeSelect" style="margin-left: 10px; padding: 4px;" ${isLocked ? 'disabled' : ''}>
+                            <option value="STEP_LEVEL_ROUTER" ${mode === 'STEP_LEVEL_ROUTER' ? 'selected' : ''}>Step-Level Router</option>
+                            <option value="CARD_LEVEL_SPLIT" ${mode === 'CARD_LEVEL_SPLIT' ? 'selected' : ''}>Card-Level Split</option>
+                        </select>
+                    </label>
+                    ${isLocked ? '<span style="font-size: 0.8rem; color: var(--secondary-text); margin-left: 5px;">(Locked)</span>' : ''}
+                </div>
+
+                ${mode === 'CARD_LEVEL_SPLIT' ? `
+                <div style="margin-bottom: 10px;">
+                    <label>Assignment: 
+                        <select id="evalAssignmentMethodSelect" style="margin-left: 10px; padding: 4px;" ${isLocked ? 'disabled' : ''}>
+                            <option value="stratified_v1" ${config.experiment?.assignmentMethod === 'stratified_v1' ? 'selected' : ''}>Stratified (Blocked)</option>
+                            <option value="random_v1" ${config.experiment?.assignmentMethod === 'random_v1' ? 'selected' : ''}>Pure Random</option>
+                        </select>
+                    </label>
+                </div>
+                ` : ''}
+                
+                <div>
+                    <button id="newExperimentBtn" class="btn-secondary" style="font-size: 0.8rem;">Start New Experiment</button>
+                    <span style="font-size: 0.8rem; margin-left: 10px; color: var(--secondary-text);">
+                        ID: ${config.experiment?.experimentId ? config.experiment.experimentId.substring(0, 8) : 'None'}
+                    </span>
+                </div>
+                ${isLocked ? `
+                <div style="margin-top: 10px; font-size: 0.8rem; color: var(--secondary-text);">
+                    <strong>Locked Settings:</strong> pA=${header.router.pA}, Sample=${header.probes.sampleRate}, Delays=[${header.probes.delaysHours.join(', ')}]h
+                </div>
+                ` : ''}
+            </div>
+            
+            <table class="stats-table" style="margin-bottom: 20px;">
+                <thead>
+                    <tr>
+                        <th>Delay</th>
+                        <th>Arm A (Cortex)</th>
+                        <th>Arm B (Baseline)</th>
+                        <th>Delta (A-B)</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        const buckets = [...delaysHours, 'all'];
+        
+        const renderRow = (label, bucket) => {
+            const sA = stats.policyA[bucket];
+            const sB = stats.policyB[bucket];
+            
+            const fmt = (s) => {
+                if (s.n === 0) return '-';
+                return `${(s.p*100).toFixed(1)}% <span style="font-size:0.7em; color:var(--secondary-text)">[${(s.lower*100).toFixed(1)}, ${(s.upper*100).toFixed(1)}]</span> <br><span style="font-size:0.7em">(n=${s.n}${s.invalidN > 0 ? `, inv=${s.invalidN}` : ''})</span>`;
+            };
+            
+            const delta = sA.p - sB.p;
+            const deltaStr = (sA.n > 0 && sB.n > 0) ? 
+                `${(delta > 0 ? '+' : '')}${(delta*100).toFixed(1)}%` : '-';
+                
+            return `
+                <tr>
+                    <td>${label}</td>
+                    <td>${fmt(sA)}</td>
+                    <td>${fmt(sB)}</td>
+                    <td>${deltaStr}</td>
+                </tr>
+            `;
+        };
+        
+        if (completed.length === 0) {
+            html += `<tr><td colspan="4">No probe data yet.</td></tr>`;
+        } else {
+            html += renderRow('All', 'all');
+            delaysHours.forEach(delay => {
+                html += renderRow(`${delay}h`, delay);
+            });
+        }
+        
+        html += `
+                </tbody>
+            </table>
+
+            <!-- Power Analysis -->
+            <div style="margin-bottom: 20px; padding: 10px; background: var(--bg-secondary); border-radius: 8px;">
+                <h4 style="margin-top: 0; font-size: 1rem;">Power / Progress</h4>
+                <div style="font-size: 0.9rem; color: var(--text-primary);">
+        `;
+        
+        const pBaseline = stats.policyB['all'].n > 10 ? stats.policyB['all'].p : 0.6;
+        const reqN = summary.estimateRequiredSample(pBaseline, 0.05);
+        const currentN = Math.min(stats.policyA['all'].n, stats.policyB['all'].n);
+        const progress = Math.min(100, (currentN / reqN) * 100);
+        
+        html += `
+                    <p>Target detectable lift: 5pp (baseline est. ${(pBaseline*100).toFixed(0)}%)</p>
+                    <p>Required n per arm: <strong>${reqN}</strong> (current min: ${currentN})</p>
+                    <div style="width: 100%; background: var(--border-color); height: 8px; border-radius: 4px; margin-top: 5px;">
+                        <div style="width: ${progress}%; background: var(--accent-color); height: 100%; border-radius: 4px;"></div>
+                    </div>
+                    <p style="font-size: 0.8rem; margin-top: 5px; color: var(--secondary-text);">
+                        ${progress < 100 ? 'Keep collecting data.' : 'Sufficient sample size for analysis.'}
+                    </p>
+                </div>
+            </div>
+
+            <!-- Assignment Balance -->
+            ${header && header.assignment && header.assignment.byDeck ? (() => {
+                let balanceHtml = `
+                    <div style="margin-bottom: 20px; padding: 10px; background: var(--bg-secondary); border-radius: 8px;">
+                        <h4 style="margin-top: 0; font-size: 1rem;">Assignment Balance</h4>
+                        <div style="font-size: 0.85rem;">
+                `;
+                
+                let totalA = 0;
+                let totalB = 0;
+                let totalCards = 0;
+                
+                for (const deckId in header.assignment.byDeck) {
+                    const d = header.assignment.byDeck[deckId];
+                    totalA += d.assignedA;
+                    totalB += d.assignedB;
+                    totalCards += d.total;
+                    
+                    const skew = d.total > 0 ? Math.abs(d.assignedA - d.assignedB) / d.total : 0;
+                    const skewWarning = skew > 0.15 ? 'color: var(--error-color); font-weight: bold;' : '';
+                    
+                    balanceHtml += `
+                        <div style="margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Deck: <strong>${deckId}</strong></span>
+                                <span style="${skewWarning}">Skew: ${(skew * 100).toFixed(1)}%</span>
+                            </div>
+                            <div style="display: flex; gap: 15px; margin-top: 3px; color: var(--secondary-text);">
+                                <span>Total: ${d.total}</span>
+                                <span>A: ${d.assignedA}</span>
+                                <span>B: ${d.assignedB}</span>
+                            </div>
+                            <div style="margin-top: 5px; display: flex; gap: 4px; overflow-x: auto; padding-bottom: 5px;">
+                    `;
+                    
+                    d.strata.forEach(s => {
+                        const sSkew = s.n > 0 ? Math.abs(s.a - s.b) : 0;
+                        const sColor = sSkew > 1 ? 'var(--error-color)' : 'var(--secondary-text)';
+                        balanceHtml += `
+                            <div style="flex: 0 0 auto; border: 1px solid var(--border-color); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; text-align: center;">
+                                <div style="color: var(--secondary-text)">Q${s.q}</div>
+                                <div style="font-weight: bold; color: ${sColor}">${s.a}/${s.b}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    balanceHtml += `
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                const overallSkew = totalCards > 0 ? Math.abs(totalA - totalB) / totalCards : 0;
+                if (overallSkew > 0.05) {
+                    balanceHtml += `<p style="color: var(--error-color); font-size: 0.8rem; margin-top: 5px;">⚠️ Overall assignment skew is high (${(overallSkew*100).toFixed(1)}%)</p>`;
+                }
+                
+                balanceHtml += `
+                        </div>
+                    </div>
+                `;
+                return balanceHtml;
+            })() : ''}
+            
+            <div style="display: flex; gap: 10px;">
+                <button id="exportEvalBtn" class="btn-secondary">Export JSON</button>
+                <button id="clearEvalBtn" class="btn-danger">Clear Data</button>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+        document.getElementById('evalEnabledCheckbox').onchange = async (e) => {
+            config.enabled = e.target.checked;
+            if (config.enabled && !config.experiment?.experimentId) {
+                config.experiment = config.experiment || {};
+                config.experiment.experimentId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                config.experiment.createdAt = Date.now();
+                // Header will be created on next render or explicitly here
+                await store.ensureExperimentHeader('default_user', config, { version: '1.0.0' });
+            }
+            await store.saveEvalConfig('default_user', config);
+            showToast(`Evaluation ${config.enabled ? 'enabled' : 'disabled'}`, 'info');
+            renderEvalPanel(container);
+        };
+        
+        document.getElementById('evalModeSelect').onchange = async (e) => {
+            if (isLocked) {
+                showToast('Settings are locked for this experiment. Start a new one to change mode.', 'warning');
+                e.target.value = mode; // Revert
+                return;
+            }
+            config.experiment = config.experiment || {};
+            config.experiment.mode = e.target.value;
+            await store.saveEvalConfig('default_user', config);
+            showToast(`Mode set to ${e.target.value}`, 'info');
+            renderEvalPanel(container);
+        };
+
+        if (document.getElementById('evalAssignmentMethodSelect')) {
+            document.getElementById('evalAssignmentMethodSelect').onchange = async (e) => {
+                if (isLocked) return;
+                config.experiment = config.experiment || {};
+                config.experiment.assignmentMethod = e.target.value;
+                await store.saveEvalConfig('default_user', config);
+                showToast(`Assignment method set to ${e.target.value}`, 'info');
+            };
+        }
+        
+        document.getElementById('newExperimentBtn').onclick = async () => {
+            if (confirm('Start new experiment? This will clear current assignment and probe data.')) {
+                const { store } = await getEvalModules();
+                await store.clearEvalData('default_user');
+                config.experiment = config.experiment || {};
+                config.experiment.experimentId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                config.experiment.createdAt = Date.now();
+                await store.saveEvalConfig('default_user', config);
+                
+                let header = await store.ensureExperimentHeader('default_user', config, { version: '1.0.0' });
+                
+                if (config.experiment.mode === 'CARD_LEVEL_SPLIT') {
+                    const allKnowledge = await getAllDataFromDB('userKnowledgeState');
+                    const knowledgeMap = new Map(allKnowledge.map(k => {
+                        let knowledgeId = k.cardID;
+                        if (!knowledgeId && k.id) {
+                            const parts = k.id.split(':');
+                            knowledgeId = parts.length > 1 ? parts[1] : parts[0];
+                        }
+                        return [knowledgeId, k];
+                    }).filter(([knowledgeId]) => knowledgeId !== undefined && knowledgeId !== null));
+                    
+                    const { collectCardMetasForDecks } = await import('../core/card-meta.js');
+                    const cardMetas = collectCardMetasForDecks(decks, Object.keys(decks || {}), knowledgeMap, computeDifficultyProxy);
+                    if (cardMetas.length === 0) {
+                        showToast('No cards available for assignment.', 'error');
+                        await renderEvalPanel(container);
+                        return;
+                    }
+                    
+                    const rng = studyState.evalRng || (() => Math.random());
+                    const { stats } = await store.ensureAssignment('default_user', config.experiment.experimentId, cardMetas, rng, {
+                        method: config.experiment.assignmentMethod || 'stratified_v1'
+                    });
+                    
+                    header.assignment = stats;
+                    await store.saveExperimentHeader('default_user', config.experiment.experimentId, header);
+                }
+
+                await renderEvalPanel(container);
+                showToast('New experiment started', 'success');
+            }
+        };
+        
+        document.getElementById('exportEvalBtn').onclick = async () => {
+            const events = await store.loadEvalEvents('default_user');
+            const pending = await store.loadPendingProbes('default_user');
+            
+            // Compute assignment summary
+            const exposures = events.filter(e => e.type === 'exposure');
+            const assignedA = exposures.filter(e => e.arm === 'A').length;
+            const assignedB = exposures.filter(e => e.arm === 'B').length;
+            const decksInvolved = [...new Set(exposures.map(e => e.deckId))];
+
+            const exportData = {
+                version: 3,
+                exportedAt: new Date().toISOString(),
+                config,
+                experimentHeader: header,
+                assignmentSummary: {
+                    totalAssignedA: assignedA,
+                    totalAssignedB: assignedB,
+                    decksInvolved,
+                    assignment: header?.assignment || null
+                },
+                eventsSummary: {
+                    count: events.length,
+                    exposures: exposures.length
+                },
+                events, // Full events
+                pendingProbes: pending,
+                completedProbes: completed
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `lagiote-eval-${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+        
+        document.getElementById('clearEvalBtn').onclick = async () => {
+            if (confirm('Are you sure you want to clear all evaluation data? This cannot be undone.')) {
+                await store.clearEvalData('default_user');
+                await renderEvalPanel(container);
+                showToast('Evaluation data cleared', 'success');
+            }
+        };
+        
+    } catch (err) {
+        console.error('Error rendering eval panel:', err);
+        container.innerHTML = `<div class="error-message">Error loading evaluation data: ${err.message}</div>`;
+    }
 }
 
 async function showAnalyticsView() {
@@ -8743,7 +10125,10 @@ async function showAnalyticsView() {
         sessionList.innerHTML = sessions.map(s => {
             const date = new Date(s.date).toLocaleString();
             const duration = `${Math.round(s.duration / 60)}m`;
-            return `<div class="deck-card-item">${escapeHtml(date)}: Studied "${escapeHtml(s.deckName || 'Unknown')}" for ${escapeHtml(duration)}</div>`;
+            const modeLabel = formatModeLabel(s.mode);
+            const accuracyLabel = typeof s.accuracy === 'number' ? ` | ${Math.round(s.accuracy * 100)}%` : '';
+            const deckName = escapeHtml(s.deckName || 'Unknown');
+            return `<div class="deck-card-item">${escapeHtml(date)}: ${escapeHtml(modeLabel)} on "${deckName}" for ${escapeHtml(duration)}${escapeHtml(accuracyLabel)}</div>`;
         }).join('');
     } else {
         sessionList.innerHTML = '<p style="color: var(--secondary-text); text-align: center;">No study sessions recorded yet.</p>';
@@ -8752,6 +10137,17 @@ async function showAnalyticsView() {
     transitionView('analyticsView', false, () => {
         renderAnalyticsActivityChart(activityData);
         renderAnalyticsDeckBreakdownChart(deckData);
+        
+        const container = document.getElementById('analyticsView');
+        let evalPanel = document.getElementById('evalPanel');
+        if (!evalPanel) {
+            evalPanel = document.createElement('div');
+            evalPanel.id = 'evalPanel';
+            evalPanel.className = 'settings-container';
+            evalPanel.style.marginTop = '30px';
+            container.appendChild(evalPanel);
+        }
+        renderEvalPanel(evalPanel);
     });
 }
 
@@ -8980,8 +10376,9 @@ function updateFocusMeter() {
         lastKnownFocusScore = averageFocusScore;
 
         const focusDot = document.getElementById('focusDot');
+        if (!focusDot) return;
         if (averageFocusScore >= 0.85) {
-            focusDot.style.backgroundColor = '#38a169';
+            focusDot.style.backgroundColor = 'var(--deck-accent)';
         } else if (averageFocusScore >= 0.65) {
             focusDot.style.backgroundColor = '#f6ad55';
         } else {
@@ -9020,41 +10417,6 @@ function calculateExamRetention(state, examDate) {
     return calculateRetentionAtDate(state, target);
 }
 
-
-async function updateDueCardCounts() {
-    const knowledgeStates = await getAllDataFromDB('userKnowledgeState');
-    const knowledgeMap = new Map(knowledgeStates.map(item => [item.cardID, item]));
-
-    for (const deckId in decks) {
-        const deck = decks[deckId];
-        let dueCount = 0;
-        deck.cards.forEach(card => {
-            const state = knowledgeMap.get(card.id);
-            if (!state) {
-                dueCount++;
-            } else {
-                const pRecall = calculatePRecall(state.stability, state.lastReviewed);
-                if (pRecall <= 0.90) {
-                    dueCount++;
-                }
-            }
-        });
-
-        const spacedBtn = document.querySelector(`.deck-card[data-deck-id="${deckId}"] .spaced-btn`);
-        if (spacedBtn) {
-            const existingBadge = spacedBtn.querySelector('.due-badge');
-            if (existingBadge) existingBadge.remove();
-
-            if (dueCount > 0) {
-                const badge = document.createElement('span');
-                badge.className = 'due-badge';
-                badge.textContent = dueCount;
-                badge.style.cssText = 'background-color: var(--danger-color); color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; margin-left: 8px;';
-                spacedBtn.appendChild(badge);
-            }
-        }
-    }
-}
 
 function determineCardArchetype(card, deckTypeHint = 'General') {
     if (deckTypeHint === 'Sequence') return 'SequenceItem';
@@ -9096,110 +10458,15 @@ async function processDeckContent(deck) {
     console.log("Deck content processed:", deck);
 }
 
-async function startSequenceSessionInternal(deckId) {
-    const deck = decks?.[deckId];
-    if (!deck) {
-        showToast('Unable to find that deck yet. Please wait while decks finish loading.', 'error');
-        return;
-    }
-    if (!Array.isArray(deck.cards)) {
-        showToast('Deck cards are not available yet. Please try again in a moment.', 'error');
-        return;
-    }
-
-    currentMode = 'sequence';
-    currentDeckId = deckId;
-
-    const sequenceCards = [...deck.cards].sort((a, b) => a.order - b.order);
-
-    if (sequenceCards.length < 2) {
-        showToast("A sequence requires at least 2 cards.", "error");
-        return;
-    }
-
-    const sequenceKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
-    studyState.knowledgeStates = new Map(sequenceKnowledgeStates.map(item => [item.cardID, item]));
-
-    const persistedChunkSize = deck.sequenceState?.sequenceChunkSize ?? deck.sequenceState?.chunkSize;
-    const configuredChunkSize = Number(deck.settings?.sequenceChunkSize);
-    const chunkSize = determineSequenceChunkSize(configuredChunkSize, persistedChunkSize, deck, sequenceCards, studyState.knowledgeStates);
-    studyState.sequenceChunkSize = chunkSize;
-    studyState.sequenceChunks = [];
-    for (let i = 0; i < sequenceCards.length; i += chunkSize) {
-        studyState.sequenceChunks.push(sequenceCards.slice(i, i + chunkSize));
-    }
-
-    studyState.settings = deck.settings;
-    studyState.targetRetention = deck.settings?.targetRetention || studyState.targetRetention;
-    studyState.sequenceCards = sequenceCards;
-    studyState.currentRound = 1;
-    studyState.startTime = new Date();
-    studyState.originPlanId = null;
-
-    if (deck.sequenceState && deck.sequenceState.currentChunkIndex < studyState.sequenceChunks.length) {
-        studyState.currentChunkIndex = deck.sequenceState.currentChunkIndex;
-        studyState.sequencePhase = deck.sequenceState.sequencePhase;
-        studyState.currentCardIndex = deck.sequenceState.currentCardIndex || 0;
-        studyState.nextPhaseAfterReview = deck.sequenceState.nextPhaseAfterReview || null;
-        studyState.sequenceMissedInChunk = deck.sequenceState.sequenceMissedInChunk || [];
-        studyState.weakestLinkIteration = deck.sequenceState.weakestLinkIteration || 0;
-        studyState.sequenceForwardQueue = deck.sequenceState.sequenceForwardQueue || [];
-        studyState.sequenceMissingEdges = deck.sequenceState.sequenceMissingEdges || [];
-        studyState.sequenceLinkDrillQueue = deck.sequenceState.sequenceLinkDrillQueue || [];
-        studyState.sequenceLinkDrillAttempts = deck.sequenceState.sequenceLinkDrillAttempts || 0;
-        studyState.sequenceRecentLinkFailures = deck.sequenceState.sequenceRecentLinkFailures || 0;
-        if (deck.sequenceState.roundCardIds && deck.sequenceState.roundCardIds.length > 0) {
-            const roundIdList = deck.sequenceState.roundCardIds;
-            studyState.roundCards = roundIdList
-                .map(id => studyState.sequenceCards.find(c => c.id === id))
-                .filter(Boolean);
-        } else {
-            studyState.roundCards = [];
-        }
-        if (deck.sequenceState.activeChunkOverrideIds && deck.sequenceState.activeChunkOverrideIds.length > 0) {
-            const chunk = studyState.sequenceChunks[studyState.currentChunkIndex] || [];
-            studyState.sequenceActiveChunkOverride = deck.sequenceState.activeChunkOverrideIds
-                .map(id => chunk.find(c => c.id === id))
-                .filter(Boolean);
-        } else {
-            studyState.sequenceActiveChunkOverride = null;
-        }
-        studyState.sequenceChunkStartTime = Date.now();
-        showToast(`Resuming from Chunk ${studyState.currentChunkIndex + 1}...`, "info");
-    } else {
-        studyState.currentChunkIndex = 0;
-        studyState.sequencePhase = null;
-        studyState.currentCardIndex = 0;
-        studyState.sequenceMissedInChunk = [];
-        studyState.weakestLinkIteration = 0;
-        studyState.roundCards = [];
-        studyState.sequenceActiveChunkOverride = null;
-        studyState.sequenceForwardQueue = [];
-        studyState.sequenceChunkStartTime = Date.now();
-    }
-
-    transitionView('studyMode');
-    resetStudySubViews();
-    document.getElementById('studyTitle').textContent = 'Sequence Learner';
-    document.getElementById('studySubtitle').textContent = deck.name;
-    transitionSubView(null, document.getElementById('cardView'));
-
-    if (studyState.sequencePhase) {
-        showNextCard();
-    } else {
-        moveToNextSequencePhase();
-    }
-}
-
-async function startSequenceSession(deckId) {
-    return startMode('sequence', deckId);
-}
-
 function selectOptimalQuestionType(card, deckOverride = null, modeOverride = currentMode) {
     const resolvedDeck = deckOverride || decks[card.deckId || currentDeckId];
 
     if (!resolvedDeck) {
         console.error(`Could not find deck for card "${card.question}". Defaulting to Flashcard.`);
+        return 'Flashcard';
+    }
+
+    if (modeOverride === 'spaced') {
         return 'Flashcard';
     }
 
@@ -9256,53 +10523,330 @@ function selectOptimalQuestionType(card, deckOverride = null, modeOverride = cur
     return 'Type';
 }
 
-async function generateAndDisplayMCQ(correctCard) {
+function normalizeMcqOptionKey(optionText) {
+    if (window.lagiote?.mcqRemediation?.normalizeOptionKey) {
+        return window.lagiote.mcqRemediation.normalizeOptionKey(optionText);
+    }
+    return String(optionText || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/\s+/g, ' ');
+}
+
+function getMcqExplanation(card) {
+    if (!card || typeof card !== 'object') return '';
+    const explanation = [
+        card.explanations?.correct,
+        card.mcqExplanation,
+        card.explanation
+    ].find(value => typeof value === 'string' && value.trim());
+    return explanation ? explanation.trim() : '';
+}
+
+function getMcqRefutation(card, lureKey) {
+    if (!card || typeof card !== 'object' || !lureKey) return '';
+    const normalizedKey = normalizeMcqOptionKey(lureKey);
+    const refutations = [
+        card.explanations?.lures,
+        card.distractorRefutations,
+        card.mcqRefutations
+    ];
+    for (const source of refutations) {
+        if (source && typeof source === 'object') {
+            const candidate = source[normalizedKey];
+            if (typeof candidate === 'string' && candidate.trim()) {
+                return candidate.trim();
+            }
+        }
+    }
+    return '';
+}
+
+function ensureMcqRemediationState() {
+    if (!studyState.mcqRemediation) {
+        studyState.mcqRemediation = {
+            queue: [],
+            cooldownUntil: 0,
+            cooldownMs: 60000,
+            maxQueue: 20,
+            pendingSteps: 0,
+            activeTask: null
+        };
+    }
+    if (!Array.isArray(studyState.mcqRemediation.queue)) {
+        studyState.mcqRemediation.queue = [];
+    }
+    return studyState.mcqRemediation;
+}
+
+function setRemediationDelay(remediationState, minSteps = 1, maxSteps = 3) {
+    const min = Math.max(0, Math.floor(minSteps));
+    const max = Math.max(min, Math.floor(maxSteps));
+    remediationState.pendingSteps = min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function enqueueLureRemediation(card, correctAnswer, lureOption, lureKey) {
+    if (!card || !card.id) return;
+    const remediationState = ensureMcqRemediationState();
+    const normalizedLureKey = normalizeMcqOptionKey(lureKey || lureOption);
+    if (!normalizedLureKey) return;
+
+    if (window.lagiote?.mcqRemediation?.enqueueRemediation) {
+        const task = {
+            type: 'lure_discriminate',
+            cardId: card.id,
+            correct: String(correctAnswer || '').trim(),
+            lure: String(lureOption || '').trim(),
+            lureKey: normalizedLureKey
+        };
+        remediationState.queue = window.lagiote.mcqRemediation.enqueueRemediation(
+            remediationState.queue,
+            task,
+            remediationState.maxQueue
+        );
+    } else {
+        const exists = remediationState.queue.some(task => task.cardId === card.id && task.lureKey === normalizedLureKey);
+        if (exists) return;
+        remediationState.queue.push({
+            type: 'lure_discriminate',
+            cardId: card.id,
+            correct: String(correctAnswer || '').trim(),
+            lure: String(lureOption || '').trim(),
+            lureKey: normalizedLureKey,
+            createdAt: Date.now(),
+            attempts: 0
+        });
+        if (remediationState.queue.length > remediationState.maxQueue) {
+            remediationState.queue.splice(0, remediationState.queue.length - remediationState.maxQueue);
+        }
+    }
+
+    if (!Number.isFinite(remediationState.pendingSteps) || remediationState.pendingSteps <= 0) {
+        setRemediationDelay(remediationState);
+    }
+}
+
+function shouldShowRemediation(nowMs = Date.now()) {
+    const remediationState = ensureMcqRemediationState();
+    if (remediationState.queue.length === 0) return false;
+
+    if (window.lagiote?.mcqRemediation?.shouldShowRemediation) {
+        if (!window.lagiote.mcqRemediation.shouldShowRemediation(remediationState.queue, nowMs, remediationState.cooldownUntil)) {
+            return false;
+        }
+    } else {
+        if (nowMs <= remediationState.cooldownUntil) return false;
+    }
+
+    const pending = Number.isFinite(remediationState.pendingSteps) ? remediationState.pendingSteps : 0;
+    return pending <= 0;
+}
+
+function decrementRemediationDelay() {
+    const remediationState = ensureMcqRemediationState();
+    if (remediationState.queue.length === 0) {
+        remediationState.pendingSteps = 0;
+        return;
+    }
+    const pending = Number.isFinite(remediationState.pendingSteps) ? remediationState.pendingSteps : 0;
+    remediationState.pendingSteps = Math.max(0, pending - 1);
+}
+
+function popNextRemediation() {
+    const remediationState = ensureMcqRemediationState();
+    if (remediationState.queue.length === 0) return null;
+
+    if (window.lagiote?.mcqRemediation?.popNextRemediation) {
+        const { task, nextQueue } = window.lagiote.mcqRemediation.popNextRemediation(remediationState.queue);
+        remediationState.queue = nextQueue;
+        return task;
+    }
+
+    let bestIndex = 0;
+    let bestTask = remediationState.queue[0];
+    for (let i = 1; i < remediationState.queue.length; i++) {
+        const candidate = remediationState.queue[i];
+        if (candidate.attempts < bestTask.attempts) {
+            bestIndex = i;
+            bestTask = candidate;
+            continue;
+        }
+        if (candidate.attempts === bestTask.attempts && candidate.createdAt < bestTask.createdAt) {
+            bestIndex = i;
+            bestTask = candidate;
+        }
+    }
+    remediationState.queue.splice(bestIndex, 1);
+    return bestTask;
+}
+
+function applyRemediationOutcome(stats, isCorrect, nowMs = Date.now()) {
+    if (window.lagiote?.mcqRemediation?.updateMcqRemediationStats) {
+        const nextStats = window.lagiote.mcqRemediation.updateMcqRemediationStats(stats, isCorrect, { now: nowMs });
+        Object.assign(stats, nextStats);
+        return;
+    }
+
+    stats.remediationAttempts += 1;
+    if (isCorrect) {
+        stats.remediationCorrect += 1;
+        stats.recognitionDependenceEma = Math.max(0, Math.min(1, stats.recognitionDependenceEma * (1 - 0.06)));
+    } else {
+        const ema = Number.isFinite(stats.recognitionDependenceEma) ? stats.recognitionDependenceEma : 0.0;
+        const alpha = 0.22;
+        stats.recognitionDependenceEma = Math.max(0, Math.min(1, (ema * (1 - alpha)) + alpha));
+    }
+    stats.lastRemediationAt = nowMs;
+    stats.lastUpdated = nowMs;
+}
+
+function findCardById(cardId) {
+    if (!cardId) return null;
+    const currentDeck = decks[currentDeckId];
+    const fromCurrentDeck = currentDeck?.cards?.find(card => card.id === cardId);
+    if (fromCurrentDeck) return fromCurrentDeck;
+    for (const deck of Object.values(decks)) {
+        const candidate = deck?.cards?.find(card => card.id === cardId);
+        if (candidate) return candidate;
+    }
+    return null;
+}
+
+function weightedSample(items, weightFn, count) {
+    const pool = items.slice();
+    const selected = [];
+    const targetCount = Math.min(count, pool.length);
+    for (let pick = 0; pick < targetCount; pick++) {
+        let totalWeight = 0;
+        const weights = pool.map(item => {
+            const weight = Math.max(0, Number(weightFn(item)) || 0);
+            totalWeight += weight;
+            return weight;
+        });
+        if (totalWeight <= 0) {
+            selected.push(pool.shift());
+            continue;
+        }
+        let roll = Math.random() * totalWeight;
+        let chosenIndex = 0;
+        for (let i = 0; i < pool.length; i++) {
+            roll -= weights[i];
+            if (roll <= 0) {
+                chosenIndex = i;
+                break;
+            }
+        }
+        selected.push(pool.splice(chosenIndex, 1)[0]);
+    }
+    return selected;
+}
+
+function selectPreferredMcqOptions(options, correctAnswer, preferredCount = 3, lureCounts = null) {
+    const unique = Array.from(new Set((Array.isArray(options) ? options : []).map(o => String(o || '').trim())))
+        .filter(Boolean);
+    const correct = String(correctAnswer || '').trim();
+    const withoutEmpty = unique.filter(Boolean);
+    if (!withoutEmpty.includes(correct)) withoutEmpty.unshift(correct);
+    if (withoutEmpty.length <= preferredCount) return shuffleArray(withoutEmpty);
+
+    const lures = withoutEmpty.filter(opt => opt !== correct);
+    if (preferredCount <= 1 || lures.length < (preferredCount - 1)) {
+        return shuffleArray(withoutEmpty.slice(0, Math.max(2, Math.min(4, withoutEmpty.length))));
+    }
+
+    const lureCountsMap = lureCounts && typeof lureCounts === 'object' ? lureCounts : null;
+    let selectedLures;
+    if (lureCountsMap && window.lagiote?.mcqRemediation?.weightedSampleDistractors) {
+        selectedLures = window.lagiote.mcqRemediation.weightedSampleDistractors(lures, lureCountsMap, preferredCount - 1);
+    } else if (lureCountsMap) {
+        selectedLures = weightedSample(lures, option => 1 + Math.min(5, lureCountsMap[normalizeMcqOptionKey(option)] || 0), preferredCount - 1);
+    } else {
+        selectedLures = shuffleArray(lures).slice(0, preferredCount - 1);
+    }
+    return shuffleArray([correct, ...selectedLures]);
+}
+
+function renderMcqOptionsPlaceholder(message = 'Generating options...') {
     const optionsContainer = document.getElementById('mcqOptions');
     if (!optionsContainer) return;
     optionsContainer.innerHTML = '';
     optionsContainer.classList.remove('hidden');
     const placeholder = document.createElement('div');
     placeholder.className = 'mcq-placeholder';
-    placeholder.textContent = 'Generating options...';
+    placeholder.textContent = message;
     optionsContainer.appendChild(placeholder);
+}
 
-    studyState.pendingMCQToken = (studyState.pendingMCQToken || 0) + 1;
-    const requestToken = studyState.pendingMCQToken;
-    studyState.pendingMCQCardId = correctCard.id;
-
-    const finalizeOptions = (options) => {
-        if (studyState.pendingMCQToken !== requestToken) return;
-        if (studyState.pendingMCQCardId !== correctCard.id) return;
-        displayMCQButtons(options, correctCard);
+function startMcqPipeline(card) {
+    const token = (studyState.pendingMCQToken || 0) + 1;
+    studyState.pendingMCQToken = token;
+    studyState.pendingMCQCardId = card.id;
+    studyState.mcqPipeline = {
+        token,
+        cardId: card.id,
+        phase: 'recall',
+        recallWasCorrect: null,
+        options: null,
+        startedAt: Date.now()
     };
+    prefetchMcqOptions(card, token);
+}
 
-    const deckForThisCard = decks[correctCard.deckId];
+async function prefetchMcqOptions(card, token) {
+    try {
+        const options = await buildMcqOptions(card);
+        if (studyState.pendingMCQToken !== token) return;
+        if (studyState.pendingMCQCardId !== card.id) return;
+        if (!studyState.mcqPipeline || studyState.mcqPipeline.token !== token) return;
+        studyState.mcqPipeline.options = options;
+        if (studyState.mcqPipeline.phase === 'recognition') {
+            displayMCQButtons(options, card);
+        }
+    } catch (error) {
+        console.warn('[MCQ] Option prefetch failed', error);
+    }
+}
+
+async function buildMcqOptions(correctCard) {
+    const deckIdForThisCard = correctCard.deckId || currentDeckId;
+    let lureCounts = null;
+    try {
+        const state = studyState.knowledgeStates?.get(correctCard.id)
+            || await getOrCreateKnowledgeState('default_user', correctCard.id, deckIdForThisCard);
+        const stats = ensureMcqStats(state?.mcqStats);
+        lureCounts = stats.lureCounts;
+    } catch (error) {
+        lureCounts = null;
+    }
+    const deckForThisCard = decks[deckIdForThisCard];
     if (!deckForThisCard) {
         console.error("Deck not found for card:", correctCard.id, "DeckID:", correctCard.deckId);
-        console.log("Available decks:", Object.keys(decks));
-        optionsContainer.innerHTML = '';
-        return;
+        return selectPreferredMcqOptions([correctCard.answer], correctCard.answer, 2, lureCounts);
     }
 
+    const correctAnswer = String(correctCard.answer || '').trim();
     const cardInDeck = deckForThisCard.cards.find(c => c.id === correctCard.id);
-    if (cardInDeck?.distractors && cardInDeck.distractors.length >= 3) {
-        console.log("[MCQ] Using cached distractors for card:", correctCard.id);
-        const finalOptions = shuffleArray([correctCard.answer, ...cardInDeck.distractors]);
-        finalizeOptions(finalOptions);
-        return;
+    const preGenerated = studyState.preGeneratedDistractors?.get?.(correctCard.id) || null;
+
+    if (Array.isArray(preGenerated) && preGenerated.length >= 2) {
+        const options = [correctAnswer, ...preGenerated];
+        return selectPreferredMcqOptions(shuffleArray(options), correctAnswer, 3, lureCounts);
+    }
+
+    if (cardInDeck?.distractors && cardInDeck.distractors.length >= 2) {
+        const options = [correctAnswer, ...cardInDeck.distractors];
+        return selectPreferredMcqOptions(shuffleArray(options), correctAnswer, 3, lureCounts);
     }
 
     if (isOnline) {
-        console.log("[MCQ] No cached data. Calling API to generate distractors for card:", correctCard.id);
         try {
-            const requestBody = { question: correctCard.question, answer: correctCard.answer };
+            const requestBody = { question: correctCard.question, answer: correctAnswer };
             let generatedDistractors;
 
             if (isElectron) {
-                console.log("[MCQ] Using Electron API for distractor generation");
                 generatedDistractors = await window.electronAPI.generateDistractors(requestBody);
             } else {
-                console.log("[MCQ] Using server API for distractor generation");
                 const response = await fetch('/api/distractors', {
                     method: 'POST',
                     headers: {
@@ -9313,7 +10857,6 @@ async function generateAndDisplayMCQ(correctCard) {
                 });
 
                 if (response.status === 401) {
-                    console.warn("[MCQ] Token expired, attempting to refresh");
                     if (getStoredSession()) {
                         await loadUserDataAndSync();
                     }
@@ -9321,8 +10864,6 @@ async function generateAndDisplayMCQ(correctCard) {
                 }
 
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error("[MCQ] API error response:", errorText);
                     throw new Error(`Server function for distractors failed: ${response.status}`);
                 }
                 const result = await response.json();
@@ -9333,75 +10874,552 @@ async function generateAndDisplayMCQ(correctCard) {
                 throw new Error("Offline: " + (generatedDistractors.message || "Cannot generate distractors"));
             }
 
-            if (generatedDistractors && generatedDistractors.length >= 3) {
+            if (Array.isArray(generatedDistractors) && generatedDistractors.length >= 2) {
                 if (cardInDeck) {
                     cardInDeck.distractors = generatedDistractors;
                     await saveDataToDB('decks', deckForThisCard);
-                    console.log("[MCQ] Distractors cached to deck for card:", correctCard.id);
                 }
                 correctCard.distractors = generatedDistractors;
-                const finalOptions = shuffleArray([correctCard.answer, ...generatedDistractors]);
-                finalizeOptions(finalOptions);
-                return;
-            } else {
-                console.warn("[MCQ] API returned insufficient distractors:", generatedDistractors?.length || 0);
+                const options = [correctAnswer, ...generatedDistractors];
+                return selectPreferredMcqOptions(shuffleArray(options), correctAnswer, 3, lureCounts);
             }
         } catch (error) {
-            console.error("[MCQ] Failed to generate/cache distractors:", error);
             const errorMsg = error.message || "Error generating options";
-            if (errorMsg.includes('Offline') || errorMsg.includes('expired')) {
-                console.log("[MCQ] Offline or auth issue detected, using random distractors");
-            } else {
+            if (!String(errorMsg).includes('Offline') && !String(errorMsg).includes('expired')) {
                 showToast("Couldn't generate smart options, using random.", "warning");
             }
         }
-    } else {
-        console.log("[MCQ] Offline mode - skipping API call");
     }
 
-    console.warn("[MCQ] Falling back to random distractors for card:", correctCard.id);
-    const allCardsInDeck = deckForThisCard.cards;
-    const options = new Set([correctCard.answer]);
+    const allCardsInDeck = deckForThisCard.cards || [];
+    const options = new Set([correctAnswer]);
     const randomFill = shuffleArray(allCardsInDeck.filter(card => card.id !== correctCard.id));
     for (const randomCard of randomFill) {
-        if (options.size < 4) options.add(randomCard.answer);
+        if (options.size < 4) options.add(String(randomCard.answer || '').trim());
         else break;
     }
-    const finalOptions = shuffleArray(Array.from(options));
-    finalizeOptions(finalOptions);
+    return selectPreferredMcqOptions(shuffleArray(Array.from(options)), correctAnswer, 3, lureCounts);
+}
+
+function enterMcqRecognitionPhase(card) {
+    if (!studyState.mcqPipeline || studyState.mcqPipeline.cardId !== card.id) return;
+    studyState.mcqPipeline.phase = 'recognition';
+    const writeInput = document.getElementById('writeAnswerInput');
+    if (writeInput) {
+        writeInput.disabled = true;
+        writeInput.classList.add('hidden');
+    }
+    document.getElementById('checkAnswerBtn')?.classList.add('hidden');
+    document.getElementById('dontKnowBtn')?.classList.add('hidden');
+
+    const options = studyState.mcqPipeline.options;
+    if (Array.isArray(options) && options.length) {
+        displayMCQButtons(options, card);
+    } else {
+        renderMcqOptionsPlaceholder();
+    }
+}
+
+async function submitMcqRecallAttempt() {
+    const card = getActiveCard();
+    if (!card || !studyState.mcqPipeline || studyState.mcqPipeline.cardId !== card.id) {
+        return autoCheckAnswer();
+    }
+
+    const deckIdForThisCard = card.deckId || currentDeckId;
+    const state = await getOrCreateKnowledgeState('default_user', card.id, deckIdForThisCard);
+    const stats = ensureMcqStats(state?.mcqStats);
+    const nowMs = Date.now();
+
+    const userInput = document.getElementById('writeAnswerInput');
+    const feedbackMessage = document.getElementById('feedbackMessage');
+    const submissionTime = performance.now();
+    const recallLatency = currentInteractionLog.firstKeyPressTime ? Math.round(currentInteractionLog.firstKeyPressTime - currentInteractionLog.questionLoadTime) : null;
+
+    let answerFluency = 0;
+    if (currentInteractionLog.firstKeyPressTime) {
+        const typingDuration = submissionTime - currentInteractionLog.firstKeyPressTime;
+        if (typingDuration > 0) {
+            answerFluency = parseFloat((userInput.value.trim().length / (typingDuration / 1000))).toFixed(2);
+        }
+    }
+
+    const userAnswer = userInput ? userInput.value.trim() : '';
+    const correctAnswer = String(card.answer || '').trim();
+    const deck = decks[deckIdForThisCard];
+    const settings = { ...DEFAULT_DECK_SETTINGS, ...(deck?.settings || {}), ...(studyState.settings || {}) };
+    const checkResult = checkAnswerForgivingly(userAnswer, correctAnswer, settings);
+    const recallCorrect = checkResult.result === 'CORRECT' || checkResult.result === 'TYPO';
+
+    stats.attempts += 1;
+    stats.recallAttempts += 1;
+    stats.lastUpdated = nowMs;
+
+    studyState.mcqPipeline.recallWasCorrect = recallCorrect;
+
+    if (recallCorrect) {
+        stats.recallCorrect += 1;
+        stats.recognitionDependenceEma = Math.max(0, Math.min(1, stats.recognitionDependenceEma * (1 - 0.08)));
+
+        state.mcqStats = stats;
+        studyState.knowledgeStates?.set?.(card.id, { ...state, mcqStats: stats });
+
+        if (feedbackMessage) {
+            feedbackMessage.style.color = 'var(--deck-accent)';
+            feedbackMessage.textContent = 'Correct.';
+        }
+        document.getElementById('checkAnswerBtn')?.classList.add('hidden');
+        document.getElementById('dontKnowBtn')?.classList.add('hidden');
+
+        await logInteraction({
+            cardID: card.id,
+            wasCorrect: true,
+            userAnswer,
+            correctAnswer,
+            recallLatency,
+            answerFluency,
+            totalCorrections: checkResult.result === 'TYPO' ? checkResult.distance : 0,
+            attemptCount: 1,
+            questionType: 'MultipleChoice'
+        });
+
+        const { shouldLogMcqExposure } = await getEvalExposureDedupeModule();
+        if (shouldLogMcqExposure('recall', recallCorrect)) {
+            await logEvalExposureOnce(card, true, recallLatency, { pipeline: 'mcq', phase: 'recall' });
+        }
+
+        if (userInput) {
+            userInput.disabled = true;
+            userInput.classList.add('correct');
+        }
+
+        setTimeout(() => {
+            if (feedbackMessage) feedbackMessage.textContent = '';
+            moveCard(card, true, 'MultipleChoice', { format: 'recall', calibrationTruth: true, mcqStats: stats });
+        }, 900);
+        return;
+    }
+
+    state.mcqStats = stats;
+    studyState.knowledgeStates?.set?.(card.id, { ...state, mcqStats: stats });
+
+    if (userInput) {
+        userInput.disabled = true;
+        userInput.classList.add('incorrect');
+    }
+    if (feedbackMessage) {
+        feedbackMessage.style.color = 'var(--text-color)';
+        feedbackMessage.textContent = '';
+    }
+
+    await logInteraction({
+        cardID: card.id,
+        wasCorrect: false,
+        userAnswer,
+        correctAnswer,
+        recallLatency,
+        answerFluency,
+        totalCorrections: 0,
+        attemptCount: 1,
+        questionType: 'MultipleChoice'
+    });
+
+    enterMcqRecognitionPhase(card);
+}
+
+function skipMcqRecallAttempt() {
+    const card = getActiveCard();
+    if (!card || !studyState.mcqPipeline || studyState.mcqPipeline.cardId !== card.id) {
+        return dontKnowAnswer();
+    }
+
+    const deckIdForThisCard = card.deckId || currentDeckId;
+    getOrCreateKnowledgeState('default_user', card.id, deckIdForThisCard).then(state => {
+        const stats = ensureMcqStats(state?.mcqStats);
+        stats.attempts += 1;
+        stats.recallAttempts += 1;
+        stats.lastUpdated = Date.now();
+        state.mcqStats = stats;
+        studyState.knowledgeStates?.set?.(card.id, { ...state, mcqStats: stats });
+        studyState.mcqPipeline.recallWasCorrect = false;
+        enterMcqRecognitionPhase(card);
+    }).catch(() => enterMcqRecognitionPhase(card));
 }
 
 function displayMCQButtons(options, correctCard) {
     const optionsContainer = document.getElementById('mcqOptions');
+    if (!optionsContainer) return;
     optionsContainer.innerHTML = '';
+    optionsContainer.classList.remove('hidden');
 
     options.forEach(optionText => {
         const button = document.createElement('button');
         button.className = 'btn btn-secondary';
         button.textContent = optionText;
-        button.onclick = () => {
-            optionsContainer.querySelectorAll('button').forEach(btn => btn.disabled = true);
-
-            const isCorrect = (optionText === correctCard.answer);
-
-            button.classList.remove('btn-secondary');
-            button.classList.add(isCorrect ? 'btn-success' : 'btn-danger');
-
-            if (!isCorrect) {
-                optionsContainer.querySelectorAll('button').forEach(btn => {
-                    if (btn.textContent === correctCard.answer) {
-                        btn.classList.remove('btn-secondary');
-                        btn.classList.add('btn-success');
-                    }
-                });
-            }
-
-            logInteraction({ cardID: correctCard.id, wasCorrect: isCorrect, userAnswer: optionText, questionType: 'MultipleChoice', recallLatency: null, answerFluency: 0, totalCorrections: 0, attemptCount: 1 });
-            setTimeout(() => moveCard(correctCard, isCorrect, 'MultipleChoice'), 1500);
-        };
+        button.onclick = () => handleMcqOptionSelected(optionText, correctCard);
         optionsContainer.appendChild(button);
     });
 }
+
+function displayRemediationButtons(options, task) {
+    const optionsContainer = document.getElementById('mcqOptions');
+    if (!optionsContainer) return;
+    optionsContainer.innerHTML = '';
+    optionsContainer.classList.remove('hidden');
+
+    options.forEach(optionText => {
+        const button = document.createElement('button');
+        button.className = 'btn btn-secondary';
+        button.textContent = optionText;
+        button.onclick = () => handleRemediationOptionSelected(optionText, task);
+        optionsContainer.appendChild(button);
+    });
+}
+
+function renderLureRemediation(task) {
+    if (!task) return false;
+    const remediationState = ensureMcqRemediationState();
+    remediationState.activeTask = task;
+    remediationState.cooldownUntil = Date.now() + remediationState.cooldownMs;
+    if (remediationState.queue.length > 0) {
+        setRemediationDelay(remediationState);
+    }
+
+    const options = Array.from(new Set([task.correct, task.lure].map(opt => String(opt || '').trim())))
+        .filter(Boolean);
+    if (options.length < 2) {
+        remediationState.activeTask = null;
+        return false;
+    }
+
+    document.getElementById('mcqView').classList.remove('hidden');
+    const simpleButtons = document.getElementById('simpleAnswerButtons');
+    if (simpleButtons) simpleButtons.classList.add('hidden');
+
+    const mcqQEl = document.getElementById('mcqQuestion');
+    if (mcqQEl) {
+        const card = findCardById(task.cardId);
+        const prompt = 'Which answer is correct?';
+        mcqQEl.textContent = card?.question ? `${prompt} ${card.question}` : prompt;
+    }
+
+    const feedbackMessage = document.getElementById('feedbackMessage');
+    if (feedbackMessage) feedbackMessage.innerHTML = '';
+
+    displayRemediationButtons(shuffleArray(options), task);
+    startInteractionLog(task.cardId);
+    return true;
+}
+
+async function handleRemediationOptionSelected(optionText, task) {
+    const remediationState = ensureMcqRemediationState();
+    if (!task || remediationState.activeTask !== task) return;
+
+    const optionsContainer = document.getElementById('mcqOptions');
+    optionsContainer?.querySelectorAll?.('button')?.forEach(btn => btn.disabled = true);
+
+    const correctAnswer = String(task.correct || '').trim();
+    const chosen = String(optionText || '').trim();
+    const isCorrect = chosen === correctAnswer;
+    const responseLatency = (typeof currentInteractionLog?.questionLoadTime === 'number')
+        ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
+        : null;
+
+    const card = findCardById(task.cardId) || { id: task.cardId, deckId: currentDeckId };
+    const deckIdForThisCard = card.deckId || currentDeckId;
+    const state = await getOrCreateKnowledgeState('default_user', task.cardId, deckIdForThisCard);
+    const stats = ensureMcqStats(state?.mcqStats);
+    const nowMs = Date.now();
+
+    applyRemediationOutcome(stats, isCorrect, nowMs);
+
+    state.mcqStats = stats;
+    studyState.knowledgeStates?.set?.(task.cardId, { ...state, mcqStats: stats });
+
+    const buttons = Array.from(optionsContainer?.querySelectorAll?.('button') || []);
+    buttons.forEach(btn => {
+        const text = String(btn.textContent || '').trim();
+        if (text === chosen) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add(isCorrect ? 'btn-success' : 'btn-danger');
+        }
+        if (!isCorrect && text === correctAnswer) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add('btn-success');
+        }
+    });
+
+    const feedbackMessage = document.getElementById('feedbackMessage');
+    if (feedbackMessage) {
+        const safeCorrect = escapeHtml(correctAnswer);
+        const refutation = getMcqRefutation(card, task.lureKey);
+        feedbackMessage.style.color = 'var(--text-color)';
+        if (refutation) {
+            feedbackMessage.innerHTML = `${escapeHtml(refutation)}<br><strong>The correct answer is:</strong> <span style="color:var(--deck-accent)">${safeCorrect}</span>`;
+        } else {
+            feedbackMessage.innerHTML = `<strong>The correct answer is:</strong> <span style="color:var(--deck-accent)">${safeCorrect}</span>`;
+        }
+    }
+
+    await logInteraction({
+        cardID: task.cardId,
+        wasCorrect: isCorrect,
+        userAnswer: chosen,
+        correctAnswer,
+        recallLatency: responseLatency,
+        answerFluency: 0,
+        totalCorrections: 0,
+        attemptCount: 1,
+        questionType: 'MultipleChoice'
+    });
+
+    try {
+        const interactionLog = {
+            ...currentInteractionLog,
+            recallLatency: responseLatency,
+            answerFluency: 0,
+            totalCorrections: 0,
+            attemptCount: 1,
+            questionType: 'MultipleChoice'
+        };
+        await applyFsrsReviewUpdate(
+            card,
+            deckIdForThisCard,
+            isCorrect,
+            interactionLog,
+            0.5,
+            {
+                format: 'mcq',
+                subformat: 'remediation',
+                calibrationTruth: true,
+                mcqStats: stats,
+                questionType: 'MultipleChoice'
+            }
+        );
+        const deck = decks[deckIdForThisCard];
+        if (deck) {
+            await saveDataToDB('decks', deck);
+        }
+    } catch (error) {
+        console.warn('[MCQ] Remediation update failed', error);
+        await upsertKnowledgeState({ ...state, mcqStats: stats });
+    }
+
+    if (!isCorrect) {
+        const requeue = {
+            ...task,
+            attempts: (task.attempts || 0) + 1,
+            createdAt: Date.now()
+        };
+        const exists = remediationState.queue.some(item => item.cardId === requeue.cardId && item.lureKey === requeue.lureKey);
+        if (!exists) {
+            remediationState.queue.push(requeue);
+            if (remediationState.queue.length > remediationState.maxQueue) {
+                remediationState.queue.splice(0, remediationState.queue.length - remediationState.maxQueue);
+            }
+        }
+        setRemediationDelay(remediationState, 1, 3);
+    }
+
+    setTimeout(() => {
+        if (feedbackMessage) feedbackMessage.innerHTML = '';
+        remediationState.activeTask = null;
+        showNextCard();
+    }, 1500);
+}
+
+async function handleMcqOptionSelected(optionText, correctCard) {
+    const card = correctCard || getActiveCard();
+    if (!card) return;
+    const optionsContainer = document.getElementById('mcqOptions');
+    optionsContainer?.querySelectorAll?.('button')?.forEach(btn => btn.disabled = true);
+
+    const correctAnswer = String(card.answer || '').trim();
+    const chosen = String(optionText || '').trim();
+    const isCorrect = chosen === correctAnswer;
+    const responseLatency = (typeof currentInteractionLog?.questionLoadTime === 'number')
+        ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
+        : null;
+    const pipeline = studyState.mcqPipeline && studyState.mcqPipeline.cardId === card.id
+        ? studyState.mcqPipeline
+        : null;
+    const recallWasCorrect = pipeline ? pipeline.recallWasCorrect : null;
+    const recallAttempted = pipeline ? pipeline.recallWasCorrect !== null : false;
+
+    const deckIdForThisCard = card.deckId || currentDeckId;
+    const state = await getOrCreateKnowledgeState('default_user', card.id, deckIdForThisCard);
+    const stats = ensureMcqStats(state?.mcqStats);
+    const nowMs = Date.now();
+
+    stats.mcqAttempts += 1;
+    if (isCorrect) {
+        stats.mcqCorrect += 1;
+        stats.lastLureKey = null;
+    } else {
+        const lureKey = normalizeMcqOptionKey(chosen);
+        stats.lureCounts[lureKey] = (stats.lureCounts[lureKey] || 0) + 1;
+        stats.lastLureKey = lureKey;
+        enqueueLureRemediation(card, correctAnswer, chosen, lureKey);
+    }
+    stats.lastUpdated = nowMs;
+
+    if (studyState.mcqPipeline && studyState.mcqPipeline.cardId === card.id && studyState.mcqPipeline.recallWasCorrect === false) {
+        const ema = Number.isFinite(stats.recognitionDependenceEma) ? stats.recognitionDependenceEma : 0.0;
+        const alpha = isCorrect ? 0.18 : 0.22;
+        stats.recognitionDependenceEma = Math.max(0, Math.min(1, (ema * (1 - alpha)) + alpha));
+    }
+
+    state.mcqStats = stats;
+    studyState.knowledgeStates?.set?.(card.id, { ...state, mcqStats: stats });
+
+    const buttons = Array.from(optionsContainer?.querySelectorAll?.('button') || []);
+    buttons.forEach(btn => {
+        const text = String(btn.textContent || '').trim();
+        if (text === chosen) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add(isCorrect ? 'btn-success' : 'btn-danger');
+        }
+        if (!isCorrect && text === correctAnswer) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add('btn-success');
+        }
+    });
+
+    const feedbackMessage = document.getElementById('feedbackMessage');
+    if (feedbackMessage) {
+        const safeCorrect = escapeHtml(correctAnswer);
+        if (!isCorrect) {
+            feedbackMessage.style.color = 'var(--text-color)';
+            const refutation = getMcqRefutation(card, chosen);
+            if (refutation) {
+                feedbackMessage.innerHTML = `${escapeHtml(refutation)}<br><strong>The correct answer is:</strong> <span style="color:var(--deck-accent)">${safeCorrect}</span>`;
+            } else {
+                feedbackMessage.innerHTML = `Incorrect. <strong>The correct answer is:</strong> <span style="color:var(--deck-accent)">${safeCorrect}</span>`;
+            }
+        } else {
+            feedbackMessage.style.color = 'var(--deck-accent)';
+            const explanation = getMcqExplanation(card);
+            if (explanation) {
+                feedbackMessage.innerHTML = `Correct. <strong>${safeCorrect}</strong><br>${escapeHtml(explanation)}`;
+            } else {
+                feedbackMessage.innerHTML = `Correct. <strong>${safeCorrect}</strong>`;
+            }
+        }
+    }
+
+    await logInteraction({
+        cardID: card.id,
+        wasCorrect: isCorrect,
+        userAnswer: chosen,
+        correctAnswer,
+        recallLatency: responseLatency,
+        answerFluency: 0,
+        totalCorrections: 0,
+        attemptCount: 1,
+        questionType: 'MultipleChoice'
+    });
+
+    const { shouldLogMcqExposure } = await getEvalExposureDedupeModule();
+    if (shouldLogMcqExposure('recognition', recallWasCorrect)) {
+        await logEvalExposureOnce(card, isCorrect, responseLatency, {
+            pipeline: 'mcq',
+            phase: 'recognition',
+            recallAttempted,
+            recallWasCorrect
+        });
+    }
+
+    setTimeout(() => {
+        if (feedbackMessage) feedbackMessage.innerHTML = '';
+        moveCard(card, isCorrect, 'MultipleChoice', { format: 'mcq', calibrationTruth: true, mcqStats: stats });
+    }, 1500);
+}
+
+window.debugMcqPipelineSelfCheck = function () {
+    const stats = createDefaultMcqStats();
+    const clampValue = (value, min, max) => Math.min(max, Math.max(min, value));
+
+    const boost = (s) => {
+        const lureCounts = s.lureCounts && typeof s.lureCounts === 'object' ? s.lureCounts : {};
+        const lureTotal = Object.values(lureCounts).reduce((sum, v) => sum + (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0), 0);
+        const lureBoost = 1 + 0.10 * Math.min(6, lureTotal);
+        const ema = Number.isFinite(Number(s.recognitionDependenceEma)) ? Math.max(0, Math.min(1, Number(s.recognitionDependenceEma))) : 0;
+        const dependenceBoost = 1 + 0.45 * ema;
+        const attempts = Number.isFinite(Number(s.remediationAttempts)) ? Math.max(0, Number(s.remediationAttempts)) : 0;
+        const correct = Number.isFinite(Number(s.remediationCorrect)) ? Math.max(0, Number(s.remediationCorrect)) : 0;
+        const failureRate = attempts > 0 ? 1 - (correct / Math.max(1, attempts)) : 0;
+        const remBoost = 1 + 0.35 * clampValue(failureRate, 0, 1);
+        return lureBoost * dependenceBoost * remBoost;
+    };
+
+    let prevBoost = boost(stats);
+    for (let i = 0; i < 5; i++) {
+        stats.attempts += 1;
+        stats.recallAttempts += 1;
+        stats.mcqAttempts += 1;
+        stats.mcqCorrect += 1;
+        stats.recognitionDependenceEma = Math.max(0, Math.min(1, (stats.recognitionDependenceEma * (1 - 0.18)) + 0.18));
+        stats.lastUpdated = Date.now();
+        const nextBoost = boost(stats);
+        console.assert(nextBoost >= prevBoost, 'Expected MCQ boost to be non-decreasing with repeated recognition-only success');
+        prevBoost = nextBoost;
+    }
+
+    console.assert(stats.recognitionDependenceEma > 0, 'Expected recognitionDependenceEma to increase');
+    console.assert(stats.mcqCorrect > 0 && stats.recallCorrect === 0, 'Expected mastery gate to block without recall success');
+
+    const remediationState = ensureMcqRemediationState();
+    const prevQueue = remediationState.queue.slice();
+    const prevPending = remediationState.pendingSteps;
+    const prevCooldown = remediationState.cooldownUntil;
+    const prevActive = remediationState.activeTask;
+
+    remediationState.queue = [];
+    remediationState.pendingSteps = 0;
+    remediationState.cooldownUntil = 0;
+    remediationState.activeTask = null;
+
+    enqueueLureRemediation({ id: 'mcq-debug-card', answer: 'Alpha' }, 'Alpha', 'Beta', 'beta');
+    console.assert(remediationState.queue.length === 1, 'Expected remediation task to enqueue');
+
+    remediationState.pendingSteps = 2;
+    console.assert(!shouldShowRemediation(Date.now()), 'Expected remediation to be delayed');
+    decrementRemediationDelay();
+    decrementRemediationDelay();
+    console.assert(shouldShowRemediation(Date.now()), 'Expected remediation to unlock within a few steps');
+
+    const beforeRemBoost = boost(stats);
+    applyRemediationOutcome(stats, false, Date.now());
+    const afterRemBoost = boost(stats);
+    console.assert(stats.remediationAttempts === 1, 'Expected remediationAttempts to increment');
+    console.assert(stats.remediationCorrect === 0, 'Expected remediationCorrect to remain 0 after failure');
+    console.assert(stats.recognitionDependenceEma > 0, 'Expected remediation failure to increase recognitionDependenceEma');
+    console.assert(afterRemBoost > beforeRemBoost, 'Expected remediation failure to increase boost');
+
+    const options = ['Correct', 'Lure A', 'Lure B', 'Lure C'];
+    const lureCounts = { [normalizeMcqOptionKey('Lure B')]: 5 };
+    const lureTallies = { 'Lure A': 0, 'Lure B': 0, 'Lure C': 0 };
+    for (let i = 0; i < 200; i++) {
+        const selection = selectPreferredMcqOptions(options, 'Correct', 3, lureCounts);
+        selection.forEach(opt => {
+            if (opt !== 'Correct' && lureTallies[opt] !== undefined) {
+                lureTallies[opt] += 1;
+            }
+        });
+    }
+    console.assert(lureTallies['Lure B'] > lureTallies['Lure A'], 'Expected weighted lure to appear more often');
+    console.assert(lureTallies['Lure B'] > lureTallies['Lure C'], 'Expected weighted lure to appear more often');
+
+    remediationState.queue = prevQueue;
+    remediationState.pendingSteps = prevPending;
+    remediationState.cooldownUntil = prevCooldown;
+    remediationState.activeTask = prevActive;
+
+    stats.recallCorrect += 1;
+    console.assert(!(stats.mcqCorrect > 0 && stats.recallCorrect === 0), 'Expected MCQ-only mastery gate to clear after recallCorrect >= 1');
+
+    console.log('[MCQ Debug] Self-check passed', { stats, boost: prevBoost });
+};
 
 function setupAdaptiveSettings() {
     const autoToggle = document.getElementById('adaptiveAutoToggle');
@@ -9924,21 +11942,22 @@ function renderAiGeneratedCards(cardsData) {
 
     if (Array.isArray(cardsData)) {
         cards = cardsData;
-    } else if (cardsData && (cardsData.cards || cardsData.sequences)) {
-        cards = cardsData.cards || cardsData.sequences;
+    } else if (cardsData && cardsData.cards) {
+        cards = cardsData.cards;
         deckName = cardsData.deckName;
         deckNotes = cardsData.deckNotes;
         deckLanguage = cardsData.language || '';
         deckType = cardsData.type || deckType;
     } else if (cardsData && typeof cardsData === 'object' && !Array.isArray(cardsData)) {
-        // Fallback in case of normalized object with unexpected keys
-        cards = cardsData.cards || cardsData.sequences || [];
+        cards = cardsData.cards || [];
         deckName = cardsData.deckName;
         deckNotes = cardsData.deckNotes;
         deckLanguage = cardsData.language || '';
         deckType = cardsData.type || deckType;
     }
 
+    listContainer.dataset.previewType = deckType || 'flashcard';
+    listContainer.dataset.sequences = '';
     listContainer.dataset.cards = JSON.stringify(cards);
     if (deckName) {
         listContainer.dataset.deckName = deckName;
@@ -9948,6 +11967,57 @@ function renderAiGeneratedCards(cardsData) {
     }
     listContainer.dataset.language = deckLanguage || '';
     listContainer.dataset.deckType = deckType || 'flashcard';
+
+    if (deckType === 'sequence' && cardsData && cardsData.sequences) {
+        listContainer.dataset.sequences = JSON.stringify(cardsData.sequences);
+        listContainer.innerHTML = '';
+        const sequences = cardsData.sequences;
+        if (!sequences.length) {
+            const empty = document.createElement('div');
+            empty.className = 'list-empty-state';
+            empty.textContent = 'No sequences generated.';
+            listContainer.appendChild(empty);
+            return;
+        }
+        sequences.forEach((seq, seqIndex) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'generated-sequence';
+            wrapper.style.border = '1px solid var(--border-color)';
+            wrapper.style.borderRadius = '10px';
+            wrapper.style.padding = '12px 14px';
+            wrapper.style.marginBottom = '12px';
+
+            const heading = document.createElement('div');
+            heading.style.fontWeight = '700';
+            heading.style.display = 'flex';
+            heading.style.justifyContent = 'space-between';
+            heading.textContent = `${seq.title || `Sequence ${seqIndex + 1}`}`;
+
+            const stepsList = document.createElement('ol');
+            stepsList.style.paddingLeft = '20px';
+            (seq.steps || []).forEach(step => {
+                const li = document.createElement('li');
+                li.textContent = typeof step === 'string' ? step : (step.text || step.question || '');
+                if (step.notes) {
+                    const note = document.createElement('div');
+                    note.style.color = 'var(--secondary-text)';
+                    note.style.fontSize = '0.9rem';
+                    note.textContent = step.notes;
+                    li.appendChild(note);
+                }
+                stepsList.appendChild(li);
+            });
+
+            wrapper.appendChild(heading);
+            wrapper.appendChild(stepsList);
+            listContainer.appendChild(wrapper);
+        });
+        const heading = document.getElementById('flashcard-count');
+        heading.textContent = `Generated Sequences (${cardsData.sequences.length})`;
+        return;
+    }
+
+    cards = cards.filter(card => !card?._isSequence);
 
     listContainer.innerHTML = '';
     if (cards.length === 0) {
@@ -9966,86 +12036,41 @@ function renderAiGeneratedCards(cardsData) {
     }
 
     cards.forEach((card, index) => {
-        if (card._isSequence) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'generated-sequence';
-            wrapper.dataset.index = String(index);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'generated-card';
+        wrapper.dataset.index = String(index);
 
-            const header = document.createElement('div');
-            header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:12px;';
-            const title = document.createElement('div');
-            title.style.fontWeight = '700';
-            title.style.fontSize = '1.05rem';
-            title.textContent = card.title || 'Sequence';
-            const actions = document.createElement('div');
-            actions.className = 'generated-card-actions';
-            const delBtn = document.createElement('button');
-            delBtn.className = 'generated-card-action-btn delete';
-            delBtn.title = 'Delete Sequence';
-            delBtn.innerHTML = '&times;';
-            delBtn.addEventListener('click', () => deleteGeneratedCard(index));
-            actions.appendChild(delBtn);
-            header.appendChild(title);
-            header.appendChild(actions);
-            wrapper.appendChild(header);
+        const q = document.createElement('div');
+        q.className = 'question';
+        q.textContent = String(card.question || '');
+        const a = document.createElement('div');
+        a.className = 'answer';
+        a.textContent = String(card.answer || '');
 
-            if (card.description) {
-                const desc = document.createElement('div');
-                desc.style.color = 'var(--secondary-text)';
-                desc.style.marginTop = '6px';
-                desc.textContent = String(card.description);
-                wrapper.appendChild(desc);
-            }
-            const ol = document.createElement('ol');
-            ol.style.cssText = 'margin-top:8px; padding-left:18px; color:var(--text-color);';
-            (card.steps || []).forEach(s => {
-                const li = document.createElement('li');
-                li.textContent = String(s);
-                ol.appendChild(li);
-            });
-            wrapper.appendChild(ol);
-            listContainer.appendChild(wrapper);
-        } else {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'generated-card';
-            wrapper.dataset.index = String(index);
+        const actions = document.createElement('div');
+        actions.className = 'generated-card-actions';
+        const delBtn = document.createElement('button');
+        delBtn.className = 'generated-card-action-btn delete';
+        delBtn.title = 'Delete Card';
+        delBtn.innerHTML = '&times;';
+        delBtn.addEventListener('click', () => deleteGeneratedCard(index));
+        actions.appendChild(delBtn);
 
-            const q = document.createElement('div');
-            q.className = 'question';
-            q.textContent = String(card.question || '');
-            const a = document.createElement('div');
-            a.className = 'answer';
-            a.textContent = String(card.answer || '');
-
-            const actions = document.createElement('div');
-            actions.className = 'generated-card-actions';
-            const delBtn = document.createElement('button');
-            delBtn.className = 'generated-card-action-btn delete';
-            delBtn.title = 'Delete Card';
-            delBtn.innerHTML = '&times;';
-            delBtn.addEventListener('click', () => deleteGeneratedCard(index));
-            actions.appendChild(delBtn);
-
-            wrapper.appendChild(q);
-            wrapper.appendChild(a);
-            wrapper.appendChild(actions);
-            listContainer.appendChild(wrapper);
-        }
+        wrapper.appendChild(q);
+        wrapper.appendChild(a);
+        wrapper.appendChild(actions);
+        listContainer.appendChild(wrapper);
     });
 
     const heading = document.getElementById('flashcard-count');
-    const deckTypeFromData = listContainer.dataset.deckType || '';
-    const isSequence = deckTypeFromData.toLowerCase() === 'sequence' || (cards.length > 0 && cards[0]._isSequence);
-    if (isSequence) {
-        const totalSteps = cards.reduce((count, card) => count + (Array.isArray(card.steps) ? card.steps.length : 0), 0) || cards.length;
-        heading.textContent = `Generated Sequence${totalSteps === 1 ? '' : 's'} (${totalSteps} steps)`;
-    } else {
-        heading.textContent = `Generated Flashcards (${cards.length})`;
-    }
+    heading.textContent = `Generated Flashcards (${cards.length})`;
 }
 
 function deleteGeneratedCard(index) {
     const listContainer = document.getElementById('flashcard-list');
+    if (listContainer.dataset.previewType === 'sequence') {
+        return;
+    }
     const cards = JSON.parse(listContainer.dataset.cards);
     cards.splice(index, 1);
     renderAiGeneratedCards(cards);
@@ -10053,52 +12078,30 @@ function deleteGeneratedCard(index) {
 
 async function saveAiGeneratedDeck() {
     const listContainer = document.getElementById('flashcard-list');
-    const cards = JSON.parse(listContainer.dataset.cards);
+    const previewType = listContainer.dataset.previewType || 'flashcard';
+    const cards = listContainer.dataset.cards ? JSON.parse(listContainer.dataset.cards) : [];
     // Use the deckName from the dataset if available, otherwise fallback to doc name or default
     const aiDeckName = listContainer.dataset.deckName;
     const aiDeckNotes = listContainer.dataset.deckNotes || '';
     const deckName = aiDeckName || (documentsForAi.length > 0 ? documentsForAi[0].name.split('.')[0] : "New AI Deck");
 
-    if (cards.length === 0) {
-        showToast("There are no cards to save.", "error");
-        return;
-    }
-
-    const deckTypeFromDataset = (listContainer.dataset.deckType || 'flashcard').toLowerCase();
-    const isSequenceType = deckTypeFromDataset === 'sequence' || (cards[0] && cards[0]._isSequence);
-
-
-    if (isSequenceType) {
-        const finalCards = [];
-        let orderCounter = 0;
-        cards.forEach(sequence => {
-            const steps = splitSteps(sequence.steps || sequence.sequence || sequence.items);
-            const question = sequence.description || sequence.title || '';
-            steps.forEach(step => {
-                orderCounter += 1;
-                finalCards.push({
-                    id: crypto.randomUUID(),
-                    question,
-                    answer: step,
-                    order: orderCounter,
-                    isNew: true,
-                    questionImage: '',
-                    answerImage: ''
-                });
-            });
-        });
-
-        if (!finalCards.length) {
-            showToast("No sequence steps were detected to save.", "error");
+    if (previewType === 'sequence') {
+        const sequences = listContainer.dataset.sequences ? JSON.parse(listContainer.dataset.sequences) : [];
+        if (!sequences.length) {
+            showToast("There are no sequences to save.", "error");
             return;
         }
-
-        await createNewDeck(deckName, 'Other', finalCards, aiDeckNotes, 'Sequence');
-        showToast(`Sequence deck "${deckName}" created successfully with ${finalCards.length} steps!`, 'success');
+        const converted = convertExternalSequenceJson({ title: deckName, sequences });
+        await createNewDeck(deckName, 'Other', converted.cards, aiDeckNotes, 'Sequence', { sequenceMeta: converted.sequenceMeta });
+        showToast(`Deck "${deckName}" created successfully!`, 'success');
         backToDashboard();
         return;
     }
 
+    if (cards.length === 0) {
+        showToast("There are no cards to save.", "error");
+        return;
+    }
 
     const finalCards = cards.map((c, idx) => ({
         id: crypto.randomUUID(),
@@ -10115,8 +12118,778 @@ async function saveAiGeneratedDeck() {
     backToDashboard();
 }
 
+function hideStandardStudyControlsForSequence() {
+    document.getElementById('flashcardViewContainer')?.classList.add('hidden');
+    document.getElementById('mcqView')?.classList.add('hidden');
+    document.getElementById('simpleAnswerButtons')?.classList.add('hidden');
+    document.getElementById('spacedRatingButtons')?.classList.add('hidden');
+    document.getElementById('writeAnswerInput')?.classList.add('hidden');
+}
+
+function getCardMasteryScore(card, knowledgeMap) {
+    if (!knowledgeMap) return 0;
+    const state = knowledgeMap.get(card.id);
+    if (!state) return 0;
+    if (typeof state.masteryScore === 'number') return state.masteryScore;
+    const retention = calculateRetentionAtDate(state, new Date());
+    return Number.isFinite(retention) ? retention : 0;
+}
+
+function computeSequenceMasteries(deck, knowledgeMap) {
+    const groups = buildSequenceGroups(deck.cards || [], deck.sequenceMeta || {});
+    return groups.map(group => {
+        const scores = group.steps.map(card => getCardMasteryScore(card, knowledgeMap));
+        const average = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+        return { sequenceId: group.sequenceId, title: group.title, average };
+    });
+}
+
+function computeSequenceMasteriesFromGroups(groups, knowledgeMap) {
+    const safeGroups = Array.isArray(groups) ? groups : [];
+    return safeGroups.map(group => {
+        const steps = Array.isArray(group.steps) ? group.steps : [];
+        const scores = steps.map(card => getCardMasteryScore(card, knowledgeMap));
+        const average = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+        return { sequenceId: group.sequenceId, title: group.title, average };
+    });
+}
+
+function buildSequenceChunk(anchorCard, deck, settings) {
+    const sequenceCards = (deck.cards || []).filter(c => c.sequenceId === anchorCard.sequenceId)
+        .sort((a, b) => {
+            const aIdx = typeof a.stepIndex === 'number' ? a.stepIndex : (a.order || 0);
+            const bIdx = typeof b.stepIndex === 'number' ? b.stepIndex : (b.order || 0);
+            return aIdx - bIdx;
+        });
+    const baseSize = settings.sequenceStartChunk || 4;
+    const min = Math.max(1, settings.sequenceChunkMin || 2);
+    const max = settings.sequenceChunkMax || baseSize;
+    const windowSize = Math.min(max, Math.max(min, baseSize));
+    let anchorIndex = sequenceCards.findIndex(c => c.id === anchorCard.id);
+    if (anchorIndex < 0) anchorIndex = 0;
+    let start = Math.max(0, anchorIndex - Math.floor(windowSize / 2));
+    let end = Math.min(sequenceCards.length, start + windowSize);
+    if (end - start < windowSize) {
+        start = Math.max(0, end - windowSize);
+    }
+    const chunk = sequenceCards.slice(start, end);
+    const anchorInChunk = chunk.findIndex(c => c.id === anchorCard.id);
+    return { chunk, anchorIndex: anchorInChunk >= 0 ? anchorInChunk : 0, startIndex: start };
+}
+
+function pickSequenceAnchor(deck, knowledgeMap, session) {
+    const masteryBySequence = computeSequenceMasteries(deck, knowledgeMap);
+    const threshold = deck.settings?.sequenceMixingThreshold || DEFAULT_DECK_SETTINGS.sequenceMixingThreshold || 0.8;
+    const allowMixed = deck.settings?.sequenceAllowMixed !== false;
+    const belowThreshold = masteryBySequence.filter(seq => seq.average < threshold);
+
+    if (allowMixed && !belowThreshold.length) {
+        session.mixed = true;
+    }
+    const targetSequences = session.mixed ? masteryBySequence : (belowThreshold.length ? belowThreshold : masteryBySequence);
+    const targetIds = new Set(targetSequences.map(seq => seq.sequenceId));
+    const candidates = (deck.cards || []).filter(c => targetIds.has(c.sequenceId));
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => getCardMasteryScore(a, knowledgeMap) - getCardMasteryScore(b, knowledgeMap));
+    return candidates[0];
+}
+
+async function ensureSequenceGraphForSequence(session, deckId, sequenceId, steps) {
+    const module = await getSequenceGraphModule();
+    const cacheKey = `${String(deckId)}:${String(sequenceId || 'default')}`;
+    const cached = session?.sequenceGraphs?.get ? session.sequenceGraphs.get(cacheKey) : null;
+    if (cached) {
+        const ensured = module.ensureGraphUpToDate(cached, steps);
+        if (ensured !== cached && session?.sequenceGraphs?.set) {
+            session.sequenceGraphs.set(cacheKey, ensured);
+        }
+        return ensured;
+    }
+
+    const cardID = getSequenceGraphCardId(deckId, sequenceId);
+    const stored = await getDataFromDB('userKnowledgeState', `default_user:${cardID}`);
+    const ensured = module.ensureGraphUpToDate(stored?.sequenceGraph, steps);
+    if (!stored || stored.sequenceGraph !== ensured) {
+        const nowISO = new Date().toISOString();
+        const record = prepareKnowledgeRecord({
+            userID: 'default_user',
+            cardID,
+            deckID: deckId,
+            sequenceId: String(sequenceId || 'default'),
+            kind: 'sequenceGraph',
+            sequenceGraph: ensured,
+            masteryScore: stored?.masteryScore ?? 0.5,
+            fsrs: null,
+            lastModified: nowISO,
+            updatedAt: nowISO
+        });
+        if (record) await saveDataToDB('userKnowledgeState', record);
+    }
+    if (session?.sequenceGraphs?.set) session.sequenceGraphs.set(cacheKey, ensured);
+    return ensured;
+}
+
+function sliceSequenceWindow(steps, startIndex, endIndex) {
+    const safeSteps = Array.isArray(steps) ? steps : [];
+    const start = Math.max(0, Math.min(safeSteps.length, startIndex));
+    const end = Math.max(start, Math.min(safeSteps.length, endIndex));
+    return { chunk: safeSteps.slice(start, end), startIndex: start };
+}
+
+function buildCenteredWindow(steps, centerIndex, desiredSize) {
+    const safeSteps = Array.isArray(steps) ? steps : [];
+    const size = Math.max(2, Math.min(safeSteps.length, desiredSize));
+    const center = Math.max(0, Math.min(safeSteps.length - 1, centerIndex));
+    let start = Math.max(0, center - Math.floor(size / 2));
+    let end = Math.min(safeSteps.length, start + size);
+    if (end - start < size) start = Math.max(0, end - size);
+    return sliceSequenceWindow(safeSteps, start, end);
+}
+
+function computeAdaptiveOrderWindow(module, graph, steps, fromIndex, toIndex, opts = {}) {
+    const safeSteps = Array.isArray(steps) ? steps : [];
+    const baseSize = Number.isFinite(Number(opts.baseSize)) ? Number(opts.baseSize) : 5;
+    const capSize = Number.isFinite(Number(opts.capSize)) ? Number(opts.capSize) : 8;
+    const expandThreshold = Number.isFinite(Number(opts.expandThreshold)) ? Number(opts.expandThreshold) : 0.65;
+    let left = Math.max(0, Math.min(safeSteps.length - 1, Math.min(fromIndex, toIndex)));
+    let right = Math.max(0, Math.min(safeSteps.length - 1, Math.max(fromIndex, toIndex)));
+
+    while ((right - left + 1) < Math.min(baseSize, safeSteps.length)) {
+        if (left > 0) left -= 1;
+        if ((right - left + 1) >= Math.min(baseSize, safeSteps.length)) break;
+        if (right < safeSteps.length - 1) right += 1;
+        if (left === 0 && right === safeSteps.length - 1) break;
+    }
+
+    while ((right - left + 1) < Math.min(capSize, safeSteps.length)) {
+        const canExpandLeft = left > 0;
+        const canExpandRight = right < safeSteps.length - 1;
+        if (!canExpandLeft && !canExpandRight) break;
+
+        const leftEdgeKey = canExpandLeft ? module.edgeKeyFor(safeSteps, left - 1, left) : null;
+        const rightEdgeKey = canExpandRight ? module.edgeKeyFor(safeSteps, right, right + 1) : null;
+        const leftEma = leftEdgeKey ? Number(graph?.edges?.[leftEdgeKey]?.ema ?? 0.5) : 1;
+        const rightEma = rightEdgeKey ? Number(graph?.edges?.[rightEdgeKey]?.ema ?? 0.5) : 1;
+        const shouldExpandLeft = canExpandLeft && leftEma < expandThreshold;
+        const shouldExpandRight = canExpandRight && rightEma < expandThreshold;
+
+        if (!shouldExpandLeft && !shouldExpandRight) break;
+        if (shouldExpandLeft) left -= 1;
+        if ((right - left + 1) >= Math.min(capSize, safeSteps.length)) break;
+        if (shouldExpandRight) right += 1;
+        if (left === 0 && right === safeSteps.length - 1) break;
+    }
+
+    return sliceSequenceWindow(safeSteps, left, right + 1);
+}
+
+async function startSequenceMode(deckId) {
+    const deck = decks[deckId];
+    if (!deck) {
+        showToast('Deck not found.', 'error');
+        return;
+    }
+    if (deck.typeHint !== 'Sequence') {
+        showToast('Sequence mode is only available for Sequence decks.', 'error');
+        return;
+    }
+
+    currentMode = 'sequence';
+    currentDeckId = deckId;
+    deck.settings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
+    studyState.settings = deck.settings;
+    studyAccentModule?.refresh();
+
+    const knowledgeMap = await buildDeckKnowledgeMap(deck);
+    studyState.knowledgeStates = knowledgeMap;
+    studyState.sequenceSession = {
+        deckId,
+        knowledgeMap,
+        taskCursor: 0,
+        incorrectQueue: [],
+        mixed: false,
+        currentTask: null,
+        sequenceGroups: null,
+        sequenceStepsById: null,
+        sequenceGraphs: new Map(),
+        recentEdges: [],
+        accuracyLog: [],
+        totalAttempts: 0
+    };
+    studyState.sequenceSession.sequenceGroups = buildSequenceGroups(deck.cards || [], deck.sequenceMeta || {});
+    studyState.sequenceSession.sequenceStepsById = new Map(
+        (studyState.sequenceSession.sequenceGroups || []).map(group => [group.sequenceId, group.steps])
+    );
+    studyState.sequenceAccuracy = [];
+    studyState.startTime = new Date();
+
+    resetSessionState();
+    transitionView('studyMode');
+    resetStudySubViews();
+    document.getElementById('studyTitle').textContent = 'Sequence Mode';
+    document.getElementById('studySubtitle').textContent = deck.name;
+    transitionSubView(null, document.getElementById('cardView'));
+    hideStandardStudyControlsForSequence();
+    document.getElementById('sequenceTaskView')?.classList.remove('hidden');
+    await continueSequenceTask();
+}
+
+function renderOrderTask(task) {
+    const body = document.getElementById('sequenceTaskBody');
+    const shuffled = shuffleArray([...task.chunk]);
+    const list = document.createElement('div');
+    list.id = 'sequenceOrderList';
+    list.className = 'sequence-order-list';
+
+    shuffled.forEach(card => {
+        const row = document.createElement('div');
+        row.className = 'sequence-order-item';
+        row.dataset.cardId = card.id;
+        const text = document.createElement('div');
+        text.className = 'sequence-order-text';
+        text.textContent = card.question || '';
+        const actions = document.createElement('div');
+        actions.className = 'sequence-order-actions';
+        const up = document.createElement('button');
+        up.className = 'btn btn-secondary sequence-move-btn';
+        up.textContent = '↑';
+        up.onclick = () => reorderSequenceOrderItem(row, -1);
+        const down = document.createElement('button');
+        down.className = 'btn btn-secondary sequence-move-btn';
+        down.textContent = '↓';
+        down.onclick = () => reorderSequenceOrderItem(row, 1);
+        actions.appendChild(up);
+        actions.appendChild(down);
+        row.appendChild(text);
+        row.appendChild(actions);
+        list.appendChild(row);
+    });
+
+    body.appendChild(list);
+}
+
+function reorderSequenceOrderItem(item, direction) {
+    if (!item) return;
+    const parent = item.parentElement;
+    if (!parent) return;
+    const siblings = Array.from(parent.children);
+    const index = siblings.indexOf(item);
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= siblings.length) return;
+    const target = siblings[targetIndex];
+    if (direction < 0) {
+        parent.insertBefore(item, target);
+    } else {
+        parent.insertBefore(item, target.nextSibling);
+    }
+}
+
+function renderNextStepTask(task) {
+    const body = document.getElementById('sequenceTaskBody');
+    const anchorCard = task.chunk[task.anchorIndex] || task.chunk[0];
+    const prompt = document.createElement('div');
+    prompt.className = 'sequence-next-prompt';
+    prompt.textContent = `Current step: ${anchorCard.question}`;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'form-group sequence-form-group';
+    const input = document.createElement('textarea');
+    input.id = 'sequenceNextInput';
+    input.className = 'sequence-next-input';
+    input.placeholder = task.taskType === 'prev' ? 'Type the previous step...' : 'Type the next step...';
+    body.appendChild(prompt);
+    wrapper.appendChild(input);
+    body.appendChild(wrapper);
+    setActiveStudyInput(input);
+    input.addEventListener('focus', () => setActiveStudyInput(input));
+}
+
+function renderGapTask(task) {
+    const body = document.getElementById('sequenceTaskBody');
+    const fallbackIndex = Math.min(Math.max(1, Math.floor(task.chunk.length / 2)), task.chunk.length - 1);
+    const missingIndex = Number.isFinite(Number(task.missingIndex)) ? Number(task.missingIndex) : fallbackIndex;
+    task.missingIndex = missingIndex;
+    const missingCard = task.chunk[missingIndex];
+    const list = document.createElement('ol');
+    list.className = 'sequence-gap-list';
+    task.chunk.forEach((card, idx) => {
+        const li = document.createElement('li');
+        li.className = 'sequence-gap-item';
+        if (idx === missingIndex) {
+            li.textContent = '[blank]';
+            li.classList.add('is-blank');
+        } else {
+            li.textContent = card.question;
+        }
+        list.appendChild(li);
+    });
+    const selectWrapper = document.createElement('div');
+    selectWrapper.className = 'form-group sequence-form-group';
+    const select = document.createElement('select');
+    select.id = 'sequenceGapSelect';
+    select.className = 'sequence-gap-select';
+    const options = shuffleArray(task.chunk.map(c => c.question || ''));
+    options.forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt;
+        option.textContent = opt;
+        select.appendChild(option);
+    });
+    body.appendChild(list);
+    selectWrapper.appendChild(select);
+    body.appendChild(selectWrapper);
+    task.missingCardId = missingCard?.id;
+}
+
+function renderSequenceTask(task) {
+    const deck = decks[currentDeckId];
+    const sequenceTitle = deck.sequenceMeta?.[task.sequenceId]?.title || task.chunk[0]?.sequenceTitle || deck.name;
+    const titleEl = document.getElementById('sequenceTaskTitle');
+    const subtitleEl = document.getElementById('sequenceTaskSubtitle');
+    const body = document.getElementById('sequenceTaskBody');
+    const feedbackEl = document.getElementById('sequenceTaskFeedback');
+    const submitBtn = document.getElementById('sequenceSubmitBtn');
+    const continueBtn = document.getElementById('sequenceContinueBtn');
+    hideStandardStudyControlsForSequence();
+    document.getElementById('sequenceTaskView')?.classList.remove('hidden');
+    body.innerHTML = '';
+    feedbackEl.innerHTML = '';
+    feedbackEl.classList.add('hidden');
+    submitBtn.classList.remove('hidden');
+    continueBtn.classList.add('hidden');
+    setActiveStudyInput(null);
+
+    const minStep = Math.min(...task.chunk.map(c => typeof c.stepIndex === 'number' ? c.stepIndex : (c.order || 0)));
+    const maxStep = Math.max(...task.chunk.map(c => typeof c.stepIndex === 'number' ? c.stepIndex : (c.order || 0)));
+    if (titleEl) titleEl.textContent = sequenceTitle;
+    if (subtitleEl) subtitleEl.textContent = `Steps ${minStep + 1}–${maxStep + 1} of "${sequenceTitle}"`;
+
+    if (task.taskType === 'order') renderOrderTask(task);
+    if (task.taskType === 'next' || task.taskType === 'prev') renderNextStepTask(task);
+    if (task.taskType === 'gap') renderGapTask(task);
+    task.renderedAt = performance.now();
+}
+
+async function prepareSequenceTask() {
+    const deck = decks[currentDeckId];
+    if (!deck || deck.typeHint !== 'Sequence') return;
+    const session = studyState.sequenceSession;
+    if (!session) return;
+    const knowledgeMap = session.knowledgeMap || studyState.knowledgeStates || new Map();
+
+    const groups = Array.isArray(session.sequenceGroups)
+        ? session.sequenceGroups
+        : buildSequenceGroups(deck.cards || [], deck.sequenceMeta || {});
+    if (!session.sequenceGroups) {
+        session.sequenceGroups = groups;
+        session.sequenceStepsById = new Map((groups || []).map(group => [group.sequenceId, group.steps]));
+    }
+
+    let forcedSequenceId = null;
+    if (session.incorrectQueue.length) {
+        const forcedCard = session.incorrectQueue.shift();
+        forcedSequenceId = forcedCard?.sequenceId || null;
+    }
+
+    let best = null;
+    try {
+        const graphModule = await getSequenceGraphModule();
+        const masteryBySequence = computeSequenceMasteriesFromGroups(groups, knowledgeMap);
+        const threshold = deck.settings?.sequenceMixingThreshold || DEFAULT_DECK_SETTINGS.sequenceMixingThreshold || 0.8;
+        const allowMixed = deck.settings?.sequenceAllowMixed !== false;
+        const belowThreshold = masteryBySequence.filter(seq => seq.average < threshold);
+        if (allowMixed && !belowThreshold.length) session.mixed = true;
+        const targetSequences = session.mixed ? masteryBySequence : (belowThreshold.length ? belowThreshold : masteryBySequence);
+        const candidateIds = forcedSequenceId
+            ? [forcedSequenceId]
+            : targetSequences.map(seq => seq.sequenceId).filter(Boolean);
+
+        const nowMs = Date.now();
+        for (const sequenceId of candidateIds) {
+            const steps = session.sequenceStepsById?.get ? session.sequenceStepsById.get(sequenceId) : null;
+            if (!Array.isArray(steps) || steps.length < 2) continue;
+            const graph = await ensureSequenceGraphForSequence(session, deck.id, sequenceId, steps);
+            const pick = graphModule.pickWeakEdge(graph, steps, session.recentEdges, nowMs, {
+                minCandidates: 3,
+                recencyHalfLifeMs: 10 * 60 * 1000,
+                avoidRecentMs: 90 * 1000,
+                weightCascade: 0.25
+            });
+            if (!pick) continue;
+            if (!best || pick.score > best.pick.score) {
+                best = { sequenceId, steps, graph, pick };
+            }
+        }
+
+        if (best) {
+            const edgeRec = best.graph?.edges?.[best.pick.edgeKey] || null;
+            const edgeEma = Number.isFinite(Number(edgeRec?.ema)) ? Number(edgeRec.ema) : 0.5;
+            let taskType = null;
+            if (edgeEma < 0.45) {
+                taskType = (session.taskCursor % 2 === 0) ? 'next' : 'prev';
+            } else if (edgeEma < 0.70) {
+                taskType = 'gap';
+            } else {
+                taskType = 'order';
+            }
+            session.taskCursor += 1;
+
+            const desiredRecallSize = 4;
+            let chunk = [];
+            let startIndex = 0;
+            let anchorIndex = 0;
+            let missingIndex = null;
+
+            if (taskType === 'order') {
+                const windowed = computeAdaptiveOrderWindow(
+                    graphModule,
+                    best.graph,
+                    best.steps,
+                    best.pick.fromIndex,
+                    best.pick.toIndex,
+                    { baseSize: 5, capSize: 8, expandThreshold: 0.65 }
+                );
+                chunk = windowed.chunk;
+                startIndex = windowed.startIndex;
+            } else if (taskType === 'gap') {
+                const len = best.steps.length;
+                let missingGlobal = best.pick.toIndex;
+                if (missingGlobal <= 0 || missingGlobal >= len - 1) {
+                    missingGlobal = best.pick.fromIndex;
+                }
+                missingGlobal = Math.min(Math.max(1, missingGlobal), len - 2);
+                const windowed = buildCenteredWindow(best.steps, missingGlobal, 5);
+                chunk = windowed.chunk;
+                startIndex = windowed.startIndex;
+                missingIndex = missingGlobal - startIndex;
+            } else {
+                const focusIndex = taskType === 'prev' ? best.pick.toIndex : best.pick.fromIndex;
+                const start = Math.max(0, Math.min(focusIndex - 1, best.steps.length - desiredRecallSize));
+                const windowed = sliceSequenceWindow(best.steps, start, start + desiredRecallSize);
+                chunk = windowed.chunk;
+                startIndex = windowed.startIndex;
+                anchorIndex = focusIndex - startIndex;
+            }
+
+            if (!chunk.length) {
+                throw new Error('Sequence chunk generation failed');
+            }
+
+            if (taskType === 'next' && anchorIndex >= chunk.length - 1 && chunk.length > 1) {
+                anchorIndex = chunk.length - 2;
+            }
+            if (taskType === 'prev' && anchorIndex <= 0 && chunk.length > 1) {
+                anchorIndex = 1;
+            }
+
+            const currentTask = {
+                taskType,
+                chunk,
+                sequenceId: best.sequenceId,
+                anchorIndex,
+                startIndex,
+                targetEdge: best.pick
+            };
+            if (taskType === 'gap' && Number.isFinite(Number(missingIndex))) {
+                currentTask.missingIndex = missingIndex;
+            }
+            session.currentTask = currentTask;
+            renderSequenceTask(currentTask);
+            return;
+        }
+    } catch (error) {
+        console.warn('[Sequence] Falling back to legacy scheduler:', error);
+    }
+
+    const fallbackAnchor = pickSequenceAnchor(deck, knowledgeMap, session);
+    if (!fallbackAnchor) {
+        showToast('No more sequence steps to practice right now.', 'info');
+        await endSession();
+        return;
+    }
+    const { chunk, anchorIndex, startIndex } = buildSequenceChunk(fallbackAnchor, deck, deck.settings || DEFAULT_DECK_SETTINGS);
+    const taskType = SEQUENCE_TASK_TYPES[session.taskCursor % SEQUENCE_TASK_TYPES.length];
+    session.taskCursor += 1;
+    const adjustedAnchorIndex = Math.min(anchorIndex, chunk.length - 1);
+    const currentTask = {
+        taskType,
+        chunk,
+        sequenceId: fallbackAnchor.sequenceId,
+        anchorIndex: adjustedAnchorIndex,
+        startIndex,
+        targetEdge: null
+    };
+    if (taskType === 'next' && adjustedAnchorIndex >= chunk.length - 1 && chunk.length > 1) {
+        currentTask.anchorIndex = chunk.length - 2;
+    }
+    session.currentTask = currentTask;
+    renderSequenceTask(currentTask);
+}
+
+async function submitSequenceTask() {
+    const session = studyState.sequenceSession;
+    const deck = decks[currentDeckId];
+    if (!session || !deck || !session.currentTask) return;
+    const task = session.currentTask;
+    const now = performance.now();
+    const responseTimeMs = typeof task.renderedAt === 'number' ? Math.max(0, now - task.renderedAt) : null;
+    const deckSettings = { ...DEFAULT_DECK_SETTINGS, ...(deck.settings || {}) };
+    let result = null;
+
+    if (task.taskType === 'order') {
+        const orderItems = Array.from(document.querySelectorAll('#sequenceOrderList .sequence-order-item'));
+        task.userOrderCardIds = orderItems.map(item => item.dataset.cardId);
+        const expected = [...task.chunk].sort((a, b) => {
+            const aIdx = typeof a.stepIndex === 'number' ? a.stepIndex : (a.order || 0);
+            const bIdx = typeof b.stepIndex === 'number' ? b.stepIndex : (b.order || 0);
+            return aIdx - bIdx;
+        });
+        task.expectedOrderCardIds = expected.map(card => card.id);
+        const byStep = orderItems.map((item, idx) => {
+            const cardId = item.dataset.cardId;
+            const correctCard = expected[idx];
+            const isCorrect = cardId === correctCard.id;
+            return {
+                cardId,
+                correct: isCorrect,
+                userAnswer: item.querySelector('div')?.textContent || '',
+                correctAnswer: correctCard.question || '',
+                questionType: 'Sequence:Order'
+            };
+        });
+        const correctCount = byStep.filter(r => r.correct).length;
+        result = { correctCount, total: byStep.length, byStep, expected };
+    } else if (task.taskType === 'next' || task.taskType === 'prev') {
+        const input = document.getElementById('sequenceNextInput');
+        const userAnswer = (input?.value || '').trim();
+        const anchorIdx = task.anchorIndex;
+        const targetCard = task.taskType === 'prev'
+            ? (task.chunk[anchorIdx - 1] || task.chunk[anchorIdx] || task.chunk[0])
+            : (task.chunk[anchorIdx + 1] || task.chunk[anchorIdx] || task.chunk[0]);
+        const correctAnswer = targetCard.question || '';
+        const checkResult = checkAnswerForgivingly(userAnswer, correctAnswer, deckSettings);
+        const isCorrect = checkResult.result === 'CORRECT' || checkResult.result === 'TYPO';
+        result = {
+            correctCount: isCorrect ? 1 : 0,
+            total: 1,
+            byStep: [{
+                cardId: targetCard.id,
+                correct: isCorrect,
+                userAnswer,
+                correctAnswer,
+                questionType: task.taskType === 'prev' ? 'Sequence:Prev' : 'Sequence:Next'
+            }],
+            expected: [targetCard]
+        };
+    } else if (task.taskType === 'gap') {
+        const select = document.getElementById('sequenceGapSelect');
+        const chosen = select ? select.value : '';
+        const missingCard = task.chunk[task.missingIndex] || task.chunk[0];
+        const isCorrect = chosen === (missingCard.question || '');
+        result = {
+            correctCount: isCorrect ? 1 : 0,
+            total: 1,
+            byStep: [{
+                cardId: missingCard.id,
+                correct: isCorrect,
+                userAnswer: chosen,
+                correctAnswer: missingCard.question || '',
+                questionType: 'Sequence:Gap'
+            }],
+            expected: [missingCard]
+        };
+    }
+
+    if (!result) return;
+    result.responseTimeMs = responseTimeMs;
+    await recordSequenceResults(result);
+}
+
+async function recordSequenceResults(result) {
+    const deck = decks[currentDeckId];
+    const session = studyState.sequenceSession;
+    if (!deck || !session) return;
+    const responseTimeSec = typeof result.responseTimeMs === 'number' ? result.responseTimeMs / 1000 : null;
+    const recallLatency = typeof result.responseTimeMs === 'number' ? Math.round(result.responseTimeMs) : null;
+    const iqsScore = Number.isFinite(recallLatency)
+        ? calculateIQS({ recallLatency, attemptCount: 1 }, getFsrsBaseline())
+        : 0.5;
+    const feedbackEl = document.getElementById('sequenceTaskFeedback');
+    const submitBtn = document.getElementById('sequenceSubmitBtn');
+    const continueBtn = document.getElementById('sequenceContinueBtn');
+    const incorrectCards = [];
+
+    const tasks = result.byStep.map(async step => {
+        const card = deck.cards.find(c => c.id === step.cardId);
+        if (!card) return;
+        const interaction = {
+            cardID: card.id,
+            deckID: deck.id,
+            wasCorrect: step.correct,
+            userAnswer: step.userAnswer,
+            correctAnswer: step.correctAnswer,
+            questionType: step.questionType,
+            responseTimeSec,
+            recallLatency,
+            attemptCount: 1
+        };
+        await logInteraction(interaction);
+        await applyFsrsReviewUpdate(card, deck.id, step.correct, interaction, iqsScore, { questionType: step.questionType });
+        if (!step.correct) incorrectCards.push(card);
+    });
+    await Promise.all(tasks);
+
+    const currentTask = session.currentTask;
+    if (currentTask && currentTask.sequenceId) {
+        try {
+            const graphModule = await getSequenceGraphModule();
+            const steps = session.sequenceStepsById?.get
+                ? session.sequenceStepsById.get(currentTask.sequenceId)
+                : null;
+            const sequenceSteps = Array.isArray(steps) && steps.length
+                ? steps
+                : ((Array.isArray(session.sequenceGroups)
+                    ? session.sequenceGroups.find(group => group.sequenceId === currentTask.sequenceId)?.steps
+                    : null) || []);
+            if (sequenceSteps.length >= 2) {
+                let graph = await ensureSequenceGraphForSequence(session, deck.id, currentTask.sequenceId, sequenceSteps);
+                const nowMs = Date.now();
+                const updatedEdgeKeys = [];
+
+                if (currentTask.taskType === 'order' && Array.isArray(currentTask.userOrderCardIds)) {
+                    const indexById = new Map(sequenceSteps.map((card, idx) => [card.id, idx]));
+                    const expectedIds = Array.isArray(currentTask.expectedOrderCardIds) && currentTask.expectedOrderCardIds.length
+                        ? currentTask.expectedOrderCardIds
+                        : [...currentTask.chunk].sort((a, b) => {
+                            const aIdx = typeof a.stepIndex === 'number' ? a.stepIndex : (a.order || 0);
+                            const bIdx = typeof b.stepIndex === 'number' ? b.stepIndex : (b.order || 0);
+                            return aIdx - bIdx;
+                        }).map(card => card.id);
+                    const posById = new Map(currentTask.userOrderCardIds.map((id, idx) => [id, idx]));
+                    for (let k = 0; k < expectedIds.length - 1; k += 1) {
+                        const fromId = expectedIds[k];
+                        const toId = expectedIds[k + 1];
+                        const fromIndex = indexById.get(fromId);
+                        const toIndex = indexById.get(toId);
+                        if (!Number.isFinite(fromIndex) || !Number.isFinite(toIndex)) continue;
+                        const edgeKey = graphModule.edgeKeyFor(sequenceSteps, fromIndex, toIndex);
+                        const posFrom = posById.get(fromId);
+                        const posTo = posById.get(toId);
+                        const edgeCorrect = Number.isFinite(posFrom) && Number.isFinite(posTo) && (posFrom + 1 === posTo);
+                        graph = graphModule.updateEdge(graph, edgeKey, edgeCorrect, nowMs, SEQUENCE_GRAPH_ALPHA);
+                        updatedEdgeKeys.push(edgeKey);
+                    }
+                } else if (currentTask.taskType === 'next' || currentTask.taskType === 'prev' || currentTask.taskType === 'gap') {
+                    const isCorrect = !!result.byStep?.[0]?.correct;
+                    const promptState = {};
+                    if (currentTask.taskType === 'next') {
+                        promptState.fromIndex = currentTask.targetEdge?.fromIndex ?? (currentTask.startIndex + currentTask.anchorIndex);
+                    } else if (currentTask.taskType === 'prev') {
+                        promptState.toIndex = currentTask.targetEdge?.toIndex ?? (currentTask.startIndex + currentTask.anchorIndex);
+                    } else if (currentTask.taskType === 'gap') {
+                        promptState.missingIndex = currentTask.startIndex + currentTask.missingIndex;
+                    }
+                    const { edgeKeys, nodeKeys } = graphModule.deriveUpdatesFromTask(
+                        currentTask.taskType,
+                        sequenceSteps,
+                        promptState,
+                        result.byStep?.[0]?.userAnswer,
+                        isCorrect
+                    );
+                    edgeKeys.forEach(edgeKey => {
+                        graph = graphModule.updateEdge(graph, edgeKey, isCorrect, nowMs, SEQUENCE_GRAPH_ALPHA);
+                        updatedEdgeKeys.push(edgeKey);
+                    });
+                    nodeKeys.forEach(nodeKey => {
+                        graph = graphModule.updateNode(graph, nodeKey, isCorrect, nowMs, SEQUENCE_GRAPH_ALPHA);
+                    });
+                }
+
+                if (updatedEdgeKeys.length) {
+                    session.recentEdges = Array.isArray(session.recentEdges) ? session.recentEdges : [];
+                    updatedEdgeKeys.forEach(edgeKey => session.recentEdges.push({ edgeKey, at: nowMs }));
+                    if (session.recentEdges.length > 12) {
+                        session.recentEdges.splice(0, session.recentEdges.length - 12);
+                    }
+                    const nowISO = new Date(nowMs).toISOString();
+                    const cardID = getSequenceGraphCardId(deck.id, currentTask.sequenceId);
+                    const record = prepareKnowledgeRecord({
+                        userID: 'default_user',
+                        cardID,
+                        deckID: deck.id,
+                        sequenceId: String(currentTask.sequenceId || 'default'),
+                        kind: 'sequenceGraph',
+                        sequenceGraph: graph,
+                        masteryScore: 0.5,
+                        fsrs: null,
+                        lastModified: nowISO,
+                        updatedAt: nowISO
+                    });
+                    if (record) await saveDataToDB('userKnowledgeState', record);
+                    const cacheKey = `${String(deck.id)}:${String(currentTask.sequenceId || 'default')}`;
+                    session.sequenceGraphs?.set?.(cacheKey, graph);
+                }
+            }
+        } catch (error) {
+            console.warn('[Sequence] Failed to update sequence graph:', error);
+        }
+    }
+
+    const accuracy = result.total > 0 ? result.correctCount / result.total : 0;
+    session.accuracyLog.push(accuracy);
+    studyState.sequenceAccuracy.push(accuracy);
+    session.totalAttempts += 1;
+
+    if (incorrectCards.length) {
+        session.incorrectQueue.push(...incorrectCards);
+    }
+
+    if (feedbackEl) {
+        feedbackEl.classList.remove('hidden');
+        feedbackEl.innerHTML = '';
+        const mainFeedback = document.createElement('div');
+        mainFeedback.className = 'sequence-task-feedback-main';
+        const accuracyMetric = renderVisualMetric({ label: 'Accuracy', value: accuracy * 100, kind: 'accuracy' });
+        accuracyMetric.classList.add('compact');
+        mainFeedback.appendChild(accuracyMetric);
+        feedbackEl.appendChild(mainFeedback);
+        if (result.expected?.length && result.byStep.length > 1) {
+            const orderText = result.expected.map(c => c.question).join(' → ');
+            const orderFeedback = document.createElement('div');
+            orderFeedback.className = 'sequence-task-feedback-order';
+            orderFeedback.textContent = `Order: ${orderText}`;
+            feedbackEl.appendChild(orderFeedback);
+        }
+    }
+    if (submitBtn) submitBtn.classList.add('hidden');
+    if (continueBtn) continueBtn.classList.remove('hidden');
+
+    const knowledgeMap = studyState.knowledgeStates || session.knowledgeMap;
+    if (knowledgeMap && Array.isArray(result.expected)) {
+        result.expected.forEach(card => {
+            const state = knowledgeMap.get(card.id);
+            if (state) {
+                state.masteryScore = getCardMasteryScore(card, knowledgeMap);
+            }
+        });
+    }
+}
+
+async function continueSequenceTask() {
+    const submitBtn = document.getElementById('sequenceSubmitBtn');
+    const continueBtn = document.getElementById('sequenceContinueBtn');
+    if (submitBtn) submitBtn.classList.remove('hidden');
+    if (continueBtn) continueBtn.classList.add('hidden');
+    await prepareSequenceTask();
+}
+
 function setupDragDropView(chunk) {
     const list = document.getElementById('dragDropList');
+    if (!list) return;
+    const feedbackEl = document.getElementById('dragDropFeedback');
+    if (feedbackEl) {
+        feedbackEl.textContent = '';
+        feedbackEl.className = 'drag-drop-feedback hidden';
+    }
     const shuffledChunk = shuffleArray([...chunk]);
 
 
@@ -10165,255 +12938,6 @@ function setupDragDropView(chunk) {
             evt.item.style.cursor = 'grab';
         }
     });
-}
-
-async function checkDragDropOrder() {
-    const listItems = document.querySelectorAll('#dragDropList .deck-card-item');
-    const correctOrder = studyState.correctDragDropOrder;
-    let isCorrect = true;
-    let incorrectCount = 0;
-
-    const currentOrder = Array.from(listItems).map(item => item.dataset.id);
-    const edgeKey = (from, to) => `${from}::${to}`;
-    const correctEdges = new Set();
-    const userEdges = new Set();
-    for (let i = 0; i < correctOrder.length - 1; i++) {
-        correctEdges.add(edgeKey(correctOrder[i], correctOrder[i + 1]));
-    }
-    for (let i = 0; i < currentOrder.length - 1; i++) {
-        userEdges.add(edgeKey(currentOrder[i], currentOrder[i + 1]));
-    }
-
-    listItems.forEach((item, index) => {
-        const cardId = item.dataset.id;
-        if (cardId !== correctOrder[index]) {
-            isCorrect = false;
-            incorrectCount++;
-            item.style.borderColor = 'var(--danger-color)';
-            item.style.backgroundColor = '#fff5f5';
-        } else {
-            item.style.borderColor = 'var(--success-color)';
-            item.style.backgroundColor = '#f0fff4';
-        }
-    });
-
-    if (document.body.classList.contains('dark-mode')) {
-        listItems.forEach((item, index) => {
-            const cardId = item.dataset.id;
-            if (cardId !== correctOrder[index]) {
-                item.style.backgroundColor = '#c5303030';
-            } else {
-                item.style.backgroundColor = '#2c7a7b';
-            }
-        });
-    }
-
-    const missingEdges = [];
-    correctEdges.forEach(key => {
-        if (!userEdges.has(key)) {
-            const [cueId, expectedId] = key.split('::');
-            missingEdges.push({ cueId, expectedId, direction: 'after' });
-        }
-    });
-
-    if (isCorrect) {
-        showToast("Perfect Order!", "success");
-        const recallPool = studyState.sequenceChunks[studyState.currentChunkIndex] || [];
-        const recallCount = Math.min(Math.max(1, recallPool.length >= 3 ? 3 : recallPool.length), recallPool.length);
-        studyState.roundCards = shuffleArray(recallPool).slice(0, recallCount);
-        studyState.currentCardIndex = 0;
-        studyState.sequencePhase = 'Post-Drag Recall';
-        setTimeout(() => {
-            showNextCard();
-        }, 800);
-    } else {
-        showToast(`${incorrectCount} item${incorrectCount > 1 ? 's' : ''} in wrong position. Try again!`, "error");
-
-        setTimeout(() => {
-            listItems.forEach(item => {
-                item.style.borderColor = 'var(--border-color)';
-                item.style.backgroundColor = 'var(--card-bg)';
-            });
-        }, 2000);
-
-        if (missingEdges.length > 0) {
-            studyState.sequenceMissingEdges = missingEdges;
-            if (studyState.cortexDebugEnabled) {
-                console.log('[Sequence] Missing edges detected:', missingEdges);
-            }
-            const nowIso = new Date().toISOString();
-            for (const edge of missingEdges) {
-                await recordLinkResult({
-                    direction: 'after',
-                    cueId: edge.cueId,
-                    expectedId: edge.expectedId,
-                    correct: false,
-                    nowIso
-                });
-                await Promise.all([
-                    applySequenceFsrsUpdate(edge.cueId, 'Hard', nowIso, { questionType: 'Drag and Drop', correct: false }),
-                    applySequenceFsrsUpdate(edge.expectedId, 'Hard', nowIso, { questionType: 'Drag and Drop', correct: false })
-                ]);
-            }
-            const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
-            const nextChunk = studyState.sequenceChunks[studyState.currentChunkIndex + 1];
-            let boundaryLink = null;
-            if (nextChunk && nextChunk.length && currentChunk && currentChunk.length) {
-                const lastCard = currentChunk[currentChunk.length - 1];
-                const firstNext = nextChunk[0];
-                if (lastCard && firstNext) {
-                    boundaryLink = { direction: 'after', cueId: lastCard.id, expectedId: firstNext.id };
-                }
-            }
-            studyState.sequenceLinkDrillQueue = buildLinkDrillQueue({
-                missingEdges,
-                chunkIds: currentChunk ? currentChunk.map(c => c.id) : [],
-                knowledgeStates: studyState.knowledgeStates,
-                boundaryLink,
-                previousQueue: studyState.sequenceLinkDrillQueue || []
-            });
-            studyState.sequenceLinkDrillAttempts = 0;
-            studyState.sequencePhase = 'Link Drill';
-            await saveStudyProgress();
-            showToast(`${missingEdges.length} adjacency${missingEdges.length > 1 ? 'ies' : 'y'} misplaced — Link Drill time!`, "warning");
-            showNextCard();
-            return;
-        }
-    }
-}
-
-async function checkSequenceAnswer() {
-    const userInput = document.getElementById('writeAnswerInput');
-    const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
-    const cardPhasesUsingRoundCards = ['Weakest Link', 'InterChunkReview', 'Passive Review Quiz', 'Post-Drag Recall'];
-    let card = null;
-    if (studyState.sequencePhase === 'Forward Chaining' && studyState.sequenceForwardQueue?.length) {
-        const forwardId = studyState.sequenceForwardQueue[studyState.currentCardIndex];
-        card = currentChunk ? (currentChunk.find(c => c.id === forwardId) || currentChunk[studyState.currentCardIndex]) : null;
-    } else if (cardPhasesUsingRoundCards.includes(studyState.sequencePhase)) {
-        card = studyState.roundCards?.[studyState.currentCardIndex];
-    } else {
-        card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
-    }
-
-    if (studyState.sequencePhase === 'Link Drill') {
-        await handleLinkDrillResponse(userInput.value.trim());
-        return;
-    }
-
-    if (!card || userInput.value.trim() === '') return;
-
-    const userAnswer = userInput.value.trim();
-    const correctAnswer = card.answer.trim();
-
-
-    const stripHTML = (str) => {
-        const div = document.createElement('div');
-        div.innerHTML = str;
-        return div.textContent || div.innerText || '';
-    };
-
-    const normalizedUserAnswer = stripHTML(userAnswer).toLowerCase();
-    const normalizedCorrectAnswer = stripHTML(correctAnswer).toLowerCase();
-
-    const isCorrect = (normalizedUserAnswer === normalizedCorrectAnswer);
-
-    const responseTime = studyState.sequenceQuestionStartTime ? Date.now() - studyState.sequenceQuestionStartTime : null;
-    logInteraction({ cardID: card.id, wasCorrect: isCorrect, userAnswer: userAnswer, questionType: 'Sequence', responseTime });
-
-    userInput.classList.toggle('correct', isCorrect);
-    userInput.classList.toggle('incorrect', !isCorrect);
-    userInput.disabled = true;
-    showAnswer();
-    const delay = isCorrect ? 800 : 2000;
-    setTimeout(() => {
-        moveCard(card, isCorrect, 'Sequence');
-    }, delay);
-}
-
-async function dontKnowSequenceAnswer() {
-    const currentChunk = studyState.sequenceActiveChunkOverride || studyState.sequenceChunks[studyState.currentChunkIndex];
-    const cardPhasesUsingRoundCards = ['Weakest Link', 'InterChunkReview', 'Passive Review Quiz', 'Post-Drag Recall'];
-    let card = null;
-    if (studyState.sequencePhase === 'Forward Chaining' && studyState.sequenceForwardQueue?.length) {
-        const forwardId = studyState.sequenceForwardQueue[studyState.currentCardIndex];
-        card = currentChunk ? (currentChunk.find(c => c.id === forwardId) || currentChunk[studyState.currentCardIndex]) : null;
-    } else if (cardPhasesUsingRoundCards.includes(studyState.sequencePhase)) {
-        card = studyState.roundCards?.[studyState.currentCardIndex];
-    } else {
-        card = currentChunk ? currentChunk[studyState.currentCardIndex] : null;
-    }
-
-    if (studyState.sequencePhase === 'Link Drill') {
-        await handleLinkDrillResponse('', true);
-        return;
-    }
-
-    if (!card) return;
-
-    const responseTime = studyState.sequenceQuestionStartTime ? Date.now() - studyState.sequenceQuestionStartTime : null;
-    logInteraction({ cardID: card.id, wasCorrect: false, userAnswer: "[Don't Know]", questionType: 'Sequence', responseTime });
-    showAnswer();
-    document.querySelector('#cardView .flashcard').classList.add('is-flipped');
-    document.getElementById('cardAnswerContent').classList.remove('hidden');
-    document.getElementById('writeAnswerInput').disabled = true;
-
-    showToast("The correct answer is shown above.", "error");
-
-    setTimeout(() => {
-        moveCard(card, false, 'Sequence');
-    }, 2000);
-}
-
-async function handleLinkDrillResponse(userAnswer, isDontKnow = false) {
-    const linkItem = studyState.sequenceLinkDrillQueue?.[0];
-    if (!linkItem) {
-        moveToNextSequencePhase();
-        return;
-    }
-    const expectedCard = studyState.sequenceCards.find(c => c.id === linkItem.expectedId);
-    const expectedText = cleanStepText(expectedCard || linkItem.expectedId).toLowerCase();
-    const normalizedAnswer = (userAnswer || '').trim().toLowerCase();
-    const isCorrect = !isDontKnow && normalizedAnswer && normalizedAnswer === expectedText;
-    await recordLinkResult({
-        direction: linkItem.direction || 'after',
-        cueId: linkItem.cueId,
-        expectedId: linkItem.expectedId,
-        correct: isCorrect
-    });
-    const responseTime = studyState.sequenceQuestionStartTime ? Date.now() - studyState.sequenceQuestionStartTime : null;
-    await applySequenceFsrsUpdate(linkItem.expectedId, isCorrect ? 'Good' : 'Hard', new Date().toISOString(), {
-        interactionLog: {
-            recallLatency: responseTime,
-            totalCorrections: 0,
-            attemptCount: 1,
-            questionType: 'Link Drill'
-        },
-        iqs: 0.5,
-        correct: isCorrect,
-        questionType: 'Link Drill'
-    });
-    studyState.sequenceLinkDrillAttempts = (studyState.sequenceLinkDrillAttempts || 0) + 1;
-    if (!isCorrect) {
-        studyState.sequenceRecentLinkFailures = (studyState.sequenceRecentLinkFailures || 0) + 1;
-        const failedEntry = studyState.sequenceLinkDrillQueue.shift();
-        if (failedEntry) studyState.sequenceLinkDrillQueue.push(failedEntry);
-        showToast("We'll revisit that adjacency shortly.", "error");
-    } else {
-        studyState.sequenceLinkDrillQueue.shift();
-        showToast("Great! That link is reinforced.", "success");
-    }
-    await saveStudyProgress();
-    const shouldExit = !studyState.sequenceLinkDrillQueue.length || studyState.sequenceLinkDrillAttempts >= studyState.sequenceLinkDrillCap;
-    if (shouldExit) {
-        studyState.sequenceRecentLinkFailures = 0;
-        studyState.sequenceMissingEdges = [];
-        studyState.sequenceLinkDrillAttempts = 0;
-        studyState.sequencePhase = 'Post-Drag Recall';
-        moveToNextSequencePhase();
-        return;
-    }
-    showNextCard();
 }
 
 async function showInsightsView() {
@@ -10967,7 +13491,7 @@ function updateExamProgress() {
     document.getElementById('progressTitle').textContent = `Today's Session Progress`;
 
     document.getElementById('deckMasteryProgress').style.width = `${progressPercent}%`;
-    document.getElementById('deckMasteryValue').textContent = `${Math.round(progressPercent)}%`;
+    renderMetricInto('deckMasteryValue', { label: 'Progress', value: progressPercent, kind: 'progress' }, ['compact']);
     document.getElementById('masteredCardCount').textContent = dailyPriorityQueue.length;
     document.getElementById('learningCardCount').textContent = completedThisSession;
     document.querySelector('#masteredCardCount + .stat-label').textContent = "Cards Remaining";
@@ -11373,7 +13897,7 @@ async function showCurriculaLibrary() {
     grid.innerHTML = '<p>Loading courses...</p>';
 
     try {
-        const response = await fetch('/.netlify/functions/getPublicCurricula');
+        const response = await fetch('/api/public-curricula');
         if (!response.ok) throw new Error('Failed to load the library.');
 
         const curricula = await response.json();
@@ -11433,56 +13957,57 @@ function hideLoadingScreen() {
     loadingView.style.display = 'none';
 }
 
-function toggleEditorView(deckType) {
+function toggleEditorView(deckType, deck = null) {
     const container = document.getElementById('flashcardsContainer');
-    const cards = [];
-
-    document.querySelectorAll('#editorView .flashcard-item').forEach(el => {
-        const isSequence = el.querySelector('.sequence-term-input');
-        cards.push({
-            question: isSequence ? el.querySelector('.sequence-desc-input').value.trim() : el.querySelector('.question-input').value.trim(),
-            answer: isSequence ? el.querySelector('.sequence-term-input').value.trim() : el.querySelector('.solution-input').value.trim(),
-            questionImage: el.querySelector('.question-image-input')?.value.trim() || '',
-            answerImage: el.querySelector('.answer-image-input')?.value.trim() || ''
-        });
-    });
-
+    const existingStandardCards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map(el => ({
+        question: el.querySelector('.question-input')?.value.trim() || '',
+        answer: el.querySelector('.solution-input')?.value.trim() || '',
+        questionImage: el.querySelector('.question-image-input')?.value.trim() || '',
+        answerImage: el.querySelector('.answer-image-input')?.value.trim() || ''
+    })).filter(card => card.question || card.answer || card.questionImage || card.answerImage);
+    const existingSequences = collectSequenceEditorData(true);
     container.innerHTML = '';
+    editorCardCounter = 0;
+    destroySequenceSortables();
 
+    const addBtn = document.querySelector('.add-question-btn');
     if (deckType === 'Sequence') {
-        const addBtn = document.querySelector('.add-question-btn');
-        addBtn.textContent = '+ Add Sequence Item';
-        addBtn.onclick = () => editorAddNewCard('Sequence');
-        document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Sequence');
-        cards.forEach(card => editorAddNewCard('Sequence', card));
-        if (sortableInstance) {
-            try {
-                sortableInstance.destroy();
-            } catch (error) {
-                console.warn('Failed to destroy Sortable instance:', error);
-                // Continue execution even if destroy fails
-            }
-            sortableInstance = null;
+        destroyStandardSortableInstance();
+        addBtn.textContent = '+ Add Sequence';
+        addBtn.onclick = () => editorAddSequence();
+        const sourceDeck = deck && deck.typeHint === 'Sequence'
+            ? deck
+            : ((currentDeckId && decks[currentDeckId]?.typeHint === 'Sequence') ? decks[currentDeckId] : null);
+        const sequencesFromDeck = sourceDeck ? buildSequenceGroups(sourceDeck.cards || [], sourceDeck.sequenceMeta || {}) : [];
+        const sequencesToRender = sequencesFromDeck.length ? sequencesFromDeck : (existingSequences.length ? existingSequences : []);
+        if (sequencesToRender.length) {
+            sequencesToRender.forEach(seq => editorAddSequence({
+                sequenceId: seq.sequenceId || seq.id,
+                title: seq.title,
+                description: seq.description,
+                steps: seq.steps
+            }));
+        } else {
+            editorAddSequence();
         }
-        sortableInstance = new Sortable(container, {
-            animation: 150,
-            handle: '.drag-handle',
-            ghostClass: 'drag-ghost',
-            onEnd: editorRenumberCards
-        });
-    } else {
-        document.querySelector('.add-question-btn').onclick = () => editorAddNewCard('Standard');
-        cards.forEach(card => editorAddNewCard('Standard', card));
-        if (sortableInstance) {
-            try {
-                sortableInstance.destroy();
-            } catch (error) {
-                console.warn('Failed to destroy Sortable instance:', error);
-                // Continue execution even if destroy fails
-            }
-            sortableInstance = null;
-        }
+        refreshSequenceSortables();
+        editorRenumberCards();
+        return;
     }
+
+    destroySequenceSortables();
+    addBtn.textContent = '+ Add Question';
+    addBtn.onclick = () => editorAddNewCard('Standard');
+    const sourceCards = (deck && deck.cards && deck.typeHint !== 'Sequence')
+        ? deck.cards
+        : (existingStandardCards.length ? existingStandardCards : null);
+    if (sourceCards && sourceCards.length) {
+        sourceCards.forEach(card => editorAddNewCard('Standard', card));
+    } else {
+        editorAddNewCard('General');
+        editorAddNewCard('General');
+    }
+    initStandardEditorSortable();
     editorRenumberCards();
 }
 
@@ -12013,111 +14538,7 @@ function normalizeCardRecord(entry, type) {
     return { question, answer: answerValue };
 }
 
-const DEFAULT_SEQUENCE_TITLE = 'Sequence';
-const SEQUENCE_STEP_SOURCES = ['steps', 'sequence', 'items'];
 
-function splitSteps(value) {
-    if (Array.isArray(value)) {
-        return value.map(item => cleanStepText(item)).filter(Boolean);
-    }
-    if (typeof value === 'string') {
-        return value.split(/\r?\n/).map(line => cleanStepText(line)).filter(Boolean);
-    }
-    return [];
-}
-
-function hasSequenceSources(entry) {
-    if (!entry || typeof entry !== 'object') return false;
-    return SEQUENCE_STEP_SOURCES.some(key => entry[key] !== undefined && entry[key] !== null);
-}
-
-function hasStepText(entry) {
-    if (!entry || typeof entry !== 'object') return false;
-    return Boolean(cleanStepText(entry.answer || entry.term || entry.step || entry.text || entry.description || entry.question));
-}
-
-function isStepCardShape(entry) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    if (hasSequenceSources(entry)) return false;
-    return hasStepText(entry);
-}
-
-function extractSequenceSteps(entry) {
-    for (const key of SEQUENCE_STEP_SOURCES) {
-        if (entry[key] !== undefined && entry[key] !== null) {
-            const steps = splitSteps(entry[key]);
-            if (steps.length) return steps;
-        }
-    }
-    return [];
-}
-
-function normalizeSequenceObject(entry) {
-    if (!entry || typeof entry !== 'object') return null;
-    const steps = extractSequenceSteps(entry);
-    if (!steps.length) return null;
-    const title = (entry.title || entry.name || entry.term || DEFAULT_SEQUENCE_TITLE).toString().trim() || DEFAULT_SEQUENCE_TITLE;
-    const description = (entry.description || entry.desc || entry.note || entry.summary || '').toString().trim();
-    return {
-        _isSequence: true,
-        title,
-        description,
-        steps
-    };
-}
-
-function createSequenceFromStepCards(entries) {
-    const orderedSteps = entries
-        .map((entry, idx) => {
-            const text = cleanStepText(entry.answer || entry.term || entry.step || entry.text || entry.description);
-            if (!text) return null;
-            const order = Number.isFinite(entry.order) ? entry.order : idx;
-            return { order, text };
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.order - b.order)
-        .map(item => item.text);
-
-    if (!orderedSteps.length) return null;
-    const meta = entries.find(entry => entry) || {};
-    const title = (meta.title || meta.name || DEFAULT_SEQUENCE_TITLE).toString().trim() || DEFAULT_SEQUENCE_TITLE;
-    const description = (meta.description || meta.desc || meta.note || '').toString().trim();
-    return {
-        _isSequence: true,
-        title,
-        description,
-        steps: orderedSteps
-    };
-}
-
-function normalizeSequenceEntries(entries) {
-    if (!Array.isArray(entries)) return [];
-    const validEntries = entries.filter(entry => entry !== null && entry !== undefined);
-    if (!validEntries.length) return [];
-
-    const simpleStringsOnly = validEntries.every(item => typeof item === 'string' || typeof item === 'number');
-    if (simpleStringsOnly) {
-        const steps = splitSteps(validEntries);
-        if (!steps.length) return [];
-        return [{
-            _isSequence: true,
-            title: DEFAULT_SEQUENCE_TITLE,
-            description: '',
-            steps
-        }];
-    }
-
-    const onlyStepCards = validEntries.every(entry => isStepCardShape(entry));
-    if (onlyStepCards) {
-        const sequence = createSequenceFromStepCards(validEntries);
-        return sequence ? [sequence] : [];
-    }
-
-    const sequences = validEntries
-        .map(entry => normalizeSequenceObject(entry))
-        .filter(Boolean);
-    return sequences;
-}
 
 function normalizeAiDeckResponse(response) {
     if (!response) {
@@ -12142,22 +14563,24 @@ function normalizeAiDeckResponse(response) {
     const language = response.language || '';
 
     if (type === 'sequence') {
-        const sequenceSources = [response.sequences, response.cards, response.steps, response.items];
-        let rawSequenceEntries = null;
-        for (const source of sequenceSources) {
-            if (Array.isArray(source) && source.length > 0) {
-                rawSequenceEntries = source;
-                break;
-            }
-        }
-        if (!rawSequenceEntries) {
-            throw new Error('AI response did not include usable sequence steps.');
-        }
-        const sequences = normalizeSequenceEntries(rawSequenceEntries);
+        const sequences = Array.isArray(response.sequences) ? response.sequences : [];
         if (!sequences.length) {
+            throw new Error('AI response did not include sequences.');
+        }
+        const normalizedSequences = sequences.map((seq, idx) => {
+            const title = (seq.title || `Sequence ${idx + 1}`).toString().trim() || `Sequence ${idx + 1}`;
+            const steps = Array.isArray(seq.steps) ? seq.steps : [];
+            const normalizedSteps = steps.map(step => {
+                if (typeof step === 'string') return { text: step };
+                if (step && typeof step === 'object') return { text: step.text || step.question || step.prompt || '', notes: step.notes || step.answer || '' };
+                return { text: '' };
+            }).filter(step => step.text);
+            return { title, steps: normalizedSteps, notes: seq.description || seq.notes || '' };
+        }).filter(seq => seq.steps.length);
+        if (!normalizedSequences.length) {
             throw new Error('AI response did not include usable sequence steps.');
         }
-        return { type, deckName, deckNotes, language, sequences };
+        return { type: 'sequence', deckName, deckNotes, language, sequences: normalizedSequences };
     }
 
     if (type === 'flashcard-legacy' && typeof response.flashcardText === 'string') {
@@ -12203,3 +14626,13 @@ window.toggleCortexDebug = async function () {
     console.log('[Cortex Debug]', studyState.cortexDebugEnabled ? 'ENABLED' : 'DISABLED');
     return studyState.cortexDebugEnabled;
 };
+
+
+
+
+
+
+
+
+
+

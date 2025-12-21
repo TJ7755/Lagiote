@@ -1,5 +1,6 @@
 import { FSRSAlgorithm } from './fsrs.js';
-import { initDB, getDB, getDataFromDB, saveDataToDB, getAllDataFromDB, deleteDataFromDB } from './db.js';
+import { initDB, getDB, getDataFromDB, saveDataToDB, getAllDataFromDB, deleteDataFromDB, DEFAULT_USER_ID } from './db.js';
+import { DEFAULT_CALIBRATION_BINS, DEFAULT_IMPLICIT_RELIABILITY, DEFAULT_IMPLICIT_WEIGHTS, applyReliability, buildImplicitFeatureVector, calibratePrediction, predictPCorrectFromWeights, loadImplicitCalibration, saveImplicitCalibration, updateCalibrationBins, updateImplicitReliability, updateImplicitWeights } from './cortex-calibration.js';
 
 const DEFAULT_HORIZON_DAYS = 3;
 let fsrsInstance = null;
@@ -10,7 +11,17 @@ const cortexState = {
     modelPredictor: null,
     nowProvider: () => new Date(),
     debugEnabled: false,
-    featureNames: null
+    featureNames: null,
+    implicitCalibration: {
+        loaded: false,
+        userID: DEFAULT_USER_ID,
+        weights: { ...DEFAULT_IMPLICIT_WEIGHTS },
+        reliability: { ...DEFAULT_IMPLICIT_RELIABILITY },
+        bins: DEFAULT_CALIBRATION_BINS.map(bin => ({ ...bin })),
+        updates: 0,
+        stats: { n: 0, brierEma: null },
+        lastUpdated: null
+    }
 };
 
 const MODEL_STORAGE_KEY = 'cortexModelV1';
@@ -37,6 +48,16 @@ const LEARNING_RATE_TIME = 0.01;
 const MIN_TIME_COST = 2.0;
 const MAX_TIME_COST = 60.0;
 const DEFAULT_TIME_COST_SECONDS = 5.0;
+const IMPLICIT_PERSIST_EVERY = 10;
+const BRIER_EMA_ALPHA = 0.02;
+const IMPLICIT_UPDATE_OPTS = { lr: 0.02, l2: 0.0005, maxDelta: 0.03, maxNorm: 0.08 };
+const IMPLICIT_RELIABILITY_OPTS = { lr_r: 0.01, rMin: 0.2, maxDeltaR: 0.02 };
+const TIME_FEATURE_KEYS = ['zLatency', 'zFirstAction', 'pauses', 'focusLoss'];
+const IMPLICIT_CALIBRATION_OPTS = { binsCount: 10, priorN: 4, priorS: 2, k: 25, z: 1.64 };
+const INTERFERENCE_FRAGILITY_ALPHA = 0.12;
+const INTERFERENCE_FRAGILITY_DECAY = 0.06;
+const INTERFERENCE_PRIORITY_WEIGHT = 0.35;
+const INTERFERENCE_MASTERY_BLOCK_THRESHOLD = 0.35;
 
 // --- Helpers ---
 
@@ -71,81 +92,178 @@ function clamp(val, min, max) {
     return Math.min(max, Math.max(min, val));
 }
 
+function computeProbeCalibrationScale(context) {
+    const probe = context?.interference;
+    if (!probe || probe.type !== 'probe') return 1;
+    const similarityRaw = Number(probe.similarity);
+    const similarity = Number.isFinite(similarityRaw) ? clamp(similarityRaw, 0, 1) : 0;
+    return clamp(0.6 + 0.4 * (1 - similarity), 0.6, 1.0);
+}
+
+function computeFormatCalibrationScale(context) {
+    if (context?.format === 'mcq') {
+        if (context?.subformat === 'remediation') return 0.4;
+        return 0.5;
+    }
+    return 1.0;
+}
+
+function updateInterferenceFragilityEma(prevEma, explicitCorrectness, similarity) {
+    const ema = clamp(normalizeFeature(prevEma, 0), 0, 1);
+    const simRaw = Number(similarity);
+    const sim = Number.isFinite(simRaw) ? clamp(simRaw, 0, 1) : 0;
+    const severity = clamp(0.5 + 0.5 * sim, 0.5, 1.0);
+    if (explicitCorrectness === true) {
+        return clamp(ema * (1 - INTERFERENCE_FRAGILITY_DECAY), 0, 1);
+    }
+    if (explicitCorrectness === false) {
+        return clamp((ema * (1 - INTERFERENCE_FRAGILITY_ALPHA)) + (INTERFERENCE_FRAGILITY_ALPHA * severity), 0, 1);
+    }
+    return ema;
+}
+
+function applyExamPressureDamp(reliability, examPressure) {
+    if (!Number.isFinite(examPressure)) return reliability;
+    const pressure = clamp(examPressure, 0, 1);
+    const damp = 1 - (0.5 * pressure);
+    const adjusted = { ...reliability };
+    TIME_FEATURE_KEYS.forEach(key => {
+        if (typeof adjusted[key] === 'number') {
+            adjusted[key] *= damp;
+        }
+    });
+    return adjusted;
+}
+
+async function ensureImplicitCalibration(userID = DEFAULT_USER_ID) {
+    const state = cortexState.implicitCalibration;
+    if (state.loaded && state.userID === userID) return state;
+    let loaded = null;
+    try {
+        loaded = await loadImplicitCalibration(userID);
+    } catch (error) {
+        if (cortexState.debugEnabled) {
+            console.warn('[ImplicitCalibration] Failed to load calibration, using defaults', error);
+        }
+    }
+    cortexState.implicitCalibration = {
+        loaded: true,
+        userID,
+        weights: loaded?.weights || { ...DEFAULT_IMPLICIT_WEIGHTS },
+        reliability: loaded?.reliability || { ...DEFAULT_IMPLICIT_RELIABILITY },
+        bins: Array.isArray(loaded?.bins) ? loaded.bins : DEFAULT_CALIBRATION_BINS.map(bin => ({ ...bin })),
+        updates: loaded?.updates || 0,
+        stats: loaded?.stats || { n: 0, brierEma: null },
+        lastUpdated: loaded?.lastUpdated || null
+    };
+    return cortexState.implicitCalibration;
+}
+
+function getImplicitWeightsForUser(userID = DEFAULT_USER_ID) {
+    const state = cortexState.implicitCalibration;
+    if (state.loaded && state.userID === userID && state.weights) return state.weights;
+    return DEFAULT_IMPLICIT_WEIGHTS;
+}
+
+function getImplicitReliabilityForUser(userID = DEFAULT_USER_ID) {
+    const state = cortexState.implicitCalibration;
+    if (state.loaded && state.userID === userID && state.reliability) return state.reliability;
+    return DEFAULT_IMPLICIT_RELIABILITY;
+}
+
+function getImplicitCalibrationBinsForUser(userID = DEFAULT_USER_ID) {
+    const state = cortexState.implicitCalibration;
+    if (state.loaded && state.userID === userID && Array.isArray(state.bins)) return state.bins;
+    return DEFAULT_CALIBRATION_BINS;
+}
+
+async function persistImplicitCalibration() {
+    const state = cortexState.implicitCalibration;
+    if (!state || !state.loaded) return;
+    const lastUpdated = new Date().toISOString();
+    try {
+        await saveImplicitCalibration(state.userID || DEFAULT_USER_ID, {
+            weights: state.weights,
+            reliability: state.reliability,
+            bins: state.bins,
+            updates: state.updates || 0,
+            lastUpdated,
+            stats: state.stats || { n: 0, brierEma: null }
+        });
+        state.lastUpdated = lastUpdated;
+    } catch (error) {
+        if (cortexState.debugEnabled) {
+            console.warn('[ImplicitCalibration] Persist failed', error);
+        }
+    }
+}
+
 // --- 1. Implicit Inference ---
 
-export function inferRetrievalOutcome(metrics, userBaseline = {}, explicitFeedback = null) {
-    // metrics: { recallLatency, answerFluency, totalCorrections, attemptCount, 
-    //            backspaceRate, hesitationPauses, timeToFirstAction, focusLossCount, ... }
-    
-    // Baselines
-    const baseLatency = userBaseline.latency || 2500;
-    const baseFluency = userBaseline.fluency || 5;
-
-    // Feature extraction & Z-scoring
-    const latency = normalizeFeature(metrics.recallLatency, baseLatency);
-    const zLatency = (latency - baseLatency) / (baseLatency * 0.5); // Assume std ~ 0.5*mean
-    
-    const timeToFirst = normalizeFeature(metrics.timeToFirstAction, 500);
-    const zFirstAction = (timeToFirst - 500) / 300; // Heuristic
-    
-    const corrections = normalizeFeature(metrics.totalCorrections, 0);
-    const attempts = normalizeFeature(metrics.attemptCount, 1);
-    const backspaces = normalizeFeature(metrics.backspaceRate, 0); // e.g., per char
-    const pauses = normalizeFeature(metrics.hesitationPauses, 0);
-    const focusLoss = normalizeFeature(metrics.focusLossCount, 0);
-    
-    // --- Probability of Correctness (pCorrect) ---
-    // Log-odds model starting at 0 (p=0.5)
-    let logOdds = 1.0; 
-    
-    // Latency penalty
-    logOdds -= (0.8 * zLatency);
-    
-    // Hesitation / Struggle penalties
-    logOdds -= (0.5 * zFirstAction);
-    logOdds -= (1.2 * corrections);
-    logOdds -= (1.5 * (attempts - 1));
-    logOdds -= (2.0 * backspaces);
-    logOdds -= (0.5 * pauses);
-    logOdds -= (1.0 * focusLoss);
-    
-    // --- Volatility & Confidence ---
-    // Volatility: Behavioural instability (Noise in execution)
-    // High if performance contradicts itself (e.g. fast but wrong) or implies struggle
-    let volatility = 0.1;
-    if (Math.abs(zLatency) > 2.0) volatility += 0.2;
-    if (attempts > 1) volatility += 0.3;
-    if (corrections > 1) volatility += 0.2;
-    if (backspaces > 0.5) volatility += 0.2;
-    
-    volatility = clamp(volatility, 0.0, 1.0);
-
-    // Confidence: Epistemic certainty (How well does this single sample represent knowledge?)
-    // If volatility is high, our single-sample confidence is lower.
-    // Explicit feedback dramatically increases confidence.
-    let confidence = 0.8 - (0.5 * volatility);
+export function inferRetrievalOutcome(metrics, userBaseline = {}, explicitFeedback = null, context = {}) {
+    const featureVector = buildImplicitFeatureVector(metrics, userBaseline);
+    const userID = cortexState.implicitCalibration?.userID || DEFAULT_USER_ID;
+    const testCalibration = (typeof process !== 'undefined'
+        && process.env?.NODE_ENV === 'test'
+        && context?._testCalibrationPayload)
+        ? context._testCalibrationPayload
+        : null;
+    const weights = testCalibration?.weights || getImplicitWeightsForUser(userID);
+    const reliabilitySource = testCalibration?.reliability || getImplicitReliabilityForUser(userID);
+    const reliability = applyExamPressureDamp(reliabilitySource, context?.examPressure);
+    const bins = testCalibration?.bins || getImplicitCalibrationBinsForUser(userID);
+    const effectiveWeights = applyReliability(weights, reliability);
+    const pPred = predictPCorrectFromWeights(effectiveWeights, featureVector.x);
+    const calibrated = calibratePrediction(pPred, bins, IMPLICIT_CALIBRATION_OPTS);
+    const pLowerBase = calibrated.pLower;
+    const pUpperBase = calibrated.pUpper;
+    const computeConfidence = (pLower, pUpper) => {
+        const intervalWidth = clamp(pUpper - pLower, 0, 1);
+        return clamp(1 - intervalWidth, 0.05, 0.99);
+    };
+    const intervalWidth = clamp(pUpperBase - pLowerBase, 0, 1);
+    const confidence = computeConfidence(pLowerBase, pUpperBase);
+    const evidenceSigmaBase = 0.5 * intervalWidth;
     
     // --- Explicit Feedback Integration ---
     if (explicitFeedback === false) {
-        // Explicit wrong: Clamp pCorrect <= 0.05
-        // We override the logOdds derived probability
+        const pLower = 0.01;
+        const pUpper = 0.15;
+        const intervalWidthExplicit = clamp(pUpper - pLower, 0, 1);
+        const evidenceSigma = 0.5 * intervalWidthExplicit;
         return { 
             pCorrect: 0.05, 
-            confidence: Math.max(0.9, confidence + 0.2), // High confidence in failure
-            volatility: volatility 
+            pLower,
+            pUpper,
+            evidenceSigma,
+            volatility: evidenceSigma,
+            confidence: computeConfidence(pLower, pUpper)
         };
     } else if (explicitFeedback === true) {
-        // Explicit correct: Add weak prior, do NOT clamp to 1.0
-        logOdds += 1.5; 
-        confidence = Math.min(0.95, confidence + 0.15); 
+        const base = clamp(calibrated.pCal, 1e-6, 1 - 1e-6);
+        const logOdds = Math.log(base / (1 - base)) + 1.5;
+        const pCorrect = clamp(sigmoid(logOdds), 0.01, 0.99);
+        const pLower = clamp(Math.min(pLowerBase + 0.10, pCorrect), 0.0, 1.0);
+        const pUpper = clamp(Math.max(pUpperBase + 0.10, pCorrect), 0.0, 1.0);
+        const intervalWidthExplicit = clamp(pUpper - pLower, 0, 1);
+        const evidenceSigma = 0.5 * intervalWidthExplicit;
+        return {
+            pCorrect,
+            pLower,
+            pUpper,
+            evidenceSigma,
+            volatility: evidenceSigma,
+            confidence: computeConfidence(pLower, pUpper)
+        };
     }
     
-    const pCorrect = sigmoid(logOdds);
-    
     return {
-        pCorrect: clamp(pCorrect, 0.01, 0.99),
-        confidence: clamp(confidence, 0.1, 0.99),
-        volatility
+        pCorrect: clamp(calibrated.pCal, 0.01, 0.99),
+        pLower: clamp(pLowerBase, 0.0, 1.0),
+        pUpper: clamp(pUpperBase, 0.0, 1.0),
+        evidenceSigma: evidenceSigmaBase,
+        volatility: evidenceSigmaBase,
+        confidence: clamp(confidence, 0.1, 0.99)
     };
 }
 
@@ -225,14 +343,16 @@ export function mapPCorrectToOutcomeDistribution(pCorrect, confidence) {
 }
 
 
-function mapProbabilityToRating(pCorrect, confidence, engine) {
+function mapProbabilityToRating(pCorrect, confidence, engine, pLower = null) {
     const ratings = engine.getRatings();
     
     // Map pCorrect to Rating bands
     // Shift pessimistically if confidence is low to ensure safety
     // adjustedP = p - (uncertainty * penalty_factor)
     const uncertainty = 1.0 - confidence;
-    const adjustedP = pCorrect - (uncertainty * 0.25);
+    const adjustedP = (typeof pLower === 'number' && Number.isFinite(pLower))
+        ? pLower
+        : (pCorrect - (uncertainty * 0.25));
 
     if (adjustedP < 0.45) return ratings.Again;
     if (adjustedP < 0.75) return ratings.Hard;
@@ -243,18 +363,29 @@ function mapProbabilityToRating(pCorrect, confidence, engine) {
 // --- 2. Uncertainty-Aware Update Logic ---
 
 export async function processReview(card, knowledgeState, metrics, explicitFeedback = null, userBaseline = {}, context = {}) {
+    const userID = knowledgeState?.userID || knowledgeState?.userId || DEFAULT_USER_ID;
+    await ensureImplicitCalibration(userID).catch(() => null);
     const engine = await getFsrsEngine();
     const now = getNow(cortexState.nowProvider);
     const deckContext = context?.deck || null;
     const sessionContext = context?.sessionState || null;
+    const priorFragility = clamp(normalizeFeature(knowledgeState?.interferenceFragilityEma, 0), 0, 1);
+    const probeContext = context?.interference?.type === 'probe' ? context.interference : null;
+    const nextFragility = (typeof explicitFeedback === 'boolean' && context?.calibrationTruth === true && probeContext)
+        ? updateInterferenceFragilityEma(priorFragility, explicitFeedback, probeContext.similarity)
+        : priorFragility;
 
     const preFeatures = await computeFeatures(card, knowledgeState, sessionContext, deckContext);
     const targetDate = buildTargetDate(deckContext, now);
     const preparedState = engine.prepareCard(knowledgeState?.fsrs || knowledgeState);
     const beforeRetrievability = await estimateRetrievabilityAt(engine, preparedState, targetDate);
 
-    const inference = inferRetrievalOutcome(metrics, userBaseline, explicitFeedback);
-    const rating = mapProbabilityToRating(inference.pCorrect, inference.confidence, engine);
+    const inference = inferRetrievalOutcome(metrics, userBaseline, explicitFeedback, context);
+    const ratings = engine.getRatings();
+    let rating = mapProbabilityToRating(inference.pCorrect, inference.confidence, engine, inference.pLower);
+    if (priorFragility > INTERFERENCE_MASTERY_BLOCK_THRESHOLD && rating === ratings.Easy) {
+        rating = ratings.Good;
+    }
     const result = await engine.reviewCard(knowledgeState, rating, now);
 
     const resolvedFsrs = result.fsrs || result;
@@ -267,13 +398,16 @@ export async function processReview(card, knowledgeState, metrics, explicitFeedb
 
     const updatedState = {
         ...result,
-        evidenceSigma: inference.volatility,
+        evidenceSigma: typeof inference.evidenceSigma === 'number' ? inference.evidenceSigma : inference.volatility,
+        pLower: inference.pLower,
+        pUpper: inference.pUpper,
         lastInference: inference,
         lastMetrics: metrics,
         lastRating: rating,
         rating,
         lastReviewed: lastReviewedIso,
-        stability: derivedStability
+        stability: derivedStability,
+        interferenceFragilityEma: nextFragility
     };
 
     try {
@@ -288,6 +422,50 @@ export async function processReview(card, knowledgeState, metrics, explicitFeedb
     } catch (error) {
         if (cortexState.debugEnabled) {
             console.warn('[NeuralPredictor] Training sample skipped', error);
+        }
+    }
+
+    if (typeof explicitFeedback === 'boolean' && context?.calibrationTruth === true) {
+        try {
+            const featureVector = buildImplicitFeatureVector(metrics, userBaseline);
+            const currentState = cortexState.implicitCalibration || {};
+            const currentWeights = currentState.userID === userID && currentState.weights ? currentState.weights : getImplicitWeightsForUser(userID);
+            const currentReliability = currentState.userID === userID && currentState.reliability ? currentState.reliability : getImplicitReliabilityForUser(userID);
+            const currentBins = currentState.userID === userID && Array.isArray(currentState.bins) ? currentState.bins : getImplicitCalibrationBinsForUser(userID);
+            const y = explicitFeedback ? 1 : 0;
+            const effectiveWeights = applyReliability(currentWeights, currentReliability);
+            const pHat = predictPCorrectFromWeights(effectiveWeights, featureVector.x);
+            const nextBins = updateCalibrationBins(currentBins, pHat, y);
+            const probeScale = computeProbeCalibrationScale(context);
+            const formatScale = computeFormatCalibrationScale(context);
+            const lrScale = probeScale * formatScale;
+            const updateOpts = lrScale === 1 ? IMPLICIT_UPDATE_OPTS : { ...IMPLICIT_UPDATE_OPTS, lr: IMPLICIT_UPDATE_OPTS.lr * lrScale };
+            const reliabilityOpts = lrScale === 1 ? IMPLICIT_RELIABILITY_OPTS : { ...IMPLICIT_RELIABILITY_OPTS, lr_r: IMPLICIT_RELIABILITY_OPTS.lr_r * lrScale };
+            const nextWeights = updateImplicitWeights(currentWeights, featureVector.x, y, updateOpts);
+            const nextReliability = updateImplicitReliability(currentReliability, currentWeights, featureVector.x, y, pHat, reliabilityOpts);
+            const brier = (pHat - y) * (pHat - y);
+            const prevStats = currentState.stats || { n: 0, brierEma: null };
+            const nextStats = {
+                n: (prevStats.n || 0) + 1,
+                brierEma: prevStats.brierEma === null ? brier : (prevStats.brierEma * (1 - BRIER_EMA_ALPHA)) + (BRIER_EMA_ALPHA * brier)
+            };
+            cortexState.implicitCalibration = {
+                ...currentState,
+                loaded: true,
+                userID,
+                weights: nextWeights,
+                reliability: nextReliability,
+                bins: nextBins,
+                updates: (currentState.updates || 0) + 1,
+                stats: nextStats
+            };
+            if ((cortexState.implicitCalibration.updates % IMPLICIT_PERSIST_EVERY) === 0) {
+                await persistImplicitCalibration();
+            }
+        } catch (error) {
+            if (cortexState.debugEnabled) {
+                console.warn('[ImplicitCalibration] Update failed', error);
+            }
         }
     }
 
@@ -318,10 +496,10 @@ async function recordNeuralTrainingExample({ card, context, features, metrics = 
 }
 
 const DETERMINISTIC_INFERENCES = {
-    Again: { pCorrect: 0.05, confidence: 0.95, volatility: 0.1 },
-    Hard: { pCorrect: 0.55, confidence: 0.95, volatility: 0.1 },
-    Good: { pCorrect: 0.80, confidence: 0.95, volatility: 0.1 },
-    Easy: { pCorrect: 0.95, confidence: 0.95, volatility: 0.1 }
+    Again: { pCorrect: 0.05, pLower: 0.01, pUpper: 0.15, evidenceSigma: 0.07, confidence: 0.95, volatility: 0.07 },
+    Hard: { pCorrect: 0.55, pLower: 0.40, pUpper: 0.70, evidenceSigma: 0.15, confidence: 0.95, volatility: 0.15 },
+    Good: { pCorrect: 0.80, pLower: 0.65, pUpper: 0.90, evidenceSigma: 0.125, confidence: 0.95, volatility: 0.125 },
+    Easy: { pCorrect: 0.95, pLower: 0.85, pUpper: 0.99, evidenceSigma: 0.07, confidence: 0.95, volatility: 0.07 }
 };
 
 function resolveRatingLabel(engine, rating) {
@@ -333,7 +511,7 @@ function buildDeterministicInference(label) {
     if (label && DETERMINISTIC_INFERENCES[label]) {
         return DETERMINISTIC_INFERENCES[label];
     }
-    return { pCorrect: 0.5, confidence: 0.5, volatility: 0.1 };
+    return { pCorrect: 0.5, pLower: 0.25, pUpper: 0.75, evidenceSigma: 0.25, confidence: 0.5, volatility: 0.25 };
 }
 
 export async function processReviewWithRating(card, knowledgeState, fsrsRating, nowOverride = null, meta = {}, context = {}) {
@@ -383,9 +561,12 @@ export async function processReviewWithRating(card, knowledgeState, fsrsRating, 
         rating: fsrsRating,
         lastRating: fsrsRating,
         evidenceSigma,
+        pLower: inference.pLower,
+        pUpper: inference.pUpper,
         lastInference: inference,
         lastMetrics: meta?.metrics || null,
         lastReviewed: lastReviewedIso,
+        interferenceFragilityEma: clamp(normalizeFeature(knowledgeState?.interferenceFragilityEma, 0), 0, 1),
         stability
     };
 }
@@ -509,6 +690,31 @@ export async function computeFeatures(card, knowledgeState, sessionState, deck) 
     };
 }
 
+function computeMcqPriorityBoost(knowledgeState, deck) {
+    if (!knowledgeState || !knowledgeState.mcqStats) return 1.0;
+    if (!deck || !Array.isArray(deck.cards) || deck.cards.length < 4) return 1.0;
+    const adaptive = deck.settings?.adaptiveModes || null;
+    if (adaptive && adaptive.mcq === false) return 1.0;
+
+    const stats = knowledgeState.mcqStats || {};
+    const lureCounts = stats.lureCounts && typeof stats.lureCounts === 'object' ? stats.lureCounts : {};
+    const lureTotal = Object.values(lureCounts).reduce((sum, v) => {
+        const num = Number(v);
+        return sum + (Number.isFinite(num) ? Math.max(0, num) : 0);
+    }, 0);
+    const lureBoost = 1 + 0.10 * Math.min(6, lureTotal);
+    const emaRaw = Number(stats.recognitionDependenceEma);
+    const ema = Number.isFinite(emaRaw) ? clamp(emaRaw, 0, 1) : 0;
+    const dependenceBoost = 1 + 0.45 * ema;
+    const remediationAttempts = Number(stats.remediationAttempts);
+    const remediationCorrect = Number(stats.remediationCorrect);
+    const attempts = Number.isFinite(remediationAttempts) && remediationAttempts > 0 ? remediationAttempts : 0;
+    const correct = Number.isFinite(remediationCorrect) ? remediationCorrect : 0;
+    const failureRate = attempts > 0 ? 1 - (correct / Math.max(1, attempts)) : 0;
+    const remBoost = 1 + 0.35 * clamp(failureRate, 0, 1);
+    return lureBoost * dependenceBoost * remBoost;
+}
+
 export async function scoreCard(card, knowledgeState, sessionState, deck) {
     const engine = await getFsrsEngine();
     const now = getNow(cortexState.nowProvider);
@@ -586,6 +792,10 @@ export async function scoreCard(card, knowledgeState, sessionState, deck) {
         - uncertaintyPenalty
         + explorationBonus;
     
+    const fragility = clamp(normalizeFeature(knowledgeState?.interferenceFragilityEma, 0), 0, 1);
+    score *= (1 + (INTERFERENCE_PRIORITY_WEIGHT * fragility));
+    score *= computeMcqPriorityBoost(knowledgeState, deck);
+
     // Invariant: Score valid
     if (!Number.isFinite(score)) score = -999;
 
@@ -927,6 +1137,52 @@ export function hasModel() {
     return !!(cortexState.modelConfig);
 }
 
+export function debugInterferenceSelfCheck(options = {}) {
+    const simRaw = Number(options.similarity);
+    const sim = Number.isFinite(simRaw) ? clamp(simRaw, 0, 1) : 0.75;
+    const probeFailures = Number.isFinite(options.probeFailures) ? Math.max(1, Math.floor(options.probeFailures)) : 3;
+    const probeSuccesses = Number.isFinite(options.probeSuccesses) ? Math.max(0, Math.floor(options.probeSuccesses)) : 2;
+
+    let ema = 0;
+    for (let i = 0; i < probeFailures; i++) {
+        ema = updateInterferenceFragilityEma(ema, false, sim);
+    }
+    const afterFailures = ema;
+    for (let i = 0; i < probeSuccesses; i++) {
+        ema = updateInterferenceFragilityEma(ema, true, sim);
+    }
+
+    const boostAfterFailures = 1 + (INTERFERENCE_PRIORITY_WEIGHT * afterFailures);
+    const boostAfterSuccesses = 1 + (INTERFERENCE_PRIORITY_WEIGHT * ema);
+
+    return {
+        similarity: sim,
+        afterFailures,
+        afterSuccesses: ema,
+        boostAfterFailures,
+        boostAfterSuccesses,
+        masteryBlockedAfterFailures: afterFailures > INTERFERENCE_MASTERY_BLOCK_THRESHOLD,
+        masteryBlockedAfterSuccesses: ema > INTERFERENCE_MASTERY_BLOCK_THRESHOLD
+    };
+}
+
+function getImplicitCalibration() {
+    return cortexState.implicitCalibration;
+}
+
+function resetImplicitCalibration() {
+    cortexState.implicitCalibration = {
+        loaded: true,
+        userID: DEFAULT_USER_ID,
+        weights: { ...DEFAULT_IMPLICIT_WEIGHTS },
+        reliability: { ...DEFAULT_IMPLICIT_RELIABILITY },
+        bins: DEFAULT_CALIBRATION_BINS.map(bin => ({ ...bin })),
+        updates: 0,
+        stats: { n: 0, brierEma: null },
+        lastUpdated: null
+    };
+}
+
 const Cortex = {
     initCortex,
     hasModel,
@@ -940,5 +1196,20 @@ const Cortex = {
     NeuralPredictor,
     buildTargetDate
 };
+
+// Test-only hooks gated by environment
+export const __TEST_HOOKS__ = (typeof process !== 'undefined' && process?.env?.NODE_ENV === 'test')
+    ? { getImplicitCalibration, resetImplicitCalibration, debugInterferenceSelfCheck }
+    : null;
+
+// Dev-only runtime guard to prevent accidental exposure
+if (typeof process !== 'undefined' && process?.env?.NODE_ENV === 'development') {
+    if (Cortex.getImplicitCalibration || Cortex.resetImplicitCalibration || Cortex.debugInterferenceSelfCheck) {
+        console.warn('[Cortex] Test hooks leaked into production object. Purging.');
+        delete Cortex.getImplicitCalibration;
+        delete Cortex.resetImplicitCalibration;
+        delete Cortex.debugInterferenceSelfCheck;
+    }
+}
 
 export default Cortex;

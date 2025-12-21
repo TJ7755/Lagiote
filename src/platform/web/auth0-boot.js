@@ -29,7 +29,7 @@ async function resolveCreateAuth0Client() {
         // 2) No-bundler path: load ESM directly from a CDN.
         try {
             const url = `https://cdn.jsdelivr.net/npm/@auth0/auth0-spa-js@${AUTH0_SDK_VERSION}/dist/auth0-spa-js.production.esm.js`;
-            const mod = await import(url);
+            const mod = await import(/* @vite-ignore */ url);
             if (mod && typeof mod.createAuth0Client === 'function') {
                 sdkCreateAuth0Client = mod.createAuth0Client;
                 return sdkCreateAuth0Client;

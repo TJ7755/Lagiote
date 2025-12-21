@@ -10,7 +10,7 @@ process.env.NODE_ENV = process.env.NODE_ENV || (isDevMode ? 'development' : 'pro
 const VITE_CONFIG_PATH = path.join(__dirname, 'vite.config.js');
 const DEV_SERVER_DEFAULT_PORT = 5173;
 const DEV_SERVER_DEFAULT_HOST = '127.0.0.1';
-const SYNC_TIMEOUT_MS = 30000;
+const SYNC_TIMEOUT_MS = 90000;
 const OFFLINE_ERROR_CODES = new Set([
   'ENOTFOUND',
   'EAI_AGAIN',
@@ -626,8 +626,8 @@ app.whenReady().then(async () => {
   }
 
   if (!process.env.ELECTRON_AUTH0_AUDIENCE) {
-    console.warn('[Env] ELECTRON_AUTH0_AUDIENCE not found, using default fallback');
-    process.env.ELECTRON_AUTH0_AUDIENCE = 'https://dev-tn0gt5rtacrg1qdw.uk.auth0.com/api/v2/';
+    console.warn('[Env] ELECTRON_AUTH0_AUDIENCE not set; proceeding without an audience');
+    process.env.ELECTRON_AUTH0_AUDIENCE = '';
   }
 
   // Initialise update-electron-app in main process only when packaged
@@ -796,18 +796,21 @@ ipcMain.handle('sync-data', async (event, arg) => {
     headers['X-Guest-ID'] = guestId;
   }
 
+  const controller = new AbortController();
   let timeoutId;
   try {
     const response = await Promise.race([
       fetch(`${PROXY_URL}/api/sync`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(syncPayload)
+        body: JSON.stringify(syncPayload),
+        signal: controller.signal
       }),
       new Promise((_, reject) => {
         timeoutId = setTimeout(() => {
           const timeoutError = new Error('Sync timeout');
           timeoutError.type = 'timeout';
+          controller.abort();
           reject(timeoutError);
         }, SYNC_TIMEOUT_MS);
       })

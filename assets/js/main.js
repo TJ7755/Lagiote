@@ -1,6 +1,10 @@
 import { state, DEFAULT_DECK_SETTINGS, resetStudyState, resetPracticeTestState, setCurrentDeck, setCurrentMode, updateGlobalSettings, getDeck, getAllDecks, updateDeck, deleteDeck, updateAnalytics } from './state.js';
 import { showToast, showView, transitionView, transitionSubView } from './ui.js';
 import { initDB, saveDataToDB, getDataFromDB, getAllDataFromDB, deleteDataFromDB, clearStoreInDB } from './db.js';
+import { DEFAULT_BLUEPRINT_EXAM_INDICATIVE, DEFAULT_BLUEPRINT_FREE_PRACTICE, validateBlueprint, normaliseBlueprint } from '../../js/core/exam-blueprint.js';
+import { generateTestForm } from '../../js/core/test-form.js';
+import { estimateThetaRasch, updateItemDifficulties, getItemDifficulties } from '../../js/core/item-irt.js';
+import { equateScore, computeAnchorHistory } from '../../js/core/test-equating.js';
 
 // ============================================
 // FSRS Algorithm Integration
@@ -75,6 +79,76 @@ async function updateCardKnowledgeWithFSRS(card, interactionData) {
 
     await saveDataToDB('userKnowledgeState', newKnowledgeState);
     state.studyState.knowledgeStates.set(card.id, newKnowledgeState);
+}
+
+async function updateCardKnowledgeWithGrade(card, grade) {
+    if (!State || !Rating) {
+        console.error("FSRS Enums not loaded, skipping update.");
+        return;
+    }
+    const now = new Date();
+    let cardState = await getDataFromDB('userKnowledgeState', ['default_user', card.id]);
+
+    let fsrsCard;
+    if (cardState && cardState.fsrs) {
+        fsrsCard = { ...card, ...cardState.fsrs };
+    } else {
+        fsrsCard = {
+            due: now, stability: 0, difficulty: 0, elapsed_days: 0,
+            scheduled_days: 0, reps: 0, lapses: 0, state: State.New, last_review: now
+        };
+    }
+    
+    const result_of_repeat = await window.electronAPI.fsrsRepeat(fsrsCard, now.toISOString());
+    if (!result_of_repeat) {
+        console.error("FSRS repeat call failed.");
+        return;
+    }
+    const newFSRSState = result_of_repeat[grade];
+
+    const newKnowledgeState = {
+        userID: 'default_user',
+        cardID: card.id,
+        masteryScore: newFSRSState.stability,
+        stability: newFSRSState.stability,
+        difficulty: newFSRSState.difficulty,
+        lastReviewed: now.toISOString(),
+        fsrs: newFSRSState,
+        recallHistory: cardState?.recallHistory ? [...cardState.recallHistory, { date: now.toISOString(), grade }] : [{ date: now.toISOString(), grade }]
+    };
+
+    await saveDataToDB('userKnowledgeState', newKnowledgeState);
+    state.studyState.knowledgeStates.set(card.id, newKnowledgeState);
+}
+
+async function applyLearningUpdates(results) {
+    if (!confirm("This will update your learning state (FSRS/Cortex) based on these results. Continue?")) return;
+    
+    const applyBtn = document.getElementById('testApplyLearningBtn');
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = "Updating...";
+    }
+    
+    let updatedCount = 0;
+    
+    for (const result of results) {
+        if (result.marksEarned === undefined || result.marksEarned === null) continue;
+        
+        let grade = 1; // Default Again
+        if (result.marksEarned === result.marksAvailable) {
+            grade = 3; // Good
+        } else if (result.marksEarned > 0) {
+            grade = 2; // Hard
+        }
+        
+        const card = { ...result, id: result.cardId };
+        await updateCardKnowledgeWithGrade(card, grade);
+        updatedCount++;
+    }
+    
+    showToast(`Updated learning state for ${updatedCount} items.`, "success");
+    if (applyBtn) applyBtn.classList.add('hidden');
 }
 
 function calculateRetrievability(cardState, now) {
@@ -6379,11 +6453,96 @@ function loadCDNScript(src, onload) {
             document.getElementById('confirmActionModal').classList.remove('show');
         }
 
+        // Expose for UI
+        window.selectTestPreset = selectTestPreset;
+
+        let currentBlueprint = null;
+
+        function selectTestPreset(mode) {
+            const isExam = mode === 'exam_indicative';
+            currentBlueprint = isExam ? { ...DEFAULT_BLUEPRINT_EXAM_INDICATIVE } : { ...DEFAULT_BLUEPRINT_FREE_PRACTICE };
+            
+            // Update UI
+            document.getElementById('presetExam').classList.toggle('active', isExam);
+            document.getElementById('presetFree').classList.toggle('active', !isExam);
+            document.getElementById('presetDescription').textContent = isExam 
+                ? "Strict exam conditions. No feedback during test. Timed."
+                : "Relaxed practice. Feedback allowed. Flexible timing.";
+
+            // Update form fields
+            document.getElementById('testDuration').value = currentBlueprint.durationMinutes;
+            document.getElementById('testTotalMarks').value = currentBlueprint.composition.totalMarks;
+            
+            // Update advanced toggles
+            document.getElementById('optAllowBack').checked = currentBlueprint.navigation.allowBack;
+            document.getElementById('optShowTimer').checked = currentBlueprint.navigation.showTimer;
+            document.getElementById('optStrictMarking').checked = currentBlueprint.scoring.strictMarking;
+            document.getElementById('optConfidence').checked = currentBlueprint.scoring.confidenceInterval.enabled;
+
+            // Lock/Unlock fields based on mode (optional, but good for UX)
+            // For now, just warn on validation
+            validateCurrentConfig();
+        }
+
+        function validateCurrentConfig() {
+            // Construct temp blueprint from UI to validate
+            const tempBlueprint = {
+                ...currentBlueprint,
+                durationMinutes: parseInt(document.getElementById('testDuration').value),
+                composition: {
+                    ...currentBlueprint.composition,
+                    totalMarks: parseInt(document.getElementById('testTotalMarks').value)
+                },
+                navigation: {
+                    ...currentBlueprint.navigation,
+                    allowBack: document.getElementById('optAllowBack').checked,
+                    showTimer: document.getElementById('optShowTimer').checked
+                },
+                scoring: {
+                    ...currentBlueprint.scoring,
+                    strictMarking: document.getElementById('optStrictMarking').checked,
+                    confidenceInterval: { ...currentBlueprint.scoring.confidenceInterval, enabled: document.getElementById('optConfidence').checked }
+                }
+            };
+
+            const result = validateBlueprint(tempBlueprint);
+            const warningEl = document.getElementById('testValidityWarning');
+            const msgEl = document.getElementById('validityMessage');
+
+            if (!result.ok) {
+                warningEl.classList.remove('hidden');
+                warningEl.className = 'alert alert-danger';
+                msgEl.textContent = "Error: " + result.errors.join(' ');
+            } else if (result.warnings.length > 0) {
+                warningEl.classList.remove('hidden');
+                warningEl.className = 'alert alert-warning';
+                msgEl.textContent = "Warning: " + result.warnings.join(' ');
+            } else {
+                warningEl.classList.add('hidden');
+            }
+        }
+
         function openPracticeTestModal(deckId) {
             practiceTestState.deckId = deckId;
-            document.getElementById('numQuestions').max = decks[deckId].cards.length;
-            document.getElementById('numQuestions').value = Math.min(10, decks[deckId].cards.length);
+            const deck = decks[deckId];
+            
+            // Default to Exam Mode
+            selectTestPreset('exam_indicative');
+            
+            // Set max questions
+            const maxQ = deck.cards.length;
+            document.getElementById('testQuestionCount').max = maxQ;
+            document.getElementById('testQuestionCount').value = Math.min(20, maxQ);
+            
+            const deckTag = document.querySelector('#testDeckSelection .tag');
+            if (deckTag) deckTag.textContent = deck.name;
+
             document.getElementById('practiceTestModal').classList.add('show');
+            
+            // Attach listeners for validation
+            ['testDuration', 'testTotalMarks', 'optAllowBack', 'optShowTimer', 'optStrictMarking', 'optConfidence'].forEach(id => {
+                document.getElementById(id).onchange = validateCurrentConfig;
+            });
         }
 
         function closePracticeTestModal() {
@@ -6393,31 +6552,57 @@ function loadCDNScript(src, onload) {
         function startPracticeTest() {
             const deckId = practiceTestState.deckId;
             const deck = decks[deckId];
-            const testType = document.getElementById('testType').value;
-            const numQuestions = parseInt(document.getElementById('numQuestions').value);
+            
+            // 1. Build Blueprint
+            const blueprint = normaliseBlueprint({
+                ...currentBlueprint,
+                name: `Practice: ${deck.name}`,
+                durationMinutes: parseInt(document.getElementById('testDuration').value),
+                composition: {
+                    ...currentBlueprint.composition,
+                    totalMarks: parseInt(document.getElementById('testTotalMarks').value),
+                    sections: [{
+                        id: 'main',
+                        name: 'Main Section',
+                        marks: parseInt(document.getElementById('testTotalMarks').value),
+                        types: ['mixed'], // TODO: Allow config
+                        topicWeights: {},
+                        difficultyTargets: { easy: 0.3, medium: 0.4, hard: 0.3 }
+                    }]
+                },
+                selection: {
+                    ...currentBlueprint.selection,
+                    selectedDeckIds: [deckId]
+                },
+                navigation: {
+                    ...currentBlueprint.navigation,
+                    allowBack: document.getElementById('optAllowBack').checked,
+                    showTimer: document.getElementById('optShowTimer').checked
+                },
+                scoring: {
+                    ...currentBlueprint.scoring,
+                    strictMarking: document.getElementById('optStrictMarking').checked,
+                    confidenceInterval: { ...currentBlueprint.scoring.confidenceInterval, enabled: document.getElementById('optConfidence').checked }
+                }
+            });
 
-            if (numQuestions > deck.cards.length) {
-                showToast("Not enough cards in deck", "error");
+            // 2. Generate Form
+            // We need to pass allDecks. Since 'decks' is available in scope.
+            const form = await generateTestForm(blueprint, decks);
+            
+            if (form.sections.length === 0 || form.sections[0].items.length === 0) {
+                showToast("Could not generate test form. Check constraints.", "error");
                 return;
             }
 
-
-            if (testType === 'sequence') {
-                if (deck.typeHint !== 'Sequence') {
-                    showToast("This deck is not marked as a sequence deck", "error");
-                    return;
-                }
-                practiceTestState.cards = [...deck.cards];
-            } else {
-                practiceTestState.cards = shuffleArray([...deck.cards]).slice(0, numQuestions);
-            }
-
-            practiceTestState.testType = testType;
-            practiceTestState.numQuestions = testType === 'sequence' ? 1 : numQuestions;
-            practiceTestState.currentCardIndex = 0;
-            practiceTestState.correctCount = 0;
-            practiceTestState.incorrectCount = 0;
+            // 3. Initialize State
+            practiceTestState.blueprint = blueprint;
+            practiceTestState.form = form;
+            practiceTestState.flatItems = form.sections.flatMap(s => s.items); // Flatten for linear nav
+            practiceTestState.currentItemIndex = 0;
+            practiceTestState.results = []; // Store results here
             practiceTestState.startTime = new Date();
+            practiceTestState.timerInterval = null;
 
             closePracticeTestModal();
 
@@ -6428,18 +6613,54 @@ function loadCDNScript(src, onload) {
             document.getElementById('testProgressView').classList.remove('hidden');
             document.getElementById('testCardView').classList.add('hidden');
             document.getElementById('testCompleteView').classList.add('hidden');
+            
+            // Start Timer
+            if (blueprint.navigation.showTimer) {
+                startTestTimer(blueprint.durationMinutes);
+            }
+        }
+
+        function startTestTimer(minutes) {
+            const endTime = new Date().getTime() + minutes * 60000;
+            const timerEl = document.createElement('div');
+            timerEl.id = 'testTimerDisplay';
+            timerEl.className = 'test-timer';
+            document.getElementById('testInfo').appendChild(timerEl);
+
+            practiceTestState.timerInterval = setInterval(() => {
+                const now = new Date().getTime();
+                const distance = endTime - now;
+
+                if (distance < 0) {
+                    clearInterval(practiceTestState.timerInterval);
+                    timerEl.textContent = "TIME UP";
+                    if (practiceTestState.blueprint.navigation.autoSubmitOnTime) {
+                        finishTest();
+                    }
+                } else {
+                    const m = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((distance % (1000 * 60)) / 1000);
+                    timerEl.textContent = `${m}m ${s}s`;
+                }
+            }, 1000);
         }
 
         function updateTestProgress() {
-            const total = practiceTestState.numQuestions;
-            const current = practiceTestState.currentCardIndex;
-            const correct = practiceTestState.correctCount;
-            const incorrect = practiceTestState.incorrectCount;
-
-            document.getElementById('testInfo').textContent = `${current} of ${total} questions`;
+            const total = practiceTestState.flatItems.length;
+            const current = practiceTestState.currentItemIndex + 1;
+            
+            document.getElementById('testInfo').textContent = `Question ${current} of ${total}`;
             document.getElementById('testProgressBar').style.width = total > 0 ? `${(current / total) * 100}%` : '0%';
-            document.getElementById('testCorrectCount').textContent = correct;
-            document.getElementById('testIncorrectCount').textContent = incorrect;
+            
+            // Hide live score in exam mode
+            if (practiceTestState.blueprint.feedback.showCorrectnessDuringTest) {
+                const correct = practiceTestState.results.filter(r => r.wasCorrect).length;
+                document.getElementById('testCorrectCount').textContent = correct;
+                document.getElementById('testIncorrectCount').textContent = practiceTestState.results.filter(r => r.wasCorrect === false).length;
+            } else {
+                document.getElementById('testCorrectCount').parentElement.classList.add('hidden');
+                document.getElementById('testIncorrectCount').parentElement.classList.add('hidden');
+            }
         }
 
         function startTest() {
@@ -6451,34 +6672,24 @@ function loadCDNScript(src, onload) {
         }
 
         function showNextTestQuestion() {
-            if (practiceTestState.currentCardIndex >= practiceTestState.cards.length) {
+            if (practiceTestState.currentItemIndex >= practiceTestState.flatItems.length) {
                 finishTest();
                 return;
             }
 
-            const testType = practiceTestState.testType;
-
-
-            if (testType === 'sequence') {
-                initSequenceTest(practiceTestState.cards);
-                return;
-            }
-
+            const item = practiceTestState.flatItems[practiceTestState.currentItemIndex];
+            const card = decks[item.deckId].cards.find(c => c.id === item.cardId); // Re-fetch to be safe, or use item snapshot
 
             document.getElementById('testSequenceView').classList.add('hidden');
             document.getElementById('testRegularView').classList.remove('hidden');
 
-            const card = practiceTestState.cards[practiceTestState.currentCardIndex];
-            let currentTestType = testType;
-            if (testType === 'mixed') {
-                currentTestType = Math.random() > 0.5 ? 'multiple_choice' : 'type';
-            }
-
             document.querySelector('#testCardView .flashcard').classList.remove('is-flipped');
             const tqEl = document.getElementById('testQuestion');
             const taEl = document.getElementById('testAnswer');
-            if (tqEl) tqEl.textContent = card.question || '';
-            if (taEl) taEl.textContent = card.answer || '';
+            if (tqEl) tqEl.textContent = item.question || '';
+            if (taEl) taEl.textContent = item.answer || ''; // Hidden in exam mode usually until review
+            
+            // Reset UI
             document.getElementById('testAnswerContent').classList.add('hidden');
             document.getElementById('testOptions').classList.add('hidden');
             document.getElementById('testAnswerInput').classList.add('hidden');
@@ -6489,24 +6700,26 @@ function loadCDNScript(src, onload) {
             document.getElementById('testNextBtn').classList.add('hidden');
             document.getElementById('testAccentToggleBtn').classList.add('hidden');
             testAnswerInput.classList.remove('correct', 'incorrect');
+            
             document.getElementById('testCardInfo').textContent =
-                `Question ${practiceTestState.currentCardIndex + 1} of ${practiceTestState.numQuestions}`;
+                `Question ${practiceTestState.currentItemIndex + 1} of ${practiceTestState.flatItems.length} (${item.marksAvailable} marks)`;
 
-            if (currentTestType === 'multiple_choice') {
-                const options = generateMultipleChoiceOptions(card, practiceTestState.cards);
+            // Render based on type
+            if (item.type === 'multiple_choice' || item.type === 'mcq') {
+                // Use stored options if available (from form generation), else generate
+                const options = item.options || generateMultipleChoiceOptions(card, decks[item.deckId].cards);
                 displayMultipleChoiceOptions(options);
-            } else if (currentTestType === 'type') {
+            } else {
+                // Type answer
                 document.getElementById('testAnswerInput').classList.remove('hidden');
                 document.getElementById('testAnswerInput').value = '';
                 document.getElementById('testAnswerInput').disabled = false;
                 document.getElementById('testCheckAnswerBtn').classList.remove('hidden');
                 document.getElementById('testAnswerInput').focus();
-
-                document.getElementById('testAccentToggleBtn').classList.remove('hidden');
-                updateTestAccentButtonsVisibility();
-
-            } else {
-                document.getElementById('testShowAnswerBtn').classList.remove('hidden');
+                
+                // In Exam Mode, "Check Answer" might just be "Submit Answer" and move to next
+                const btn = document.getElementById('testCheckAnswerBtn');
+                btn.textContent = practiceTestState.blueprint.feedback.showCorrectnessDuringTest ? "Check Answer" : "Submit Answer";
             }
         }
 
@@ -6535,6 +6748,8 @@ function loadCDNScript(src, onload) {
                 button.textContent = option;
                 button.onclick = () => {
                     checkTestAnswer(option);
+                    // In exam mode, maybe don't disable immediately if they can change mind? 
+                    // For now, assume lock-in.
                     document.querySelectorAll('#testOptions button').forEach(btn => btn.disabled = true);
                 };
                 optionsContainer.appendChild(button);
@@ -6542,39 +6757,56 @@ function loadCDNScript(src, onload) {
         }
 
         function checkTestAnswer(selectedOption = null) {
-            const card = practiceTestState.cards[practiceTestState.currentCardIndex];
+            const item = practiceTestState.flatItems[practiceTestState.currentItemIndex];
             const isMultipleChoice = selectedOption !== null;
-
             const userInput = isMultipleChoice ? selectedOption : document.getElementById('testAnswerInput').value.trim();
-            const correctAnswer = card.answer.trim();
-
+            const correctAnswer = item.answer.trim();
             const isCorrect = userInput.toLowerCase() === correctAnswer.toLowerCase();
 
-            if (isMultipleChoice) {
-                document.querySelectorAll('#testOptions button').forEach(btn => {
-                    if (btn.textContent === selectedOption) {
-                        btn.className = isCorrect ? 'btn btn-success' : 'btn btn-danger';
-                    }
-                    if (btn.textContent === correctAnswer && !isCorrect) {
-                        btn.className = 'btn btn-success';
-                    }
-                });
-            } else {
-                document.getElementById('testAnswerInput').classList.toggle('correct', isCorrect);
-                document.getElementById('testAnswerInput').classList.toggle('incorrect', !isCorrect);
-                document.getElementById('testAnswerInput').disabled = true;
-            }
+            // Record Result
+            practiceTestState.results.push({
+                cardId: item.cardId,
+                deckId: item.deckId,
+                wasCorrect: isCorrect,
+                userAnswer: userInput,
+                marksEarned: isCorrect ? item.marksAvailable : 0,
+                marksAvailable: item.marksAvailable,
+                latencyMs: 0 // TODO: Track latency
+            });
 
-            document.getElementById('testCheckAnswerBtn').classList.add('hidden');
-            document.getElementById('testAnswerContent').classList.remove('hidden');
-            document.querySelector('#testCardView .flashcard').classList.add('is-flipped');
-            document.getElementById('testNextBtn').classList.remove('hidden');
+            const showFeedback = practiceTestState.blueprint.feedback.showCorrectnessDuringTest;
+
+            if (showFeedback) {
+                if (isMultipleChoice) {
+                    document.querySelectorAll('#testOptions button').forEach(btn => {
+                        if (btn.textContent === selectedOption) {
+                            btn.className = isCorrect ? 'btn btn-success' : 'btn btn-danger';
+                        }
+                        if (btn.textContent === correctAnswer && !isCorrect) {
+                            btn.className = 'btn btn-success';
+                        }
+                    });
+                } else {
+                    document.getElementById('testAnswerInput').classList.toggle('correct', isCorrect);
+                    document.getElementById('testAnswerInput').classList.toggle('incorrect', !isCorrect);
+                    document.getElementById('testAnswerInput').disabled = true;
+                }
+                
+                document.getElementById('testCheckAnswerBtn').classList.add('hidden');
+                document.getElementById('testAnswerContent').classList.remove('hidden');
+                document.querySelector('#testCardView .flashcard').classList.add('is-flipped');
+                document.getElementById('testNextBtn').classList.remove('hidden');
+            } else {
+                // Exam Mode: Just move on
+                nextTestQuestion();
+            }
 
             if (isCorrect) practiceTestState.correctCount++;
             else practiceTestState.incorrectCount++;
         }
 
         function showTestAnswer() {
+            // Only used in non-exam mode or review
             document.querySelector('#testCardView .flashcard').classList.add('is-flipped');
             document.getElementById('testAnswerContent').classList.remove('hidden');
             document.getElementById('testShowAnswerBtn').classList.add('hidden');
@@ -6583,64 +6815,174 @@ function loadCDNScript(src, onload) {
         }
 
         function markTestCorrect() {
+            // Manual marking (flashcard style)
+            const item = practiceTestState.flatItems[practiceTestState.currentItemIndex];
+            practiceTestState.results.push({
+                cardId: item.cardId,
+                deckId: item.deckId,
+                wasCorrect: true,
+                marksEarned: item.marksAvailable,
+                marksAvailable: item.marksAvailable
+            });
             practiceTestState.correctCount++;
             nextTestQuestion();
         }
 
         function markTestIncorrect() {
+            const item = practiceTestState.flatItems[practiceTestState.currentItemIndex];
+            practiceTestState.results.push({
+                cardId: item.cardId,
+                deckId: item.deckId,
+                wasCorrect: false,
+                marksEarned: 0,
+                marksAvailable: item.marksAvailable
+            });
             practiceTestState.incorrectCount++;
             nextTestQuestion();
         }
 
         function nextTestQuestion() {
-            practiceTestState.currentCardIndex++;
+            practiceTestState.currentItemIndex++;
             updateTestProgress();
             showNextTestQuestion();
         }
 
         async function finishTest() {
+            if (practiceTestState.timerInterval) clearInterval(practiceTestState.timerInterval);
+
             const endTime = new Date();
             const timeTaken = Math.round((endTime - practiceTestState.startTime) / 1000);
-            const totalAnswered = practiceTestState.correctCount + practiceTestState.incorrectCount;
-            const accuracy = totalAnswered > 0 ? Math.round((practiceTestState.correctCount / totalAnswered) * 100) : 0;
-            const score = practiceTestState.numQuestions > 0 ? Math.round((practiceTestState.correctCount / practiceTestState.numQuestions) * 100) : 0;
+            
+            const totalMarksAvailable = practiceTestState.results.reduce((sum, r) => sum + r.marksAvailable, 0);
+            const totalMarksEarned = practiceTestState.results.reduce((sum, r) => sum + r.marksEarned, 0);
+            const pct = totalMarksAvailable > 0 ? (totalMarksEarned / totalMarksAvailable) * 100 : 0;
+            
+            // Confidence Interval (Wilson Score Interval approximation)
+            let ci = null;
+            if (practiceTestState.blueprint.scoring.confidenceInterval.enabled) {
+                const n = practiceTestState.results.length;
+                if (n > 0) {
+                    const p = practiceTestState.results.filter(r => r.wasCorrect).length / n;
+                    const z = practiceTestState.blueprint.scoring.confidenceInterval.z || 1.96;
+                    const denom = 1 + (z*z)/n;
+                    const center = (p + (z*z)/(2*n)) / denom;
+                    const width = z * Math.sqrt((p*(1-p)/n + (z*z)/(4*n*n))) / denom;
+                    ci = { lo: Math.max(0, (center - width)*100), hi: Math.min(100, (center + width)*100) };
+                }
+            }
 
-            document.getElementById('testScore').textContent = score;
-            document.getElementById('testCorrectFinal').textContent = practiceTestState.correctCount;
-            document.getElementById('testTotalFinal').textContent = practiceTestState.numQuestions;
+            document.getElementById('testScore').textContent = `${Math.round(pct)}%`;
+            document.getElementById('testCorrectFinal').textContent = `${totalMarksEarned}/${totalMarksAvailable}`;
+            document.getElementById('testTotalFinal').textContent = practiceTestState.flatItems.length;
             document.getElementById('testTime').textContent = `${timeTaken}s`;
-            document.getElementById('testAccuracy').textContent = `${accuracy}%`;
+            document.getElementById('testAccuracy').textContent = `${Math.round(pct)}%`; // Using marks pct as accuracy
 
+            if (ci) {
+                document.getElementById('testScore').textContent += ` (CI: ${Math.round(ci.lo)}% - ${Math.round(ci.hi)}%)`;
+            }
+
+            // IRT & Equating
+            let abilityEstimate = null;
+            let equatedScore = null;
+            
+            // 1. IRT Estimation
+            const objectiveItems = practiceTestState.results.filter(r => 
+                (r.type === 'mcq' || r.type === 'short-answer') && 
+                (r.marksEarned === 0 || r.marksEarned === r.marksAvailable)
+            );
+            
+            if (objectiveItems.length > 0) {
+                const itemIds = objectiveItems.map(i => i.cardId);
+                const outcomes = objectiveItems.map(i => i.marksEarned === i.marksAvailable ? 1 : 0);
+                
+                const difficultiesMap = await getItemDifficulties('default_user', itemIds);
+                const difficulties = itemIds.map(id => difficultiesMap[id]);
+                
+                abilityEstimate = estimateThetaRasch(difficulties, outcomes);
+                
+                await updateItemDifficulties('default_user', objectiveItems.map(i => ({ id: i.cardId })), outcomes);
+            }
+            
+            // 2. Equating
+            if (practiceTestState.blueprint.generation.anchorItems && practiceTestState.blueprint.generation.anchorItems.enabled) {
+                const anchorHistory = await computeAnchorHistory('default_user', practiceTestState.blueprint.name);
+                
+                const anchorItems = practiceTestState.results.filter(r => r.isAnchor);
+                let anchorsThisAttempt = 0;
+                if (anchorItems.length > 0) {
+                    const correctAnchors = anchorItems.filter(r => r.marksEarned === r.marksAvailable).length;
+                    anchorsThisAttempt = correctAnchors / anchorItems.length;
+                    
+                    const eqResult = equateScore({
+                        rawPct: pct / 100,
+                        anchorsThisAttempt,
+                        anchorHistory
+                    });
+                    
+                    equatedScore = {
+                        pct: Math.round(eqResult.equatedPct * 100),
+                        adjustment: eqResult.adjustment
+                    };
+                }
+            }
+
+            // Save Attempt
+            const attempt = {
+                attemptId: Date.now().toString(),
+                blueprintId: practiceTestState.blueprint.name, // Simple ID
+                blueprintSnapshot: practiceTestState.blueprint,
+                startedAt: practiceTestState.startTime.toISOString(),
+                submittedAt: endTime.toISOString(),
+                timeTakenMs: timeTaken * 1000,
+                itemResults: practiceTestState.results,
+                score: { rawMarks: totalMarksEarned, totalMarks: totalMarksAvailable, pct, ci, equated: equatedScore },
+                abilityEstimate,
+            };
+            
+            // Save to DB (appData)
+            // We need to fetch existing attempts or append
+            // For now, just log or save to analytics
             analyticsData.totalStudyTime += timeTaken;
             analyticsData.sessions.unshift({
                 date: new Date().toISOString(),
                 deckName: decks[practiceTestState.deckId].name,
                 mode: 'Practice Test',
                 duration: timeTaken,
-                accuracy: accuracy
+                accuracy: Math.round(pct),
+                attemptId: attempt.attemptId
             });
             if (analyticsData.sessions.length > 50) analyticsData.sessions.pop();
             await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
+            
+            // Also save full attempt record separately if needed
+            await saveDataToDB('appData', { key: `attempt:${attempt.attemptId}`, ...attempt });
 
             transitionSubView(
                 document.getElementById('testCardView'),
                 document.getElementById('testCompleteView')
             );
+            
+            // Show Review Button if allowed
+            const reviewBtn = document.getElementById('testReviewBtn');
+            if (reviewBtn) {
+                reviewBtn.classList.remove('hidden');
+                reviewBtn.onclick = () => startReviewMode(attempt);
+            }
+        }
+
+        function startReviewMode(attempt) {
+            // TODO: Implement Review Mode
+            // For now, just show toast
+            showToast("Review mode not fully implemented yet. Check back later!", "info");
         }
 
         function restartTest() {
-            practiceTestState.currentCardIndex = 0;
-            practiceTestState.correctCount = 0;
-            practiceTestState.incorrectCount = 0;
-            practiceTestState.startTime = new Date();
-
-            transitionSubView(
-                document.getElementById('testCompleteView'),
-                document.getElementById('testProgressView')
-            );
+            // Re-run start logic
+            startPracticeTest();
         }
 
         function endTest() {
+            if (practiceTestState.timerInterval) clearInterval(practiceTestState.timerInterval);
             showView('dashboard');
         }
 
@@ -9015,7 +9357,7 @@ function loadCDNScript(src, onload) {
             grid.innerHTML = '<p>Loading courses...</p>';
 
             try {
-                const response = await fetch('/.netlify/functions/getPublicCurricula');
+                const response = await fetch('/api/public-curricula');
                 if (!response.ok) throw new Error('Failed to load the library.');
 
                 const curricula = await response.json();
@@ -9273,7 +9615,6 @@ function loadCDNScript(src, onload) {
                 const dropdown = document.getElementById('userProfileDropdown');
                 const btn = document.getElementById('userProfileBtn');
                 if (dropdown && !dropdown.classList.contains('hidden') && !dropdown.contains(e.target) && !btn.contains(e.target)) {
-
 
 
 

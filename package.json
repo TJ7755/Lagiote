@@ -16,9 +16,11 @@
     "make": "electron-forge make",
     "dev:web": "vite",
     "build:web": "vite build",
+    "build": "npm run build:web",
     "preview:web": "vite preview",
     "dev:electron": "VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
-    "smoke:web": "npm run build:web && node tests/smoke.build.mjs"
+    "smoke:web": "npm run build:web && node tests/smoke.build.mjs",
+    "test": "NODE_ENV=test node --no-warnings tests/cortex.test.mjs && NODE_ENV=test node --no-warnings tests/mcq-remediation.test.mjs && NODE_ENV=test node --no-warnings tests/utils.test.mjs && NODE_ENV=test node --no-warnings tests/eval-assignment-stratified.test.mjs"
   },
   "config": {},
   "keywords": [],
@@ -55,5 +57,8 @@
   "bugs": {
     "url": "https://github.com/TJ7755/Lagiote-revise/issues"
   },
-  "homepage": "https://github.com/TJ7755/Lagiote-revise#readme"
+  "homepage": "https://github.com/TJ7755/Lagiote-revise#readme",
+  "engines": {
+    "node": ">=18"
+  }
 }

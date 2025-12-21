@@ -4,12 +4,14 @@ import { ensureDeckAccentMetadata } from '../core/accent-utils.js';
 import { FSRSAlgorithm } from '../core/fsrs.js';
 import Cortex from '../core/cortex.js';
 import keyboardManager from '../core/keyboard.js';
+import { pickConfusableCard } from '../core/interference.js';
 
 const fsrsEngine = new FSRSAlgorithm();
 
 const studyState = {
     deck: null,
     cards: [], // Array of card objects
+    cardsById: new Map(),
     queue: [], // Array of card IDs in order
     currentIndex: 0,
     mode: 'review',
@@ -21,6 +23,16 @@ const studyState = {
     sessionMetrics: {
         focusLossCount: 0,
         meanLatency: 3000
+    },
+    interference: {
+        enabled: true,
+        probeRate: 0.12,
+        minSim: 0.28,
+        maxSim: 0.85,
+        maxCandidatesToScan: 120,
+        recentIds: [],
+        recentMax: 12,
+        pendingProbe: null
     }
 };
 
@@ -51,7 +63,103 @@ function getCurrentCard() {
     if (!studyState.queue || !studyState.cards) return null;
     const item = studyState.queue[studyState.currentIndex];
     const cardId = (typeof item === 'object') ? item.id : item;
+    if (studyState.cardsById instanceof Map && studyState.cardsById.size > 0) {
+        const direct = studyState.cardsById.get(cardId);
+        if (direct) return direct;
+    }
     return studyState.cards.find(c => c.id === cardId);
+}
+
+function getCurrentQueueItem() {
+    if (!studyState.queue) return null;
+    return studyState.queue[studyState.currentIndex] || null;
+}
+
+function resolveQueueItemId(item) {
+    if (!item) return null;
+    if (typeof item === 'object') return item.id;
+    return item;
+}
+
+function recordInterferenceRecent(cardId) {
+    const interference = studyState.interference;
+    if (!interference || !interference.enabled) return;
+    if (!cardId) return;
+    interference.recentIds.push(cardId);
+    while (interference.recentIds.length > (interference.recentMax || 0)) {
+        interference.recentIds.shift();
+    }
+}
+
+function buildUpcomingCandidatesForProbe() {
+    const interference = studyState.interference;
+    const maxCandidatesToScan = interference?.maxCandidatesToScan || 120;
+    const candidates = [];
+    const seen = new Set();
+    for (let i = studyState.currentIndex + 1; i < studyState.queue.length && candidates.length < maxCandidatesToScan; i++) {
+        const id = resolveQueueItemId(studyState.queue[i]);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const card = studyState.cardsById instanceof Map ? studyState.cardsById.get(id) : studyState.cards.find(c => c.id === id);
+        if (card) candidates.push(card);
+    }
+    return candidates;
+}
+
+function attachInterferenceToQueueItem(item, interferenceContext) {
+    const resolvedId = resolveQueueItemId(item);
+    if (!resolvedId) return item;
+    const updated = (typeof item === 'object' && item) ? { ...item } : { id: resolvedId };
+    updated.interference = interferenceContext;
+    if (!updated.intent) updated.intent = 'interference-probe';
+    return updated;
+}
+
+function scheduleInterferenceProbeAfter(baseCard) {
+    const interference = studyState.interference;
+    if (!interference || !interference.enabled) return;
+    if (!baseCard || !baseCard.id) return;
+    if (interference.pendingProbe) return;
+    if (Math.random() >= (interference.probeRate || 0)) return;
+
+    const nextIndex = studyState.currentIndex + 1;
+    if (nextIndex >= studyState.queue.length) return;
+
+    const recentSet = new Set(interference.recentIds || []);
+    recentSet.add(baseCard.id);
+
+    const candidates = buildUpcomingCandidatesForProbe();
+    const picked = pickConfusableCard(baseCard, candidates, {
+        minSim: interference.minSim,
+        maxSim: interference.maxSim,
+        maxCandidatesToScan: interference.maxCandidatesToScan,
+        recentIds: recentSet
+    });
+    if (!picked || !picked.card || !picked.card.id) return;
+
+    const probeCardId = picked.card.id;
+    const interferenceContext = { type: 'probe', baseCardId: baseCard.id, similarity: picked.sim };
+    interference.pendingProbe = { baseCardId: baseCard.id, probeCardId, similarity: picked.sim, createdAt: Date.now() };
+
+    const existingNext = studyState.queue[nextIndex];
+    const nextId = resolveQueueItemId(existingNext);
+    if (nextId === probeCardId) {
+        studyState.queue[nextIndex] = attachInterferenceToQueueItem(existingNext, interferenceContext);
+        return;
+    }
+
+    let foundIndex = -1;
+    for (let i = nextIndex + 1; i < studyState.queue.length; i++) {
+        if (resolveQueueItemId(studyState.queue[i]) === probeCardId) {
+            foundIndex = i;
+            break;
+        }
+    }
+    if (foundIndex === -1) return;
+
+    const movedItem = studyState.queue.splice(foundIndex, 1)[0];
+    const annotated = attachInterferenceToQueueItem(movedItem, interferenceContext);
+    studyState.queue.splice(nextIndex, 0, annotated);
 }
 
 // --- Metric Listeners ---
@@ -93,6 +201,11 @@ function showCard() {
     if (!card) {
         endSession();
         return;
+    }
+    recordInterferenceRecent(card.id);
+    const queueItem = getCurrentQueueItem();
+    if (queueItem && typeof queueItem === 'object' && queueItem.interference?.type === 'probe') {
+        if (studyState.interference) studyState.interference.pendingProbe = null;
     }
 
     document.getElementById('progressView')?.classList.add('hidden');
@@ -206,13 +319,17 @@ async function markAnswer(explicitCorrectness) {
         (studyState.sessionMetrics.meanLatency * 0.9) + (metrics.recallLatency * 0.1);
 
     const knowledge = ensureKnowledgeForCard(card);
+    const queueItem = getCurrentQueueItem();
+    const interferenceContext = (queueItem && typeof queueItem === 'object') ? (queueItem.interference || null) : null;
     
     const context = {
         deck: studyState.deck,
         sessionState: {
             sessionMeanLatency: studyState.sessionMetrics.meanLatency,
             cardMetrics: new Map()
-        }
+        },
+        calibrationTruth: true,
+        interference: interferenceContext?.type ? interferenceContext : undefined
     };
 
     try {
@@ -232,6 +349,7 @@ async function markAnswer(explicitCorrectness) {
              timestamp: Date.now(),
              metrics: metrics,
              explicitCorrectness: explicitCorrectness,
+             interference: context.interference || null,
              inference: updatedState.lastInference,
              fsrsState: updatedState.fsrs
         };
@@ -264,6 +382,10 @@ async function markAnswer(explicitCorrectness) {
                 }
                 console.log(`Re-queued card ${card.id} with intent '${intent}' (p=${pCorrect.toFixed(2)})`);
             }
+        }
+        
+        if (!interferenceContext?.type) {
+            scheduleInterferenceProbeAfter(card);
         }
 
     } catch (err) {
@@ -492,6 +614,7 @@ async function init() {
     
     // Load existing cards
     studyState.cards = deck.cards || [];
+    studyState.cardsById = new Map(studyState.cards.map(card => [card.id, card]));
     ensureDeckAccentMetadata(deck);
     
     await loadKnowledge(deckId);

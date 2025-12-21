@@ -1,11 +1,4 @@
-﻿<!--
-These are the notes of issues:
-
-Keyboard shortcuts are a bit funky - fix this, especially in sequence mode.
-The accents in the manual editor are a bit off.
--->
-
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -16,12 +9,11 @@ The accents in the manual editor are a bit off.
     <title>Lagiote Revise</title>
 
 
+
     <script type="module" src="./src/platform/web/index-boot.js"></script>
     <script src="./assets/js/pdf.min.js"></script>
     <script src="./assets/js/mammoth.browser.min.js"></script>
     <script src="./assets/js/chart.js"></script>
-    <script src="./js/core/sequence-utils.js"></script>
-    <script src="./assets/js/sequence-test.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -57,19 +49,20 @@ The accents in the manual editor are a bit off.
             text-overflow: ellipsis;
         }
 
-        :root {
-            --bg-color: #f7fafc;
-            --text-color: #333;
-            --header-bg: white;
-            --card-bg: white;
-            --border-color: #e2e8f0;
-            --border-dashed: #e2e8f0;
-            --primary-color: #667eea;
-            --primary-hover: #5a67d8;
-            --secondary-text: #718096;
-            --shadow-color: rgba(0, 0, 0, 0.05);
-            --input-bg: #f7fafc;
-            --input-focus-bg: white;
+	        :root {
+	            --bg-color: #f7fafc;
+	            --text-color: #333;
+	            --header-bg: white;
+	            --card-bg: white;
+	            --border-color: #e2e8f0;
+	            --border-dashed: #e2e8f0;
+	            --primary-color: #667eea;
+	            --deck-accent: var(--primary-color);
+	            --primary-hover: #5a67d8;
+	            --secondary-text: #718096;
+	            --shadow-color: rgba(0, 0, 0, 0.05);
+	            --input-bg: #f7fafc;
+	            --input-focus-bg: white;
             --button-secondary-bg: #e2e8f0;
             --button-secondary-text: #4a5568;
             --button-secondary-hover: #cbd5e0;
@@ -77,11 +70,11 @@ The accents in the manual editor are a bit off.
             --danger-color: #e53e3e;
         }
 
-        .dark-mode {
-            --bg-color: #1a202c;
-            --text-color: #e2e8f0;
-            --header-bg: #2d3748;
-            --card-bg: #2d3748;
+	        .dark-mode {
+	            --bg-color: #1a202c;
+	            --text-color: #e2e8f0;
+	            --header-bg: #2d3748;
+	            --card-bg: #2d3748;
             --border-color: #4a5568;
             --border-dashed: #4a5568;
             --primary-color: #7f9cf5;
@@ -94,8 +87,15 @@ The accents in the manual editor are a bit off.
             --button-secondary-text: #e2e8f0;
             --button-secondary-hover: #718096;
             --success-color: #68d391;
-            --danger-color: #fc8181;
-        }
+	            --danger-color: #fc8181;
+	        }
+
+	        html[data-deck-category="Science"] { --deck-accent: #4ecdc4; }
+	        html[data-deck-category="Math"],
+	        html[data-deck-category="Maths"] { --deck-accent: #667eea; }
+	        html[data-deck-category="Language"] { --deck-accent: #fab1a0; }
+	        html[data-deck-category="History"] { --deck-accent: #fd79a8; }
+	        html[data-deck-category="Other"] { --deck-accent: #a29bfe; }
 
         * {
             margin: 0;
@@ -559,21 +559,21 @@ The accents in the manual editor are a bit off.
             background-color: #a29bfe;
         }
 
-        .deck-actions {
-            display: grid;
-            grid-template-columns: 1fr 1fr auto;
-            gap: 12px;
-            margin-top: 15px;
-            align-items: center;
-        }
+	        .deck-actions {
+	            display: flex;
+	            flex-direction: column;
+	            gap: 10px;
+	            margin-top: 15px;
+	            align-items: stretch;
+	        }
 
-        .action-btn {
-            flex: 1;
-            padding: 12px 10px;
-            border: none;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 14px;
+	        .action-btn {
+	            flex: 1;
+	            padding: 12px 12px;
+	            border: none;
+	            border-radius: 12px;
+	            font-weight: 600;
+	            font-size: 14px;
             cursor: pointer;
             transition: all 0.3s;
             font-family: 'Inter', sans-serif;
@@ -605,15 +605,16 @@ The accents in the manual editor are a bit off.
             border-color: #cbd5e0;
         }
 
-        .learn-btn {
-            background: var(--primary-color);
-            color: white;
-        }
+	        .learn-btn {
+	            background: var(--deck-accent);
+	            color: white;
+	        }
 
-        .learn-btn:hover {
-            background: var(--primary-hover);
-            transform: translateY(-1px);
-        }
+	        .learn-btn:hover {
+	            background: var(--deck-accent);
+	            filter: brightness(1.05);
+	            transform: translateY(-1px);
+	        }
 
         .review-btn {
             background: var(--button-secondary-bg);
@@ -626,24 +627,17 @@ The accents in the manual editor are a bit off.
             border-color: #cbd5e0;
         }
 
-        .spaced-btn {
-            background: #38b2ac;
-            color: white;
-            grid-column: 1 / 3;
-        }
+	        .deck-detail-view {
+	            background: var(--card-bg);
+	            border-radius: 20px;
+	            padding: 30px;
+	            box-shadow: 0 8px 25px var(--shadow-color);
+	            margin-bottom: 30px;
+	        }
 
-        .spaced-btn:hover {
-            background: #319795;
-            transform: translateY(-1px);
-        }
-
-        .deck-detail-view {
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 8px 25px var(--shadow-color);
-            margin-bottom: 30px;
-        }
+	        #deckDetailView {
+	            border-top: 6px solid var(--deck-accent);
+	        }
 
         .deck-detail-header {
             display: flex;
@@ -830,38 +824,45 @@ The accents in the manual editor are a bit off.
             color: var(--secondary-text);
         }
 
-        .btn {
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-family: 'Inter', sans-serif;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
+	        body .btn {
+	            background: var(--primary-color);
+	            color: white;
+	            border: none;
+	            padding: 12px 12px;
+	            border-radius: 12px;
+	            font-size: 14px;
+	            font-weight: 600;
+	            cursor: pointer;
+	            transition: all 0.3s;
+	            font-family: 'Inter', sans-serif;
+	            display: inline-flex;
+	            align-items: center;
+	            justify-content: center;
+	            gap: 8px;
+	            height: 44px;
+	            line-height: 1;
+	        }
 
-        .btn svg {
-            width: 20px;
-            height: 20px;
-        }
+	        body .btn svg {
+	            width: 18px;
+	            height: 18px;
+	        }
 
-        .btn:hover {
-            background: var(--primary-hover);
-            transform: translateY(-1px);
-        }
+	        body .btn:hover {
+	            background: var(--primary-hover);
+	            transform: translateY(-1px);
+	        }
 
-        .btn:disabled {
-            background: #cbd5e0;
-            cursor: not-allowed;
-            transform: none;
-        }
+	        body .btn:disabled {
+	            background: #cbd5e0;
+	            cursor: not-allowed;
+	            transform: none;
+	        }
+
+	        .btn-icon {
+	            width: 44px;
+	            padding: 0;
+	        }
 
         .btn-secondary {
             background: var(--button-secondary-bg);
@@ -888,12 +889,13 @@ The accents in the manual editor are a bit off.
             background: #2f855a;
         }
 
-        .btn-prominent {
-            padding: 16px 32px;
-            font-size: 18px;
-            font-weight: 600;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
+	        .btn-prominent {
+	            padding: 14px 18px;
+	            font-size: 16px;
+	            font-weight: 600;
+	            height: 52px;
+	            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+	        }
 
         .form-group {
             margin-bottom: 25px;
@@ -1152,10 +1154,19 @@ The accents in the manual editor are a bit off.
             margin-bottom: 10px;
         }
 
-        .study-subtitle {
-            color: var(--secondary-text);
-            font-size: 1.1rem;
-        }
+	        .study-subtitle {
+	            color: var(--secondary-text);
+	            font-size: 1.1rem;
+	        }
+
+	        #focusDot {
+	            display: inline-block;
+	            width: 12px;
+	            height: 12px;
+	            border-radius: 50%;
+	            background-color: var(--deck-accent);
+	            transition: background-color 0.3s;
+	        }
 
         .flashcard-inner {
             display: grid;
@@ -1326,45 +1337,6 @@ The accents in the manual editor are a bit off.
             background: #c53030;
         }
 
-        .advanced-answer-btn {
-            flex: 1;
-            min-width: 100px;
-            padding: 12px 15px;
-            font-size: 14px;
-        }
-
-        .btn-again {
-            background: #e53e3e;
-        }
-
-        .btn-again:hover {
-            background: #c53030;
-        }
-
-        .btn-hard {
-            background: #dd6b20;
-        }
-
-        .btn-hard:hover {
-            background: #c05621;
-        }
-
-        .btn-good {
-            background: #3182ce;
-        }
-
-        .btn-good:hover {
-            background: #2b6cb0;
-        }
-
-        .btn-easy {
-            background: #38a169;
-        }
-
-        .btn-easy:hover {
-            background: #2f855a;
-        }
-
         .progress-dashboard {
             background: var(--card-bg);
             border-radius: 20px;
@@ -1426,12 +1398,12 @@ The accents in the manual editor are a bit off.
             border: 2px solid var(--border-color);
         }
 
-        .bucket-number {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--primary-color);
-            margin-bottom: 5px;
-        }
+	        .bucket-number {
+	            font-size: 1rem;
+	            font-weight: 600;
+	            color: var(--deck-accent);
+	            margin-bottom: 5px;
+	        }
 
         .bucket-count {
             font-size: 1.8rem;
@@ -1448,11 +1420,11 @@ The accents in the manual editor are a bit off.
             margin: 20px 0;
         }
 
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #38a169, #48bb78);
-            transition: width 0.5s ease;
-        }
+	        .progress-fill {
+	            height: 100%;
+	            background: var(--deck-accent);
+	            transition: width 0.5s ease;
+	        }
 
         .stats {
             display: grid;
@@ -1469,11 +1441,11 @@ The accents in the manual editor are a bit off.
             border: 2px solid var(--border-color);
         }
 
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--primary-color);
-        }
+	        .stat-value {
+	            font-size: 1.5rem;
+	            font-weight: 700;
+	            color: var(--deck-accent);
+	        }
 
         .stat-label {
             font-size: 0.9rem;
@@ -1784,12 +1756,6 @@ The accents in the manual editor are a bit off.
             background-color: var(--input-focus-bg);
 
             box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
-        }
-
-        .sequence-desc-input {
-            font-family: 'Inter', sans-serif;
-            font-size: 0.95rem;
-            line-height: 1.45;
         }
 
         .form-section {
@@ -2440,12 +2406,16 @@ The accents in the manual editor are a bit off.
             overflow: hidden;
         }
 
-        .session-progress-fill {
-            height: 100%;
-            background-color: var(--primary-color);
-            width: 0%;
-            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+	        .session-progress-fill {
+	            height: 100%;
+	            background-color: var(--deck-accent);
+	            width: 0%;
+	            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+	        }
+
+	        .session-progress-percent {
+	            color: var(--deck-accent);
+	        }
 
         .session-stats {
             font-size: 0.9rem;
@@ -2696,17 +2666,20 @@ The accents in the manual editor are a bit off.
                             <span class="deck-detail-category" id="deckDetailCategory"></span>
                             <h2 class="deck-detail-title" id="deckDetailTitle"></h2>
                         </div>
-                        <div id="deckDetailActions" class="deck-detail-actions">
-                            <button class="btn learn-btn" onclick="configureStudy('learn')">Learn</button>
-
-                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
-                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
-                            <button class="btn btn-secondary" id="deckDetailResetBtn"
-                                style="border: 2px solid var(--border-color);" onclick="resetSpecificDeck(currentViewingDeckId)">Reset Progress</button>
-                            <button class="btn btn-secondary" id="deckDetailSettingsBtn" onclick="openDeckSettingsModal(currentViewingDeckId)">Settings</button>
-                            <button class="btn btn-secondary" id="deckDetailEditBtn" onclick="editDeck(currentViewingDeckId)">Edit</button>
-                            <button class="btn btn-danger" id="deckDetailDeleteBtn" onclick="deleteDeck(currentViewingDeckId)">Delete</button>
-                        </div>
+	                        <div id="deckDetailActions" class="deck-detail-actions">
+	                            <button class="btn learn-btn" onclick="configureStudy('learn')">Learn</button>
+	
+	                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
+	                            <button class="btn learn-btn hidden" id="deckDetailSequenceBtn" onclick="configureStudy('sequence')">Sequence</button>
+	                            <button class="btn" id="deckDetailSpacedBtn" onclick="configureStudy('spaced')">Spaced Learning</button>
+	                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
+	                            <button class="btn btn-secondary" id="deckDetailResetBtn"
+	                                style="border: 2px solid var(--border-color);" onclick="resetSpecificDeck(currentViewingDeckId)">Reset Progress</button>
+	                            <button class="btn btn-secondary" id="deckDetailSettingsBtn" onclick="openDeckSettingsModal(currentViewingDeckId)">Settings</button>
+	                            <button id="deckDetailExportBtn" class="btn btn-secondary btn-icon" type="button" title="Export Deck"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></button>
+	                            <button class="btn btn-secondary" id="deckDetailEditBtn" onclick="editDeck(currentViewingDeckId)">Edit</button>
+	                            <button class="btn btn-danger" id="deckDetailDeleteBtn" onclick="deleteDeck(currentViewingDeckId)">Delete</button>
+	                        </div>
                     </div>
                     <h3 class="section-title">Cards in this deck</h3>
                     <div class="deck-cards-list" id="deckCardsList"></div>
@@ -2866,7 +2839,6 @@ The accents in the manual editor are a bit off.
                             Document</button>
                     </div>
 
-                    <!-- New Customisation Section -->
                     <div class="form-group"
                         style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
                         <label style="margin-bottom: 10px; display: block; font-weight: 600;">Customise
@@ -2980,11 +2952,11 @@ The accents in the manual editor are a bit off.
                         <select id="deckCategory" class="form-group"></select>
                     </div>
                     <div class="form-group">
-                        <label for="deckTypeHint">Deck Type (AI Hint)</label>
+                        <label for="deckTypeHint">Deck Type</label>
                         <select id="deckTypeHint">
                             <option value="General">General / Q&A</option>
                             <option value="Vocabulary">Vocabulary</option>
-                            <option value="Sequence">Sequence / Ordered List</option>
+                            <option value="Sequence">Sequence</option>
                         </select>
                     </div>
                 </div>
@@ -3090,11 +3062,11 @@ The accents in the manual editor are a bit off.
                         <div style="display: flex; gap: 5px;">
                             <button id="pomodoroPlayPause" onclick="togglePomodoro()"
                                 style="padding: 4px 12px; border: none; border-radius: 4px; background: var(--primary-color); color: white; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">
-                                ▶ Start
+                                ? Start
                             </button>
                             <button onclick="resetPomodoro()"
                                 style="padding: 4px 12px; border: none; border-radius: 4px; background: var(--button-secondary-bg); color: var(--button-secondary-text); cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">
-                                ↻ Reset
+                                ? Reset
                             </button>
                         </div>
                     </div>
@@ -3106,9 +3078,7 @@ The accents in the manual editor are a bit off.
                     <div class="study-subtitle" id="studySubtitle">Deck Name</div>
                     <div id="focusMeter" style="display: inline-block; margin-top: 8px;">
                         <span style="font-size: 0.9rem; color: var(--secondary-text); margin-right: 5px;">Focus:</span>
-                        <div id="focusDot"
-                            style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #38a169; transition: background-color 0.3s;">
-                        </div>
+	                        <div id="focusDot"></div>
                     </div>
                 </div>
 
@@ -3145,7 +3115,7 @@ The accents in the manual editor are a bit off.
                     <div style="margin-bottom: 25px;">
                         <div class="deck-progress-label" style="margin-bottom: 10px;">
                             <span>Deck Mastery</span>
-                            <span id="deckMasteryValue">0%</span>
+                            <span id="deckMasteryValue"></span>
                         </div>
                         <div class="progress-bar-container">
                             <div class="progress-fill" id="deckMasteryProgress" style="width: 0%"></div>
@@ -3184,29 +3154,6 @@ The accents in the manual editor are a bit off.
                 </div>
             </div>
             <div id="cardView" class="hidden sub-view">
-                <div id="passiveReviewView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front" style="text-align: left;">
-                        <h3 style="text-align: center; margin-bottom: 20px;">Let's learn these!</h3>
-                        <ol id="passiveReviewList" style="padding-left: 40px; font-size: 1.2rem; line-height: 1.8;">
-                        </ol>
-                    </div>
-                    <div class="answer-buttons">
-                        <button class="btn btn-success" onclick="moveToNextSequencePhase()">Got it, Start
-                            Practice</button>
-                    </div>
-                </div>
-
-                <div id="dragDropView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front">
-                        <h3 style="margin-bottom: 20px;">Put these items in the correct order:</h3>
-                        <div id="dragDropList" class="deck-cards-list" style="max-height: none; border-style: dashed;">
-                        </div>
-                    </div>
-                    <div class="answer-buttons">
-                        <button id="checkDragDropBtn" class="btn btn-show" onclick="checkDragDropOrder()">Check
-                            Order</button>
-                    </div>
-                </div>
                 <div class="round-info" id="cardRoundInfo">Round 1 - Card 1 of 5</div>
                 <div id="flashcardViewContainer">
                     <div class="flashcard">
@@ -3236,6 +3183,16 @@ The accents in the manual editor are a bit off.
                     <div id="mcqOptions" class="answer-buttons" style="flex-direction: column; gap: 15px; width: 100%;">
                     </div>
                 </div>
+                <div id="sequenceTaskView" class="hidden sequence-task-view">
+                    <div id="sequenceTaskTitle" class="sequence-task-title"></div>
+                    <div id="sequenceTaskSubtitle" class="sequence-task-subtitle"></div>
+                    <div id="sequenceTaskBody" class="sequence-task-body"></div>
+                    <div id="sequenceTaskFeedback" class="hidden sequence-task-feedback"></div>
+                    <div class="answer-buttons sequence-task-buttons" id="sequenceTaskButtons">
+                        <button class="btn btn-primary" id="sequenceSubmitBtn" onclick="submitSequenceTask()">Submit</button>
+                        <button class="btn btn-secondary hidden" id="sequenceContinueBtn" onclick="continueSequenceTask()">Continue</button>
+                    </div>
+                </div>
 
                 <div style="text-align: center; margin-top: 20px;">
                     <textarea id="writeAnswerInput" class="form-group textarea hidden"
@@ -3263,11 +3220,19 @@ The accents in the manual editor are a bit off.
                         onclick="markIncorrect()">Incorrect</button>
                     <button class="btn btn-correct hidden" id="correctBtn" onclick="markCorrect()">Correct</button>
                 </div>
-                <div class="answer-buttons hidden" id="advancedAnswerButtons">
-                    <button class="btn btn-again advanced-answer-btn" onclick="markSpaced(1)">Again</button>
-                    <button class="btn btn-hard advanced-answer-btn" onclick="markSpaced(2)">Hard</button>
-                    <button class="btn btn-good advanced-answer-btn" onclick="markSpaced(3)">Good</button>
-                    <button class="btn btn-easy advanced-answer-btn" onclick="markSpaced(4)">Easy</button>
+                <div class="answer-buttons hidden" id="spacedRatingButtons" style="gap: 10px;">
+                    <button class="btn btn-danger" id="spacedAgainBtn" data-rating="Again"
+                        onclick="gradeSpaced('Again')">Again <span class="spaced-interval"
+                            id="spacedAgainInterval"></span></button>
+                    <button class="btn btn-secondary" id="spacedHardBtn" data-rating="Hard"
+                        onclick="gradeSpaced('Hard')">Hard <span class="spaced-interval"
+                            id="spacedHardInterval"></span></button>
+                    <button class="btn btn-success" id="spacedGoodBtn" data-rating="Good"
+                        onclick="gradeSpaced('Good')">Good <span class="spaced-interval"
+                            id="spacedGoodInterval"></span></button>
+                    <button class="btn btn-prominent" id="spacedEasyBtn" data-rating="Easy"
+                        onclick="gradeSpaced('Easy')">Easy <span class="spaced-interval"
+                            id="spacedEasyInterval"></span></button>
                 </div>
             </div>
             <div id="completeView" class="hidden sub-view">
@@ -3304,26 +3269,71 @@ The accents in the manual editor are a bit off.
     </div>
 
     <div id="practiceTestModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content" style="max-width: 800px;">
             <span class="close" onclick="closePracticeTestModal()">&times;</span>
-            <h2>Practice Test</h2>
-            <div class="form-group">
-                <label for="testType">Test Type</label>
-                <select id="testType">
-                    <option value="flashcard">Flashcards</option>
-                    <option value="multiple_choice">Multiple Choice</option>
-                    <option value="type">Type Answer</option>
-                    <option value="sequence">Sequence Practice</option>
-                    <option value="mixed">Mixed Types</option>
-                </select>
+            <h2>Test Builder</h2>
+            
+            <div class="test-builder-layout">
+                <div class="builder-section">
+                    <label>Preset Mode</label>
+                    <div class="btn-group">
+                        <button class="btn active" id="presetExam" onclick="selectTestPreset('exam_indicative')">Exam-Indicative</button>
+                        <button class="btn" id="presetFree" onclick="selectTestPreset('free_practice')">Free Practice</button>
+                    </div>
+                    <p class="text-muted small" id="presetDescription">Strict exam conditions. No feedback during test. Timed.</p>
+                </div>
+
+                <div class="builder-grid">
+                    <div class="form-group">
+                        <label for="testDuration">Duration (minutes)</label>
+                        <input type="number" id="testDuration" value="60" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="testTotalMarks">Total Marks</label>
+                        <input type="number" id="testTotalMarks" value="100" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="testQuestionCount">Question Count (Approx)</label>
+                        <input type="number" id="testQuestionCount" value="20" min="1">
+                    </div>
+                </div>
+
+                <div class="builder-section">
+                    <label>Content Source</label>
+                    <div id="testDeckSelection" class="tag-container">
+                        <!-- Populated by JS -->
+                        <span class="tag">Current Deck</span>
+                    </div>
+                </div>
+
+                <div class="builder-section">
+                    <details>
+                        <summary>Advanced Settings</summary>
+                        <div class="builder-grid mt-2">
+                            <div class="form-group">
+                                <label><input type="checkbox" id="optAllowBack" checked> Allow Back Navigation</label>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="optShowTimer" checked> Show Timer</label>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="optStrictMarking" checked> Strict Marking</label>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="optConfidence" checked> Confidence Interval</label>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                <div id="testValidityWarning" class="alert alert-warning hidden">
+                    <strong>Configuration Warning:</strong> <span id="validityMessage"></span>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="numQuestions">Number of Questions</label>
-                <input type="number" id="numQuestions" min="1" max="100" value="10">
-            </div>
+
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closePracticeTestModal()">Cancel</button>
-                <button class="btn btn-success" onclick="startPracticeTest()">Start Test</button>
+                <button class="btn btn-success" onclick="startPracticeTest()">Generate & Start Test</button>
             </div>
         </div>
     </div>
@@ -3369,23 +3379,7 @@ The accents in the manual editor are a bit off.
             </div>
             <div id="testCardView" class="hidden sub-view">
                 <div class="round-info" id="testCardInfo">Question 1 of 10</div>
-
-
-                <div id="testSequenceView" class="hidden" style="width: 100%;">
-                    <div class="flashcard-front">
-                        <h3 style="margin-bottom: 20px;">Put these items in the correct order:</h3>
-                        <div id="testDragDropList" class="deck-cards-list"
-                            style="max-height: none; border-style: dashed;">
-                        </div>
-                    </div>
-                    <div class="answer-buttons">
-                        <button id="testCheckSequenceBtn" class="btn btn-show" onclick="checkTestSequence()">Check
-                            Order</button>
-                    </div>
-                </div>
-
-
-                <div id="testRegularView">
+                <div id="testRegularView" class="hidden">
                     <div class="flashcard">
                         <div class="flashcard-inner">
                             <div class="flashcard-front">
@@ -3421,10 +3415,10 @@ The accents in the manual editor are a bit off.
                 </div>
             </div>
             <div id="testCompleteView" class="hidden sub-view">
-                <div class="progress-dashboard">
-                    <div class="progress-title">Test Complete!</div>
-                    <p style="text-align: center; font-size: 1.2rem; margin: 25px 0; color: var(--secondary-text);">
-                        You scored <span id="testScore">0</span>% (<span id="testCorrectFinal">0</span> out of <span
+                    <div class="progress-dashboard">
+                        <div class="progress-title">Test Complete!</div>
+                        <p style="text-align: center; font-size: 1.2rem; margin: 25px 0; color: var(--secondary-text);">
+                        You scored <span id="testScore"></span> (<span id="testCorrectFinal">0</span> out of <span
                             id="testTotalFinal">0</span>)
                     </p>
                     <div class="stats">
@@ -3433,11 +3427,17 @@ The accents in the manual editor are a bit off.
                             <div class="stat-label">Time Taken</div>
                         </div>
                         <div class="stat">
-                            <div class="stat-value" id="testAccuracy">0%</div>
+                            <div class="stat-value" id="testAccuracy"></div>
                             <div class="stat-label">Accuracy</div>
+                        </div>
+                        <div class="stat hidden">
+                            <div class="stat-value" id="testConfidenceInterval"></div>
+                            <div class="stat-label">Confidence</div>
                         </div>
                     </div>
                     <div style="text-align: center; margin-top: 25px;">
+                        <button class="btn hidden" id="testReviewBtn" style="margin-right: 10px;">Review Test</button>
+                        <button class="btn hidden" id="testApplyLearningBtn" style="margin-right: 10px; background-color: #2ecc71;">Apply Learning Updates</button>
                         <button class="btn" onclick="restartTest()">Retake Test</button>
                         <button class="btn btn-secondary" onclick="endTest()" style="margin-left: 10px;">End
                             Test</button>
@@ -3476,10 +3476,10 @@ The accents in the manual editor are a bit off.
                         </svg>
                         Choose File
                     </label>
-                    <input type="file" id="importFileInput" accept=".json,.csv,.txt">
+                    <input type="file" id="importFileInput" accept=".json,.csv,.tsv,.txt">
                     <div id="fileNameDisplay">No file chosen</div>
                     <p style="font-size: 0.9rem; color: var(--secondary-text); text-align: left; margin-top: 10px;">
-                        Supports .json (exported from here), .csv, and .txt files.</p>
+                        Supports .json (exported from here), .csv/.tsv (tab or comma), and .txt files.</p>
                 </div>
             </div>
             <div class="form-row" style="margin-bottom: 0;">
@@ -3496,10 +3496,13 @@ The accents in the manual editor are a bit off.
                     <select id="importDeckTypeHint">
                         <option value="General">General / Q&A</option>
                         <option value="Vocabulary">Vocabulary</option>
-                        <option value="Sequence">Sequence / Ordered List</option>
+                        <option value="Sequence">Sequence</option>
                     </select>
                 </div>
             </div>
+            <p style="font-size: 0.95rem; color: var(--secondary-text); text-align: left; margin-top: 8px;">
+                Sequence imports: JSON with {"type":"sequence","sequences":[{"title":"","steps":["",""]}]} or TSV/CSV with
+                columns "Sequence Title" &rarr; "Step Text" [&rarr; "Notes"] grouped by title.</p>
             <div class="modal-actions">
                 <button class="btn btn-success" onclick="importData()">Import and Create Deck</button>
             </div>
@@ -3769,6 +3772,30 @@ The accents in the manual editor are a bit off.
                     </div>
                 </div>
 
+                <div id="deckSettingsSequenceSection" class="settings-section hidden">
+                    <h4>Sequence Mode</h4>
+                    <div class="form-group">
+                        <label for="deckSettingsSequenceChunkMin">Chunk size (min)</label>
+                        <input type="number" id="deckSettingsSequenceChunkMin" min="1" value="2">
+                    </div>
+                    <div class="form-group">
+                        <label for="deckSettingsSequenceChunkMax">Chunk size (max)</label>
+                        <input type="number" id="deckSettingsSequenceChunkMax" min="1" value="8">
+                    </div>
+                    <div class="form-group">
+                        <label for="deckSettingsSequenceStartChunk">Start chunk size</label>
+                        <input type="number" id="deckSettingsSequenceStartChunk" min="1" value="4">
+                    </div>
+                    <div class="form-group">
+                        <label for="deckSettingsSequenceMixingThreshold">Mixing threshold (0–1)</label>
+                        <input type="number" id="deckSettingsSequenceMixingThreshold" min="0" max="1" step="0.05" value="0.8">
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="deckSettingsSequenceAllowMixed" checked>
+                        <label for="deckSettingsSequenceAllowMixed">Allow mixed sequences after threshold</label>
+                    </div>
+                </div>
+
                 <div class="settings-section">
                     <h4>Review Mode</h4>
                     <div class="form-group">
@@ -3777,6 +3804,33 @@ The accents in the manual editor are a bit off.
                             <option value="random">Random</option>
                             <option value="alphabetical">Alphabetical</option>
                         </select>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h4>Spaced Mode (FSRS)</h4>
+                    <div class="form-group">
+                        <label for="deckSettingsSpacedNewPerDay">New cards per day</label>
+                        <input type="number" id="deckSettingsSpacedNewPerDay" min="0" value="20">
+                    </div>
+                    <div class="form-group">
+                        <label for="deckSettingsSpacedMaxReviews">Max reviews per day</label>
+                        <input type="number" id="deckSettingsSpacedMaxReviews" min="1" value="200">
+                    </div>
+                    <div class="form-group">
+                        <label for="deckSettingsSpacedOrder">Session order</label>
+                        <select id="deckSettingsSpacedOrder">
+                            <option value="dueThenNew">Due then New</option>
+                            <option value="random">Random</option>
+                        </select>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="deckSettingsSpacedRequeueAgain">
+                        <label for="deckSettingsSpacedRequeueAgain">Requeue "Again" cards once per session</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="deckSettingsSpacedShowIntervals">
+                        <label for="deckSettingsSpacedShowIntervals">Show next intervals on rating buttons</label>
                     </div>
                 </div>
 
@@ -3796,12 +3850,12 @@ The accents in the manual editor are a bit off.
             <p style="text-align: left; margin-top: 20px; line-height: 1.8;">
                 <b>During Simple Flashcard Mode:</b><br>
                 - <b>Space / Enter</b>: Show Answer<br>
-                - <b>→ / 2</b>: Mark as Correct<br>
-                - <b>← / 1</b>: Mark as Incorrect<br><br>
+                - <b>? / 2</b>: Mark as Correct<br>
+                - <b>? / 1</b>: Mark as Incorrect<br><br>
                 <b>During Type Mode:</b><br>
-                - <b>Enter / ↑</b>: Check Answer<br>
-                - <b>→ / 2</b>: Mark as Correct (after checking)<br>
-                - <b>← / 1</b>: Mark as Incorrect (after checking)<br><br>
+                - <b>Enter / ?</b>: Check Answer<br>
+                - <b>? / 2</b>: Mark as Correct (after checking)<br>
+                - <b>? / 1</b>: Mark as Incorrect (after checking)<br><br>
                 <b>On Progress Screen:</b><br>
                 - <b>Enter</b>: Start Next Round
             </p>
@@ -3870,5 +3924,4 @@ The accents in the manual editor are a bit off.
     </div>
 
 </body>
-
 </html>

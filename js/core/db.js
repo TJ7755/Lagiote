@@ -64,6 +64,16 @@ function prepareKnowledgeRecord(data) {
     const candidateLastReview = data.lastReviewed || data.last_review || data.lastReview || fsrs.last_review;
     const lastReviewedDate = reviewed ? parseFsrsDate(candidateLastReview) : null;
     const lastReviewed = lastReviewedDate ? lastReviewedDate.toISOString() : null;
+    const interferenceFragilityEma = Number.isFinite(data.interferenceFragilityEma)
+        ? Math.min(1, Math.max(0, Number(data.interferenceFragilityEma)))
+        : 0;
+    const sequenceGraph = (data.sequenceGraph && typeof data.sequenceGraph === 'object') ? data.sequenceGraph : undefined;
+    const sequenceId = typeof data.sequenceId === 'string'
+        ? data.sequenceId
+        : (typeof data.sequenceID === 'string' ? data.sequenceID : undefined);
+    const knowledgeKind = typeof data.kind === 'string'
+        ? data.kind
+        : (typeof data.type === 'string' ? data.type : undefined);
 
     return {
         id,
@@ -75,10 +85,14 @@ function prepareKnowledgeRecord(data) {
         lastModified: data.lastModified || new Date().toISOString(),
         recallHistory: Array.isArray(data.recallHistory) ? data.recallHistory : [],
         masteryScore: data.masteryScore,
+        interferenceFragilityEma,
         stability: data.stability,
         difficulty: data.difficulty,
         reps: data.reps,
-        lapses: data.lapses
+        lapses: data.lapses,
+        ...(sequenceGraph ? { sequenceGraph } : {}),
+        ...(sequenceId ? { sequenceId } : {}),
+        ...(knowledgeKind ? { kind: knowledgeKind } : {})
     };
 }
 

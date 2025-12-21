@@ -24,13 +24,7 @@ export const state = {
         startTime: null,
         cardStartTime: null,
         activeLearningPool: [],
-        knowledgeStates: new Map(),
-        
-        masterSequence: [],
-        chunks: [[]],
-        currentChunkIndex: 0,
-        chunkStates: [],
-        isSequenceMode: false
+        knowledgeStates: new Map()
     },
     practiceTestState: {
         deckId: null,
@@ -58,7 +52,12 @@ export const DEFAULT_DECK_SETTINGS = {
     punctuation: false,
     retypeIncorrect: true,
     feedbackStyle: 'simple',
-    forgivingAutomarking: false
+    forgivingAutomarking: false,
+    spacedNewPerDay: 20,
+    spacedMaxReviewsPerDay: 200,
+    spacedOrder: 'dueThenNew',
+    spacedRequeueAgain: true,
+    spacedShowIntervals: true
 };
 
 
@@ -74,12 +73,7 @@ export function resetStudyState() {
         startTime: null,
         cardStartTime: null,
         activeLearningPool: [],
-        knowledgeStates: new Map(),
-        masterSequence: [],
-        chunks: [[]],
-        currentChunkIndex: 0,
-        chunkStates: [],
-        isSequenceMode: false
+        knowledgeStates: new Map()
     };
 }
 
