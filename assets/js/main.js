@@ -4075,6 +4075,9 @@ function loadCDNScript(src, onload) {
 
         }
 
+        // Expose for inline handlers in index.html which expect a global function
+        if (typeof window !== 'undefined') window.configureStudy = configureStudy;
+
         async function startLearnMode(deckId) {
             currentMode = 'learn';
             currentDeckId = deckId;

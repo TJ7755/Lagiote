@@ -98,8 +98,6 @@ out/
 
 # Local-only files kept out of version control
 AGENTS.md
-tests/cortex.test.mjs
-tests/smoke.build.mjs
 .vscode/
 check_await*.js
 seq_locations.txt

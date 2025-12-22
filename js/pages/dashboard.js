@@ -135,6 +135,16 @@ function isGuestModeEnabled() {
     return localStorage.getItem('guestMode') === 'true' || sessionStorage.getItem('guestMode') === 'true';
 }
 
+function getDevSyncToken() {
+    if (isElectron) return null;
+    const env = import.meta.env || {};
+    const token = typeof env.VITE_DEV_SYNC_BEARER_TOKEN === 'string' ? env.VITE_DEV_SYNC_BEARER_TOKEN.trim() : '';
+    if (!env.DEV || !token) return null;
+    const hostname = window.location?.hostname;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    return isLocalhost ? token : null;
+}
+
 function fallbackCoerceFsrsNumber(value, fallback = 0) {
     const coerced = Number(value);
     return Number.isFinite(coerced) ? coerced : fallback;
@@ -4214,6 +4224,54 @@ function closeEditCardModal() {
     cardToEdit = { deckId: null, cardIndex: null, from: null };
 }
 
+function closeEditAiCardModal() {
+    const modal = document.getElementById('editAiCardModal');
+    if (modal) modal.classList.remove('show');
+    aiCardToEditIndex = null;
+}
+
+function saveAiEditedCard() {
+    if (aiCardToEditIndex === null) {
+        showToast('No AI card selected to edit.', 'error');
+        return;
+    }
+
+    const listContainer = document.getElementById('flashcard-list');
+    if (!listContainer || !listContainer.dataset.cards) {
+        showToast('AI card list not available.', 'error');
+        return;
+    }
+
+    if (listContainer.dataset.previewType === 'sequence') {
+        showToast('Sequence steps cannot be edited here.', 'error');
+        return;
+    }
+
+    const cards = JSON.parse(listContainer.dataset.cards || '[]');
+    if (!cards[aiCardToEditIndex]) {
+        showToast('AI card not found.', 'error');
+        return;
+    }
+
+    const newQuestion = document.getElementById('editAiCardQuestion').value.trim();
+    const newAnswer = document.getElementById('editAiCardAnswer').value.trim();
+
+    if (!newQuestion || !newAnswer) {
+        showToast('Question and Answer cannot be empty.', 'error');
+        return;
+    }
+
+    cards[aiCardToEditIndex] = {
+        ...cards[aiCardToEditIndex],
+        question: newQuestion,
+        answer: newAnswer
+    };
+
+    listContainer.dataset.cards = JSON.stringify(cards);
+    renderAiGeneratedCards(cards);
+    closeEditAiCardModal();
+}
+
 async function saveEditedCard() {
     const { deckId, cardIndex, from } = cardToEdit;
     if (deckId === null || cardIndex === null) return;
@@ -7397,6 +7455,14 @@ function markIncorrect(isAutomated = false) {
         await logEvalExposureOnce(card, false, responseLatency, { action: 'manual_grade' });
         moveCard(card, false);
     }, 200);
+}
+
+function markAnswerCorrect(isAutomated = false) {
+    markCorrect(isAutomated);
+}
+
+function markAnswerIncorrect(isAutomated = false) {
+    markIncorrect(isAutomated);
 }
 
 async function gradeSpaced(ratingLabel) {
@@ -11714,6 +11780,26 @@ function showAiGenerator() {
     document.getElementById('flashcard-summary').classList.add('hidden');
 }
 
+function closeCustomPromptModal() {
+    const modal = document.getElementById('customPromptModal');
+    if (modal) modal.classList.remove('show');
+}
+
+async function saveCustomPrompt() {
+    const textarea = document.getElementById('customPromptTextarea');
+    if (!textarea) return;
+
+    const prompt = textarea.value.trim();
+    if (prompt) {
+        globalSettings.customPrompt = prompt;
+    } else {
+        delete globalSettings.customPrompt;
+    }
+    await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
+    closeCustomPromptModal();
+    showToast('Custom prompt saved.', 'success');
+}
+
 
 
 function renderDocumentList() {
@@ -13604,9 +13690,12 @@ async function loadUserDataAndSync() {
         return;
     }
 
+    const devSyncToken = getDevSyncToken();
+    const usingDevSyncToken = Boolean(devSyncToken);
+
     // Check for Auth0 session OR Guest Mode
-    const savedSession = getStoredSession();
-    const isGuest = !savedSession;
+    const savedSession = usingDevSyncToken ? null : getStoredSession();
+    const isGuest = !usingDevSyncToken && !savedSession;
 
     if (isGuest) {
         console.log("Syncing as Guest...");
@@ -13643,7 +13732,9 @@ async function loadUserDataAndSync() {
         let token = null;
         let guestId = null;
 
-        if (savedSession) {
+        if (usingDevSyncToken) {
+            token = devSyncToken;
+        } else if (savedSession) {
             token = getAuthTokenFromSession(savedSession);
             console.log('Auth session found for sync. Token present:', !!token);
             if (!token && savedSession && typeof savedSession === 'object') {
@@ -13856,7 +13947,9 @@ async function loadUserDataAndSync() {
             console.error('Sync Error:', error);
         }
         const syncInfo = error && error.syncInfo;
-        if (error.message.includes('401') || syncInfo?.error === 'auth_error' || syncInfo?.status === 401) {
+        if (usingDevSyncToken && (error.message.includes('401') || syncInfo?.error === 'auth_error' || syncInfo?.status === 401)) {
+            showToast('Could not sync data. Working in offline mode.', 'error');
+        } else if (error.message.includes('401') || syncInfo?.error === 'auth_error' || syncInfo?.status === 401) {
             showToast('Session expired. Logging out.', 'error');
             logout();
         } else if (syncInfo?.type === 'timeout' || error.name === 'AbortError') {
@@ -14617,6 +14710,11 @@ function normalizeAiDeckResponse(response) {
     return { type: type === 'vocab' ? 'vocab' : 'flashcard', deckName, deckNotes, language, cards };
 }
 
+function closeCardHistoryModal() {
+    const modal = document.getElementById('cardHistoryModal');
+    if (modal) modal.classList.remove('show');
+}
+
 window.toggleCortexDebug = async function () {
     studyState.cortexDebugEnabled = !studyState.cortexDebugEnabled;
     const cortex = await getCortexEngine();
@@ -14626,6 +14724,99 @@ window.toggleCortexDebug = async function () {
     console.log('[Cortex Debug]', studyState.cortexDebugEnabled ? 'ENABLED' : 'DISABLED');
     return studyState.cortexDebugEnabled;
 };
+
+const inlineHandlers = {
+    addTextAsDocument,
+    autoCheckAnswer,
+    backToDashboard,
+    cancelAction,
+    checkForUpdates,
+    checkTestAnswer,
+    clearAllDecks,
+    closeAddCategoryModal,
+    closeCardHistoryModal,
+    closeCustomPromptModal,
+    closeDeckSettingsModal,
+    closeEditAiCardModal,
+    closeEditCardModal,
+    closeExamPlanModal,
+    closeImportModal,
+    closeLearnModeSetupModal,
+    closePracticeTestModal,
+    configureStudy,
+    continueSequenceTask,
+    deleteDeck,
+    dontKnowAnswer,
+    editCurrentStudyCard,
+    editDeck,
+    editorAddNewCard,
+    editorRemoveCard,
+    editorSaveDeck,
+    endSession,
+    endTest,
+    generateFullDataExport,
+    gradeSpaced,
+    handleImageFile,
+    handleNextCard,
+    handleNotesImageUpload,
+    hideExamPlanBanner,
+    importData,
+    markCorrect,
+    markIncorrect,
+    markTestCorrect,
+    markTestIncorrect,
+    nextTestQuestion,
+    openDeckSettingsModal,
+    openPracticeTestModal,
+    processAllDocuments,
+    removeDocument,
+    renderGlobalAnalytics,
+    resetPomodoro,
+    resetProgress,
+    resetSpecificDeck,
+    restartStudy,
+    restartTest,
+    saveAiEditedCard,
+    saveAiGeneratedDeck,
+    saveCustomPrompt,
+    saveDeckSettings,
+    saveEditedCard,
+    saveExamPlan,
+    saveNewCategory,
+    saveStudySettings,
+    saveUsername,
+    selectTestPreset,
+    showAiGenerator,
+    showAnswer,
+    showEditor,
+    showExamPlanModal,
+    showImportModal,
+    showInsightsView,
+    showPlanDetails,
+    showQuestion,
+    showSettings,
+    showTestAnswer,
+    startExamPlanSession,
+    startLearnModeWithSetup,
+    startPracticeTest,
+    startTest,
+    submitSequenceTask,
+    switchImportTab,
+    toggleExamSettingsVisibility,
+    togglePomodoro,
+    toggleStudyMode,
+    triggerImageUpload,
+    triggerNotesImageUpload
+};
+
+// Expose handlers used by inline HTML attributes and generated markup.
+if (typeof window !== 'undefined') {
+    Object.entries(inlineHandlers).forEach(([name, handler]) => {
+        if (typeof handler === 'function') {
+            window[name] = handler;
+        }
+    });
+}
 
 
 
