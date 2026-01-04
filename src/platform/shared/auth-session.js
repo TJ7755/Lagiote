@@ -1,4 +1,5 @@
 import { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from './auth0-config.js';
+import { isTestMode, getTestSession } from './test-mode.js';
 
 const SESSION_KEY = 'auth0Session';
 const GUEST_ID_KEY = 'guestID';
@@ -75,12 +76,18 @@ export function getOrCreateGuestID() {
 }
 
 function ensureAuth0Script() {
+    if (isTestMode()) return Promise.resolve();
     if (typeof window === 'undefined') return Promise.reject(new Error('No window available'));
     if (window.auth0 && typeof window.auth0.createAuth0Client === 'function') return Promise.resolve();
     return Promise.reject(new Error('Auth0 client not available'));
 }
 
 export async function startAuthFlow({ screenHint } = {}) {
+    if (isTestMode()) {
+        const session = getTestSession();
+        saveSession(session);
+        return session;
+    }
     // Electron path
     if (typeof window !== 'undefined' && window.electronAPI?.openLoginWindow) {
         const authResult = await window.electronAPI.openLoginWindow();
@@ -109,6 +116,11 @@ export async function startAuthFlow({ screenHint } = {}) {
 }
 
 export async function handleWebRedirect({ save = saveSession } = {}) {
+    if (isTestMode()) {
+        const session = getTestSession();
+        save(session);
+        return session;
+    }
     await ensureAuth0Script();
     const { domain, clientId, audience } = getAuthConfig();
 

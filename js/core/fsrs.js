@@ -257,6 +257,11 @@ export class FSRSAlgorithm {
             }
         }
 
+        if (typeof window !== 'undefined' && window.__TEST_MODE__) {
+            this.enableFallback();
+            return this.buildFallbackRepeat(preparedCard, evalDate);
+        }
+
         await this.loadRemoteFsrs();
         if (this.fsrsClient?.repeat) {
             try {

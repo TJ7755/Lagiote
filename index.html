@@ -2645,7 +2645,7 @@
             <div class="main-content">
                 <div id="decksSection">
                     <p id="subtitle" style="color: var(--secondary-text); font-size: 1.1rem; margin-bottom: 25px;"></p>
-                    <div id="examPlanCtaContainer" class="exam-plan-cta-container">
+                    <div id="examPlanCtaContainer" class="exam-plan-cta-container" hidden>
                         <button class="close-btn" onclick="hideExamPlanBanner(event)"
                             title="Hide this banner">&times;</button>
                         <button class="btn btn-prominent" onclick="showExamPlanModal()">
@@ -2720,7 +2720,7 @@
                     <button class="btn btn-secondary" onclick="renderGlobalAnalytics()">Global Analytics</button>
                     <button class="btn btn-secondary" onclick="showInsightsView()">Memory Insights</button>
                     <button id="createExamPlanFooterBtn" class="btn btn-secondary hidden"
-                        onclick="showExamPlanModal()">Create Exam Plan</button>
+                        onclick="showExamPlanModal()" hidden>Create Exam Plan</button>
                 </div>
             </div>
         </div>
@@ -3277,7 +3277,7 @@
                 <div class="builder-section">
                     <label>Preset Mode</label>
                     <div class="btn-group">
-                        <button class="btn active" id="presetExam" onclick="selectTestPreset('exam_indicative')">Exam-Indicative</button>
+                        <button class="btn active" id="presetExam" onclick="selectTestPreset('exam_indicative')" hidden>Exam-Indicative</button>
                         <button class="btn" id="presetFree" onclick="selectTestPreset('free_practice')">Free Practice</button>
                     </div>
                     <p class="text-muted small" id="presetDescription">Strict exam conditions. No feedback during test. Timed.</p>
@@ -3637,7 +3637,7 @@
             <span class="close" onclick="closeLearnModeSetupModal()">&times;</span>
             <h2>Learn Mode Setup</h2>
             <p>Configure your learning session for this deck.</p>
-            <div class="form-group">
+            <div class="form-group" hidden>
                 <label for="learnModeExamDate">Exam Date (Optional)</label>
                 <input type="date" id="learnModeExamDate">
                 <small style="color: var(--secondary-text);">Set this to prioritise cards you're likely to forget before
@@ -3667,7 +3667,7 @@
             <h2>Deck Settings</h2>
             <div id="deckSettingsForm">
 
-                <div class="settings-section">
+                <div class="settings-section" hidden>
                     <div
                         style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
                         <h4 style="margin: 0;">Exam Mode</h4>

@@ -4,6 +4,7 @@ import { FSRSAlgorithm } from '../core/fsrs.js';
 import * as studyModule from './study.js';
 import * as fsrsUtils from '../core/fsrs-utils.js';
 import * as mcqRemediation from '../core/mcq-remediation.js';
+import '../core/sequence-utils.js';
 import { isElectronRenderer } from '../../src/platform/shared/env.js';
 import { generateDeck as platformGenerateDeck } from '../../src/platform/shared/ai.js';
 import * as authSession from '../../src/platform/shared/auth-session.js';

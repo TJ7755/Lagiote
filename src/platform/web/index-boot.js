@@ -1,5 +1,6 @@
 import './auth0-boot.js';
 import { attachIndexGlobals } from '../../legacy/compat-globals.js';
+import { isTestMode } from '../shared/test-mode.js';
 
 // Handle Auth0 web callback as early as possible so the app
 // processes code/state even if page scripts fail to attach onload.
@@ -38,6 +39,9 @@ function applyThemeFromSystem() {
 }
 
 function bootstrapAnalytics() {
+    if (isTestMode()) {
+        return { gtag: () => {} };
+    }
     if (navigator.onLine) {
         const gtagScript = document.createElement('script');
         gtagScript.async = true;
@@ -78,6 +82,7 @@ function createLoadCdnScript() {
 }
 
 function bootstrapCdn(loadCDNScript) {
+    if (isTestMode()) return;
     loadCDNScript('https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js', () => {
         console.log('Sortable.js loaded or skipped');
     });

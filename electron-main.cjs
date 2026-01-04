@@ -7,6 +7,10 @@ const fs = require('fs');
 const isDevMode = !app.isPackaged;
 process.env.NODE_ENV = process.env.NODE_ENV || (isDevMode ? 'development' : 'production');
 
+if (process.env.LAGIOTE_TEST_USER_DATA_DIR) {
+    app.setPath('userData', process.env.LAGIOTE_TEST_USER_DATA_DIR);
+}
+
 const VITE_CONFIG_PATH = path.join(__dirname, 'vite.config.js');
 const DEV_SERVER_DEFAULT_PORT = 5173;
 const DEV_SERVER_DEFAULT_HOST = '127.0.0.1';
@@ -440,7 +444,7 @@ async function createLoginWindow() {
 
     (async () => {
       let serverPort = null;
-      const portsToTry = [80, 8080, 3000, 0];
+      const portsToTry = [8080, 3000, 0];
 
       for (const port of portsToTry) {
         try {
@@ -467,10 +471,6 @@ async function createLoginWindow() {
           }
           continue;
         }
-      }
-
-      if (serverPort !== 80) {
-        log('warn', `Using non-standard port ${serverPort}. You may need to update Auth0 allowed callback URLs to http://localhost:${serverPort}/callback`);
       }
 
       authWindow = new BrowserWindow({
@@ -688,6 +688,54 @@ ipcMain.handle('quitAndInstallUpdate', async () => {
     throw new Error('Auto-updating is only available in packaged builds');
   }
   autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('get-auth-state', async () => {
+  try {
+    const accessToken = authService.getAccessToken();
+    const profile = authService.getProfile();
+    
+    if (accessToken && profile) {
+      return {
+        isAuthenticated: true,
+        user: {
+          id: profile.sub,
+          email: profile.email,
+          name: profile.name,
+          picture: profile.picture,
+          nickname: profile.nickname
+        },
+        token: accessToken,
+        accessToken: accessToken
+      };
+    }
+    
+    // Try to refresh tokens if we have a refresh token
+    try {
+      const refreshed = await authService.refreshTokens();
+      if (refreshed && refreshed.accessToken && refreshed.profile) {
+        return {
+          isAuthenticated: true,
+          user: {
+            id: refreshed.profile.sub,
+            email: refreshed.profile.email,
+            name: refreshed.profile.name,
+            picture: refreshed.profile.picture,
+            nickname: refreshed.profile.nickname
+          },
+          token: refreshed.accessToken,
+          accessToken: refreshed.accessToken
+        };
+      }
+    } catch (refreshError) {
+      console.log('[Auth] Token refresh failed:', refreshError.message);
+    }
+    
+    return { isAuthenticated: false };
+  } catch (error) {
+    console.error('[Auth] Error getting auth state:', error);
+    return { isAuthenticated: false };
+  }
 });
 
 ipcMain.handle('open-login-window', async () => {

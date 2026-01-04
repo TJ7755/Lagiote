@@ -101,3 +101,14 @@ AGENTS.md
 .vscode/
 check_await*.js
 seq_locations.txt
+
+# Test results and artifacts
+test-results.log
+test-results/
+.test-results/
+playwright-results/
+vitest-results/
+
+# Electron build artifacts
+*.exe
+*.msi

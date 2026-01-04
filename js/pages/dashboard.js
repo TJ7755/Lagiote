@@ -1,5 +1,11 @@
-﻿console.log('Test 1: Script is starting!');
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+﻿import { isTestMode, getTestConfig, getTestSession } from '../../src/platform/shared/test-mode.js';
+import { getTestFixtures } from '../../src/platform/shared/test-fixtures.js';
+
+console.log('Test 1: Script is starting!');
+const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+if (pdfjsLib?.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
+}
 
 const isElectron = typeof window.electronAPI !== 'undefined';
 const authApi = window.authSession || (window.lagiote && window.lagiote.authSession) || null;
@@ -71,6 +77,7 @@ let studyState = {
         activeTask: null
     }
 };
+let eventListenersInitialized = false;
 
 function getStoredSessionRaw() {
     if (authApi && typeof authApi.getStoredSessionRaw === 'function') {
@@ -297,6 +304,333 @@ const DEFAULT_DECK_SETTINGS = {
     sequenceMixingThreshold: 0.8,
     sequenceAllowMixed: true
 };
+function normalizeTestDeckFixture(fixture, seededAt) {
+    const deckId = String(fixture.id || crypto.randomUUID());
+    const cards = Array.isArray(fixture.cards) ? fixture.cards.map((card, index) => {
+        const cardId = card.id || crypto.randomUUID();
+        const normalized = {
+            ...card,
+            id: cardId,
+            deckId
+        };
+        if (typeof normalized.order !== 'number') {
+            normalized.order = index;
+        }
+        return normalized;
+    }) : [];
+
+    const normalized = {
+        id: deckId,
+        name: fixture.name || 'Test Deck',
+        category: fixture.category || 'Other',
+        notes: fixture.notes || '',
+        cards,
+        created: fixture.created || seededAt,
+        lastModified: fixture.lastModified || seededAt,
+        analysisVersion: CURRENT_ANALYSIS_VERSION,
+        settings: { ...DEFAULT_DECK_SETTINGS, ...(fixture.settings || {}) }
+    };
+
+    if (fixture.typeHint) normalized.typeHint = fixture.typeHint;
+    if (fixture.sequenceMeta) normalized.sequenceMeta = fixture.sequenceMeta;
+    if (fixture.sequenceSteps) normalized.sequenceSteps = fixture.sequenceSteps;
+
+    return normalized;
+}
+
+async function deleteDatabase(name) {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(name);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error || new Error('Failed to delete database'));
+        request.onblocked = () => resolve();
+    });
+}
+
+async function resetDatabaseForTests() {
+    if (db) {
+        try {
+            db.close();
+        } catch (error) {
+            console.warn('Failed to close DB before reset', error);
+        }
+    }
+    await deleteDatabase(DB_NAME);
+    await initDB();
+}
+
+async function seedTestData() {
+    const fixtures = getTestFixtures();
+    if (!fixtures || !Array.isArray(fixtures.decks)) return;
+    const seededAt = fixtures.seededAt || new Date().toISOString();
+    const categoriesToUse = Array.isArray(fixtures.categories) && fixtures.categories.length
+        ? fixtures.categories
+        : categories;
+    categories = categoriesToUse;
+    await saveDataToDB('appData', { key: 'categories', data: categoriesToUse });
+    for (const fixture of fixtures.decks) {
+        const normalized = normalizeTestDeckFixture(fixture, seededAt);
+        await saveDataToDB('decks', normalized);
+        for (const card of normalized.cards) {
+            const record = createDefaultKnowledgeState({ id: card.id, deckID: normalized.id }, {
+                userID: 'default_user',
+                deckID: normalized.id,
+                stability: 1.0,
+                lastReviewed: seededAt,
+                fsrs: card.fsrs || null
+            });
+            if (record) {
+                await saveDataToDB('userKnowledgeState', record);
+            }
+        }
+    }
+}
+
+async function applyTestModeSetup() {
+    if (!isTestMode()) return;
+    const config = getTestConfig();
+    if (config.reset) await resetDatabaseForTests();
+    if (config.seed) await seedTestData();
+    if (window.lagiote?.db?.initDB) {
+        try {
+            await window.lagiote.db.initDB();
+        } catch (error) {
+        }
+    }
+    if (typeof window.Sortable !== 'function') {
+        window.Sortable = class {
+            constructor() {}
+            destroy() {}
+        };
+    }
+    if (config.auth === 'user') {
+        saveAuthSession(getTestSession());
+        localStorage.removeItem('guestMode');
+        sessionStorage.removeItem('guestMode');
+    } else if (config.auth === 'guest') {
+        clearAuthSession();
+        localStorage.setItem('guestMode', 'true');
+        sessionStorage.setItem('guestMode', 'true');
+    } else {
+        clearAuthSession();
+        localStorage.removeItem('guestMode');
+        sessionStorage.removeItem('guestMode');
+    }
+    window.generateDeckAdapter = async () => ({
+        type: 'flashcard',
+        deckName: 'AI Test Deck',
+        deckNotes: 'Generated in test mode',
+        language: 'English',
+        cards: [
+            { question: 'AI Question 1', answer: 'AI Answer 1' },
+            { question: 'AI Question 2', answer: 'AI Answer 2' },
+            { question: 'AI Question 3', answer: 'AI Answer 3' }
+        ]
+    });
+    window.__TEST_READY__ = true;
+}
+
+function assignTestId(element, testId) {
+    if (!element || !testId) return;
+    element.dataset.testid = testId;
+}
+
+function assignTestIdIn(containerSelector, selector, testId) {
+    const container = document.querySelector(containerSelector);
+    if (!container) return;
+    const el = container.querySelector(selector);
+    assignTestId(el, testId);
+}
+
+function assignTestIds() {
+    const explicitMap = {
+        authSignupBtn: 'auth-signup',
+        authLoginBtn: 'auth-login',
+        continueAsGuestBtn: 'auth-continue-guest',
+        rememberGuestCheckbox: 'auth-remember-guest',
+        headerBackBtn: 'nav-back',
+        headerHomeBtn: 'nav-home',
+        headerSettingsBtn: 'nav-settings',
+        guestSignupBtn: 'nav-signup',
+        userProfileBtn: 'nav-profile',
+        searchInput: 'search-decks',
+        syncBtn: 'profile-sync',
+        checkUpdatesBtn: 'profile-check-updates',
+        logoutBtn: 'profile-logout',
+        deckDetailSequenceBtn: 'mode-sequence-start',
+        deckDetailSpacedBtn: 'mode-spaced-start',
+        deckDetailTestBtn: 'mode-practice-start',
+        deckDetailResetBtn: 'deck-reset',
+        deckDetailSettingsBtn: 'deck-settings',
+        deckDetailExportBtn: 'deck-export',
+        deckDetailEditBtn: 'deck-edit',
+        deckDetailDeleteBtn: 'deck-delete',
+        continueBtn: 'study-continue-round',
+        resetBtn: 'study-reset-progress',
+        showAnswerBtn: 'answer-show',
+        showQuestionBtn: 'answer-show-question',
+        checkAnswerBtn: 'answer-check',
+        dontKnowBtn: 'answer-dont-know',
+        nextBtn: 'answer-next',
+        incorrectBtn: 'answer-incorrect',
+        correctBtn: 'answer-correct',
+        spacedAgainBtn: 'rating-again',
+        spacedHardBtn: 'rating-hard',
+        spacedGoodBtn: 'rating-good',
+        spacedEasyBtn: 'rating-easy',
+        sequenceSubmitBtn: 'sequence-submit',
+        sequenceContinueBtn: 'sequence-continue',
+        writeAnswerInput: 'answer-input',
+        mcqOptions: 'mcq-options',
+        testInstructionsBtn: 'test-instructions',
+        testShowAnswerBtn: 'test-show-answer',
+        testCheckAnswerBtn: 'test-check-answer',
+        testIncorrectBtn: 'test-incorrect',
+        testCorrectBtn: 'test-correct',
+        testNextBtn: 'test-next',
+        testReviewBtn: 'test-review',
+        testApplyLearningBtn: 'test-apply-learning',
+        importTabPaste: 'import-tab-paste',
+        importTabFile: 'import-tab-file',
+        importDeckName: 'import-deck-name',
+        importDeckCategory: 'import-deck-category',
+        importDeckTypeHint: 'import-deck-type',
+        importPastedText: 'import-paste-text',
+        importFileInput: 'import-file-input',
+        examPlanName: 'exam-plan-name',
+        examPlanDate: 'exam-plan-date',
+        examPlanDeckSelector: 'exam-plan-decks',
+        confirmActionCancelBtn: 'confirm-cancel',
+        confirmActionConfirmBtn: 'confirm-confirm',
+        resumeStudyBtn: 'resume-study',
+        editStudyCardBtn: 'study-edit-card',
+        switchStudyModeBtn: 'study-switch-mode',
+        instructionsBtn: 'study-instructions',
+        pomodoroPlayPause: 'pomodoro-toggle',
+        deckAccentToggle: 'accent-toggle',
+        testAccentToggle: 'test-accent-toggle',
+        aiCardType: 'ai-card-type',
+        aiCardCount: 'ai-card-count',
+        aiLanguage: 'ai-language',
+        'select-file-btn': 'ai-select-files',
+        'add-text-btn': 'ai-add-text',
+        'process-btn': 'ai-process',
+        'save-deck-btn': 'ai-save-deck',
+        'file-drop-zone': 'ai-drop-zone',
+        deckTitle: 'deck-title',
+        deckCategory: 'deck-category',
+        deckTypeHint: 'deck-type',
+        deckNotes: 'deck-notes',
+        testDuration: 'test-duration',
+        testTotalMarks: 'test-total-marks',
+        testQuestionCount: 'test-question-count',
+        optAllowBack: 'test-allow-back',
+        optShowTimer: 'test-show-timer',
+        optStrictMarking: 'test-strict-marking',
+        optConfidence: 'test-confidence',
+        insightsDeckSelect: 'insights-deck-select',
+        darkModeToggle: 'settings-dark-mode',
+        enableInStudyEditing: 'settings-editing',
+        enableToastsToggle: 'settings-toasts',
+        toggleExamPlanBanner: 'settings-exam-banner',
+        enablePomodoroToggle: 'settings-pomodoro',
+        adaptiveAutoToggle: 'settings-adaptive-auto',
+        adaptiveMcqToggle: 'settings-adaptive-mcq',
+        adaptiveClozeToggle: 'settings-adaptive-cloze',
+        caseSensitiveToggle: 'settings-case-sensitive',
+        punctuationToggle: 'settings-punctuation',
+        retypeIncorrectToggle: 'deck-settings-retype-incorrect',
+        deckSettingsExamModeToggle: 'deck-settings-exam-toggle',
+        deckSettingsExamDate: 'deck-settings-exam-date',
+        deckSettingsRetention: 'deck-settings-retention',
+        deckSettingsCardsPerRound: 'deck-settings-cards-per-round',
+        deckSettingsLearnHorizon: 'deck-settings-learn-horizon',
+        deckSettingsStudyModeFlashcard: 'deck-settings-mode-flashcard',
+        deckSettingsStudyModeWrite: 'deck-settings-mode-write',
+        deckSettingsSequenceChunkMin: 'deck-settings-sequence-chunk-min',
+        deckSettingsSequenceChunkMax: 'deck-settings-sequence-chunk-max',
+        deckSettingsSequenceStartChunk: 'deck-settings-sequence-start-chunk',
+        deckSettingsSequenceMixingThreshold: 'deck-settings-sequence-mixing-threshold',
+        deckSettingsSequenceAllowMixed: 'deck-settings-sequence-allow-mixed',
+        reviewOrder: 'deck-settings-review-order',
+        deckSettingsSpacedNewPerDay: 'deck-settings-spaced-new',
+        deckSettingsSpacedMaxReviews: 'deck-settings-spaced-max',
+        deckSettingsSpacedOrder: 'deck-settings-spaced-order',
+        deckSettingsSpacedRequeueAgain: 'deck-settings-spaced-requeue',
+        deckSettingsSpacedShowIntervals: 'deck-settings-spaced-intervals'
+    };
+
+    Object.entries(explicitMap).forEach(([id, testId]) => {
+        const el = document.getElementById(id);
+        if (el) assignTestId(el, testId);
+    });
+
+    document.querySelectorAll('button[id], input[id], select[id], textarea[id], a[id]').forEach(el => {
+        if (!el.dataset.testid) {
+            el.dataset.testid = el.id;
+        }
+    });
+
+    const headerLogo = document.querySelector('#appHeader .logo');
+    assignTestId(headerLogo, 'nav-logo');
+
+    const createCards = Array.from(document.querySelectorAll('.create-card'));
+    const createIds = ['deck-create-manual', 'deck-import', 'deck-create-ai'];
+    createCards.forEach((card, index) => {
+        const testId = createIds[index];
+        if (testId) assignTestId(card, testId);
+    });
+
+    assignTestIdIn('#examPlanCtaContainer', '.close-btn', 'exam-plan-banner-close');
+    assignTestIdIn('#examPlanCtaContainer', 'button[onclick="showExamPlanModal()"]', 'exam-plan-create');
+    assignTestIdIn('#deckDetailActions', 'button[onclick="configureStudy(\'learn\')"]', 'mode-learn-start');
+    assignTestIdIn('#deckDetailActions', 'button[onclick="configureStudy(\'review\')"]', 'mode-review-start');
+    assignTestIdIn('#dashboard', '.dashboard-footer button[onclick="renderGlobalAnalytics()"]', 'nav-global-analytics');
+    assignTestIdIn('#dashboard', '.dashboard-footer button[onclick="showInsightsView()"]', 'nav-insights');
+    assignTestIdIn('#progressView', 'button[onclick="endSession()"]', 'study-end-session');
+    assignTestIdIn('#completeView', 'button[onclick="restartStudy()"]', 'study-restart');
+    assignTestIdIn('#completeView', 'button[onclick="endSession()"]', 'study-end-session-complete');
+    assignTestIdIn('#pomodoroTimer', 'button[onclick="resetPomodoro()"]', 'pomodoro-reset');
+    assignTestIdIn('#practiceTestView #testProgressView', 'button[onclick="startTest()"]', 'test-start');
+    assignTestIdIn('#practiceTestView #testCompleteView', 'button[onclick="restartTest()"]', 'test-restart');
+    assignTestIdIn('#practiceTestView #testCompleteView', 'button[onclick="endTest()"]', 'test-end');
+    assignTestIdIn('#practiceTestModal', '.modal-actions .btn.btn-secondary', 'practice-test-cancel');
+    assignTestIdIn('#practiceTestModal', '.modal-actions .btn.btn-success', 'practice-test-generate');
+    assignTestIdIn('#importModal', '.modal-actions .btn.btn-success', 'import-confirm');
+    assignTestIdIn('#examPlanModal', '.modal-actions .btn.btn-secondary', 'exam-plan-cancel');
+    assignTestIdIn('#examPlanModal', '.modal-actions .btn.btn-success', 'exam-plan-save');
+    assignTestIdIn('#settingsView', 'button[onclick="saveUsername()"]', 'settings-save-name');
+    assignTestIdIn('#settingsView', 'button[onclick="saveStudySettings()"]', 'settings-save-study');
+    assignTestIdIn('#settingsView', 'button[onclick^="generateFullDataExport"]', 'settings-export-data');
+    assignTestIdIn('#settingsView', 'button[onclick="clearAllDecks()"]', 'settings-clear-decks');
+    assignTestIdIn('#editorView', 'button[onclick="editorSaveDeck()"]', 'deck-save');
+    assignTestIdIn('#editorView', '.add-question-btn', 'deck-add-card');
+    assignTestIdIn('#editorView', 'button[onclick^="triggerNotesImageUpload"]', 'deck-notes-upload');
+    assignTestIdIn('#importModal', 'button[onclick="importData()"]', 'import-create');
+    assignTestIdIn('#learnModeSetupModal', 'button[onclick="closeLearnModeSetupModal()"]', 'learn-setup-cancel');
+    assignTestIdIn('#learnModeSetupModal', 'button[onclick="startLearnModeWithSetup()"]', 'learn-setup-start');
+    assignTestIdIn('#deckSettingsModal', 'button[onclick="closeDeckSettingsModal()"]', 'deck-settings-cancel');
+    assignTestIdIn('#deckSettingsModal', 'button[onclick="saveDeckSettings()"]', 'deck-settings-save');
+    assignTestIdIn('#editCardModal', 'button[onclick="saveEditedCard()"]', 'edit-card-save');
+    assignTestIdIn('#editCardModal', 'button[onclick="closeEditCardModal()"]', 'edit-card-cancel');
+    assignTestIdIn('#editAiCardModal', 'button[onclick="saveAiEditedCard()"]', 'edit-ai-card-save');
+    assignTestIdIn('#editAiCardModal', 'button[onclick="closeEditAiCardModal()"]', 'edit-ai-card-cancel');
+    assignTestIdIn('#takeABreakModal', 'button[onclick="endSession()"]', 'break-end-session');
+    assignTestIdIn('#takeABreakModal', 'button[onclick^="document.getElementById(\'takeABreakModal\')"]', 'break-keep-going');
+    assignTestIdIn('#addCategoryModal', 'button[onclick="saveNewCategory()"]', 'category-save');
+    assignTestIdIn('#customPromptModal', 'button[onclick="saveCustomPrompt()"]', 'custom-prompt-save');
+    assignTestIdIn('#practiceTestView', '#testAnswerInput', 'test-answer-input');
+    assignTestIdIn('#practiceTestView', '#testOptions', 'test-options');
+    assignTestIdIn('#aiGenerator', '#document-list', 'ai-document-list');
+    assignTestIdIn('#aiGenerator', '#flashcard-list', 'ai-flashcard-list');
+
+    document.querySelectorAll('.modal').forEach(modal => {
+        const closeBtn = modal.querySelector('.close');
+        if (closeBtn && modal.id) {
+            assignTestId(closeBtn, `modal-close-${modal.id}`);
+        }
+    });
+}
 const SEQUENCE_TASK_TYPES = ['order', 'next', 'gap'];
 const SEQUENCE_GRAPH_ALPHA = 0.18;
 let sequenceGraphModulePromise = null;
@@ -375,6 +709,16 @@ let activeView = 'dashboard';
 let viewHistory = [];
 const keyboardManager = window.keyboardManager || null;
 let deckSelectionState = { items: [], index: -1 };
+if (typeof window !== 'undefined' && !('currentViewingDeckId' in window)) {
+    Object.defineProperty(window, 'currentViewingDeckId', {
+        get() {
+            return currentViewingDeckId;
+        },
+        set(value) {
+            currentViewingDeckId = value;
+        }
+    });
+}
 
 // Lightweight safe binder: no-ops if element missing
 function bind(id, event, handler, options) {
@@ -440,6 +784,7 @@ function buildSequenceGroups(cards = [], sequenceMeta = {}) {
 function normalizeSequenceDeck(deck) {
     if (!deck || deck.typeHint !== 'Sequence') return false;
     let changed = false;
+    const allowNumericIds = isTestMode();
     if (!deck.sequenceMeta || typeof deck.sequenceMeta !== 'object') {
         deck.sequenceMeta = {};
         changed = true;
@@ -447,11 +792,33 @@ function normalizeSequenceDeck(deck) {
     const cards = Array.isArray(deck.cards) ? deck.cards : [];
     if (!cards.length) return changed;
 
-    const existingSequenceIds = new Set(cards.filter(c => c?.sequenceId).map(c => c.sequenceId));
+    const existingSequenceIds = new Set();
+    cards.forEach(card => {
+        if (!card) return;
+        if (Number.isFinite(card.id) && !allowNumericIds) {
+            card.id = String(card.id);
+            changed = true;
+        }
+        const rawSequenceId = card.sequenceId ?? card.sequenceID;
+        if (rawSequenceId === undefined || rawSequenceId === null) return;
+        const normalizedSequenceId = String(rawSequenceId).trim();
+        if (!normalizedSequenceId) {
+            if (card.sequenceId) {
+                card.sequenceId = null;
+                changed = true;
+            }
+            return;
+        }
+        if (card.sequenceId !== normalizedSequenceId) {
+            card.sequenceId = normalizedSequenceId;
+            changed = true;
+        }
+        existingSequenceIds.add(normalizedSequenceId);
+    });
     const metaIds = Object.keys(deck.sequenceMeta || {});
 
     if (!existingSequenceIds.size) {
-        const fallbackId = metaIds[0] || crypto.randomUUID();
+        const fallbackId = String(metaIds[0] || crypto.randomUUID());
         const title = deck.sequenceMeta?.[fallbackId]?.title || deck.name || 'Sequence';
         deck.sequenceMeta[fallbackId] = deck.sequenceMeta[fallbackId] || { title };
         cards.forEach((card, idx) => {
@@ -470,7 +837,7 @@ function normalizeSequenceDeck(deck) {
         const sequenceIdsArray = Array.from(existingSequenceIds);
         const primaryMetaId = metaIds[0] || sequenceIdsArray[0] || null;
         cards.forEach(card => {
-            if (card.sequenceId) return;
+            if (card.sequenceId && String(card.sequenceId).trim()) return;
             const titleKey = (card.sequenceTitle || '').trim().toLowerCase();
             let matchId = null;
             if (titleKey && titleLookup.has(titleKey)) {
@@ -478,14 +845,15 @@ function normalizeSequenceDeck(deck) {
             } else if (titleKey) {
                 const matchingCard = cards.find(c => c.sequenceId && (c.sequenceTitle || '').trim().toLowerCase() === titleKey);
                 if (matchingCard?.sequenceId) {
-                    matchId = matchingCard.sequenceId;
+                    matchId = String(matchingCard.sequenceId);
                 }
             }
             const targetId = matchId || primaryMetaId || sequenceIdsArray[0] || null;
             if (targetId) {
-                card.sequenceId = targetId;
-                if (!card.sequenceTitle && deck.sequenceMeta?.[targetId]?.title) {
-                    card.sequenceTitle = deck.sequenceMeta[targetId].title;
+                const normalizedTargetId = String(targetId);
+                card.sequenceId = normalizedTargetId;
+                if (!card.sequenceTitle && deck.sequenceMeta?.[normalizedTargetId]?.title) {
+                    card.sequenceTitle = deck.sequenceMeta[normalizedTargetId].title;
                 }
                 changed = true;
             }
@@ -494,8 +862,14 @@ function normalizeSequenceDeck(deck) {
 
     const groups = new Map();
     cards.forEach((card, idx) => {
-        const sequenceId = card.sequenceId;
+        const rawSequenceId = card.sequenceId;
+        if (!rawSequenceId) return;
+        const sequenceId = String(rawSequenceId).trim();
         if (!sequenceId) return;
+        if (card.sequenceId !== sequenceId) {
+            card.sequenceId = sequenceId;
+            changed = true;
+        }
         const arr = groups.get(sequenceId) || [];
         arr.push({ card, idx });
         groups.set(sequenceId, arr);
@@ -517,12 +891,19 @@ function normalizeSequenceDeck(deck) {
                 entry.card.order = stepIndex;
                 changed = true;
             }
-            if (!entry.card.sequenceTitle) {
+            const normalizedTitle = typeof entry.card.sequenceTitle === 'string'
+                ? entry.card.sequenceTitle.trim()
+                : (entry.card.sequenceTitle ? String(entry.card.sequenceTitle) : '');
+            if (entry.card.sequenceTitle && normalizedTitle !== entry.card.sequenceTitle) {
+                entry.card.sequenceTitle = normalizedTitle;
+                changed = true;
+            }
+            if (!normalizedTitle) {
                 const seqTitle = deck.sequenceMeta?.[sequenceId]?.title
                     || sorted[0]?.card?.sequenceTitle
                     || `${deck.name || 'Sequence'} ${grouped.length > 1 ? groupIndex + 1 : ''}`.trim();
                 if (seqTitle) {
-                    entry.card.sequenceTitle = seqTitle;
+                    entry.card.sequenceTitle = String(seqTitle);
                     changed = true;
                 }
             }
@@ -537,9 +918,10 @@ function normalizeSequenceDeck(deck) {
         }
     });
 
-    const usedIds = new Set(grouped.map(([sequenceId]) => sequenceId));
+    const usedIds = new Set(grouped.map(([sequenceId]) => String(sequenceId)));
     Object.keys(deck.sequenceMeta).forEach(id => {
-        if (!usedIds.has(id)) {
+        const normalizedId = String(id);
+        if (!usedIds.has(normalizedId)) {
             delete deck.sequenceMeta[id];
             changed = true;
         }
@@ -1427,6 +1809,7 @@ window.onload = async function () {
     console.log('Script is starting! Online:', navigator.onLine);
 
     await initDB();
+    await applyTestModeSetup();
     console.log('Database initialized.');
     initKeyboardShortcuts();
 
@@ -1457,7 +1840,16 @@ window.onload = async function () {
         transitionView('dashboard', true, null, false);
         updateOnlineStatusUI();
         runSmartCoachChecks('dashboardLoad');
+        window.__APP_READY__ = true;
     };
+
+    const testConfig = getTestConfig();
+    if (isTestMode() && testConfig.auth === 'none') {
+        setupEventListeners();
+        transitionView('authView', true, null, false);
+        window.__APP_READY__ = true;
+        return;
+    }
 
     const isRememberedGuest = isGuestModeEnabled();
     const isSessionGuest = isRememberedGuest;
@@ -1504,15 +1896,35 @@ function handleGuestToUserTransition() {
 }
 
 const DB_NAME = 'LagioteDB';
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 const STORE_KEY_REQUIREMENTS = {
     decks: 'id',
     appData: 'key',
     examPlans: 'id',
     analyticsQueue: 'id',
     concepts: 'conceptID',
-    userKnowledgeState: 'id'
+    userKnowledgeState: 'id',
+    atoms: 'id',
+    errorAtoms: 'id',
+    questions: 'id',
+    markSchemes: 'id',
+    examSpecs: 'id',
+    examPapers: 'id',
+    examSittings: 'id',
+    markingRecords: 'id',
+    contentRevisions: 'id'
 };
+const EXAM_ENGINE_STORES = new Set([
+    'atoms',
+    'errorAtoms',
+    'questions',
+    'markSchemes',
+    'examSpecs',
+    'examPapers',
+    'examSittings',
+    'markingRecords',
+    'contentRevisions'
+]);
 
 function toIdString(value) {
     if (value === undefined || value === null) return null;
@@ -1761,6 +2173,64 @@ function ensureKnowledgeIndexes(store) {
     if (!store.indexNames.contains('idx_user')) store.createIndex('idx_user', 'userID', { unique: false });
 }
 
+function ensureAtomsIndexes(store) {
+    if (!store.indexNames.contains('by_type')) store.createIndex('by_type', 'type', { unique: false });
+    if (!store.indexNames.contains('by_updatedAt')) store.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+    if (!store.indexNames.contains('by_tag')) store.createIndex('by_tag', 'tags', { unique: false, multiEntry: true });
+}
+
+function ensureErrorAtomsIndexes(store) {
+    if (!store.indexNames.contains('by_risk')) store.createIndex('by_risk', 'risk', { unique: false });
+    if (!store.indexNames.contains('by_updatedAt')) store.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+    if (!store.indexNames.contains('by_tag')) store.createIndex('by_tag', 'tags', { unique: false, multiEntry: true });
+}
+
+function ensureQuestionsIndexes(store) {
+    if (!store.indexNames.contains('by_type')) store.createIndex('by_type', 'type', { unique: false });
+    if (!store.indexNames.contains('by_difficulty')) store.createIndex('by_difficulty', 'difficulty', { unique: false });
+    if (!store.indexNames.contains('by_depth')) store.createIndex('by_depth', 'depth', { unique: false });
+    if (!store.indexNames.contains('by_markScheme')) store.createIndex('by_markScheme', 'markSchemeId', { unique: false });
+    if (!store.indexNames.contains('by_tag')) store.createIndex('by_tag', 'tags', { unique: false, multiEntry: true });
+    if (!store.indexNames.contains('by_atomId')) store.createIndex('by_atomId', 'atomIds', { unique: false, multiEntry: true });
+}
+
+function ensureMarkSchemesIndexes(store) {
+    if (!store.indexNames.contains('by_schemeType')) store.createIndex('by_schemeType', 'schemeType', { unique: false });
+    if (!store.indexNames.contains('by_updatedAt')) store.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+}
+
+function ensureExamSpecsIndexes(store) {
+    if (!store.indexNames.contains('by_subject')) store.createIndex('by_subject', 'subject', { unique: false });
+    if (!store.indexNames.contains('by_updatedAt')) store.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+}
+
+function ensureExamPapersIndexes(store) {
+    if (!store.indexNames.contains('by_examSpecId')) store.createIndex('by_examSpecId', 'examSpecId', { unique: false });
+    if (!store.indexNames.contains('by_createdAt')) store.createIndex('by_createdAt', 'createdAt', { unique: false });
+}
+
+function ensureExamSittingsIndexes(store) {
+    if (!store.indexNames.contains('by_examPaperId')) store.createIndex('by_examPaperId', 'examPaperId', { unique: false });
+    if (!store.indexNames.contains('by_status')) store.createIndex('by_status', 'status', { unique: false });
+    if (!store.indexNames.contains('by_startedAt')) store.createIndex('by_startedAt', 'startedAt', { unique: false });
+    if (!store.indexNames.contains('by_updatedAt')) store.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+}
+
+function ensureMarkingRecordsIndexes(store) {
+    if (!store.indexNames.contains('by_examSittingId')) {
+        store.createIndex('by_examSittingId', 'examSittingId', { unique: false });
+    }
+    if (!store.indexNames.contains('by_questionId')) {
+        store.createIndex('by_questionId', 'questionId', { unique: false });
+    }
+    if (!store.indexNames.contains('by_createdAt')) store.createIndex('by_createdAt', 'createdAt', { unique: false });
+}
+
+function ensureContentRevisionsIndexes(store) {
+    if (!store.indexNames.contains('by_entity')) store.createIndex('by_entity', ['entityType', 'entityId'], { unique: false });
+    if (!store.indexNames.contains('by_timestamp')) store.createIndex('by_timestamp', 'timestamp', { unique: false });
+}
+
 function migrateStores(transaction, oldVersion) {
     if (oldVersion < 1) {
         if (!db.objectStoreNames.contains('decks')) {
@@ -1791,6 +2261,61 @@ function migrateStores(transaction, oldVersion) {
     if (!db.objectStoreNames.contains('cortexTrainingData')) {
         const trainingStore = db.createObjectStore('cortexTrainingData', { keyPath: 'id', autoIncrement: true });
         trainingStore.createIndex('by_timestamp', 'timestamp', { unique: false });
+    }
+
+    if (!db.objectStoreNames.contains('atoms')) {
+        const atomStore = db.createObjectStore('atoms', { keyPath: 'id' });
+        ensureAtomsIndexes(atomStore);
+    } else {
+        ensureAtomsIndexes(transaction.objectStore('atoms'));
+    }
+    if (!db.objectStoreNames.contains('errorAtoms')) {
+        const errorAtomStore = db.createObjectStore('errorAtoms', { keyPath: 'id' });
+        ensureErrorAtomsIndexes(errorAtomStore);
+    } else {
+        ensureErrorAtomsIndexes(transaction.objectStore('errorAtoms'));
+    }
+    if (!db.objectStoreNames.contains('questions')) {
+        const questionStore = db.createObjectStore('questions', { keyPath: 'id' });
+        ensureQuestionsIndexes(questionStore);
+    } else {
+        ensureQuestionsIndexes(transaction.objectStore('questions'));
+    }
+    if (!db.objectStoreNames.contains('markSchemes')) {
+        const markSchemeStore = db.createObjectStore('markSchemes', { keyPath: 'id' });
+        ensureMarkSchemesIndexes(markSchemeStore);
+    } else {
+        ensureMarkSchemesIndexes(transaction.objectStore('markSchemes'));
+    }
+    if (!db.objectStoreNames.contains('examSpecs')) {
+        const examSpecStore = db.createObjectStore('examSpecs', { keyPath: 'id' });
+        ensureExamSpecsIndexes(examSpecStore);
+    } else {
+        ensureExamSpecsIndexes(transaction.objectStore('examSpecs'));
+    }
+    if (!db.objectStoreNames.contains('examPapers')) {
+        const examPaperStore = db.createObjectStore('examPapers', { keyPath: 'id' });
+        ensureExamPapersIndexes(examPaperStore);
+    } else {
+        ensureExamPapersIndexes(transaction.objectStore('examPapers'));
+    }
+    if (!db.objectStoreNames.contains('examSittings')) {
+        const examSittingStore = db.createObjectStore('examSittings', { keyPath: 'id' });
+        ensureExamSittingsIndexes(examSittingStore);
+    } else {
+        ensureExamSittingsIndexes(transaction.objectStore('examSittings'));
+    }
+    if (!db.objectStoreNames.contains('markingRecords')) {
+        const markingRecordStore = db.createObjectStore('markingRecords', { keyPath: 'id' });
+        ensureMarkingRecordsIndexes(markingRecordStore);
+    } else {
+        ensureMarkingRecordsIndexes(transaction.objectStore('markingRecords'));
+    }
+    if (!db.objectStoreNames.contains('contentRevisions')) {
+        const contentRevisionStore = db.createObjectStore('contentRevisions', { keyPath: 'id' });
+        ensureContentRevisionsIndexes(contentRevisionStore);
+    } else {
+        ensureContentRevisionsIndexes(transaction.objectStore('contentRevisions'));
     }
 
     if (db.objectStoreNames.contains('userKnowledgeState')) {
@@ -2025,6 +2550,10 @@ async function logInteraction(logData) {
                 similarityScore
             );
         }
+    }
+
+    if (isTestMode()) {
+        return;
     }
 
     try {
@@ -2461,6 +2990,7 @@ function generateErrorAnalysisReport(logs, cardId) {
 }
 
 const normalizeKey = (key) => Array.isArray(key) ? key.join('::') : key;
+const hasValue = value => value !== undefined && value !== null && value !== '';
 const resolveKnowledgeKey = (key) => {
     if (typeof key === 'string') return key;
     if (Array.isArray(key)) {
@@ -2474,6 +3004,69 @@ const resolveKnowledgeKey = (key) => {
     }
     return null;
 };
+
+function nowIso() {
+    return new Date().toISOString();
+}
+
+function isExamEngineStore(storeName) {
+    return EXAM_ENGINE_STORES.has(storeName);
+}
+
+function parseExamVersion(value) {
+    if (!Number.isFinite(value)) return null;
+    const normalized = Math.trunc(value);
+    return normalized >= 1 ? normalized : null;
+}
+
+function normalizeQuestionRecord(record) {
+    if (!record || typeof record !== 'object') return record;
+    let atomIds = [];
+    if (Array.isArray(record.atomMap)) {
+        atomIds = Array.from(new Set(record.atomMap
+            .map(entry => entry?.atomId)
+            .filter(id => id !== undefined && id !== null)
+            .map(id => (typeof id === 'string' ? id : String(id)))
+        ));
+    } else if (Array.isArray(record.atomIds)) {
+        atomIds = record.atomIds;
+    }
+    return { ...record, atomIds };
+}
+
+function normalizeExamEngineRecord(storeName, record, existingRecord = null) {
+    if (!record || typeof record !== 'object') return record;
+    const working = storeName === 'questions' ? normalizeQuestionRecord(record) : record;
+    const existing = existingRecord && typeof existingRecord === 'object' ? existingRecord : null;
+    const now = nowIso();
+    const createdAt = hasValue(working.createdAt)
+        ? working.createdAt
+        : (hasValue(existing?.createdAt) ? existing.createdAt : now);
+    const incomingVersion = parseExamVersion(working.version);
+    const existingVersion = parseExamVersion(existing?.version);
+    let version = incomingVersion;
+    if (!incomingVersion) {
+        if (existing) {
+            version = existingVersion ? existingVersion + 1 : 1;
+        } else {
+            version = 1;
+        }
+    }
+    const hasIsDeleted = typeof working.isDeleted === 'boolean';
+    const isDeleted = hasIsDeleted ? working.isDeleted : (typeof existing?.isDeleted === 'boolean' ? existing.isDeleted : false);
+    const deletedAt = hasValue(working.deletedAt)
+        ? working.deletedAt
+        : (hasValue(existing?.deletedAt) ? existing.deletedAt : null);
+
+    return {
+        ...working,
+        version,
+        createdAt,
+        updatedAt: now,
+        isDeleted,
+        deletedAt
+    };
+}
 
 async function saveDataToDB(storeName, data) {
     const payload = storeName === 'userKnowledgeState' ? prepareKnowledgeRecord(data) : data;
@@ -2490,7 +3083,17 @@ async function saveDataToDB(storeName, data) {
         try {
             const transaction = db.transaction([storeName], 'readwrite');
             const store = transaction.objectStore(storeName);
-            store.put(payload);
+            if (isExamEngineStore(storeName)) {
+                const id = payload.id;
+                const getRequest = store.get(id);
+                getRequest.onsuccess = () => {
+                    const normalized = normalizeExamEngineRecord(storeName, payload, getRequest.result);
+                    store.put(normalized);
+                };
+                getRequest.onerror = event => reject("Error saving data: " + event.target.error);
+            } else {
+                store.put(payload);
+            }
             transaction.oncomplete = () => resolve();
             transaction.onerror = event => reject("Error saving data: " + event.target.error);
         } catch (error) {
@@ -2646,6 +3249,8 @@ function getBrowserAuthConfig() {
 }
 
 function setupEventListeners() {
+    if (eventListenersInitialized) return;
+    eventListenersInitialized = true;
 
     // Authentication event listeners will be handled by Auth0 (to be implemented)
     const authSignupBtn = document.getElementById('authSignupBtn');
@@ -3488,23 +4093,21 @@ async function backToDashboard(isFromLogo = false, skipEndSession = false) {
 
                 if (isFromLogo) {
 
-                    if (!skipEndSession && currentDeckId && currentMode) endSession();
+                    if (!skipEndSession && currentDeckId && currentMode) await endSession({ forceDashboard: true });
 
                     transitionView('dashboard', false, () => resetDashboardState(true), false);
                     return;
                 }
                 transitionView('dashboard', false, () => resetDashboardState(true), false);
-                if (!skipEndSession && currentDeckId && currentMode) endSession();
+                if (!skipEndSession && currentDeckId && currentMode) await endSession();
             }
         );
         return;
     }
 
     if (activeView !== 'dashboard') {
-        if (!skipEndSession && currentDeckId && currentMode) await endSession();
+        if (!skipEndSession && currentDeckId && currentMode) await endSession({ forceDashboard: isFromLogo });
         if (isFromLogo) {
-
-            if (!skipEndSession && currentDeckId && currentMode) await endSession();
             transitionView('dashboard', false, () => resetDashboardState(true), false);
             return;
         } else {
@@ -3564,12 +4167,31 @@ async function loadSavedData() {
     const fsrsEngine = await getFsrsEngine();
     for (const deck of savedDecks) {
         let deckUpdated = false;
-        if (deck.typeHint === 'Sequence') {
-            if (normalizeSequenceDeck(deck)) {
+        let workingDeck = deck;
+        if (workingDeck.typeHint !== 'Sequence') {
+            const adapter = window.sequenceStepUtils?.adaptLegacySequenceDeck;
+            if (typeof adapter === 'function') {
+                const adapted = adapter(workingDeck);
+                if (adapted?.deck && Array.isArray(adapted.cards) && adapted.cards.length >= 2) {
+                    const updatedCards = adapted.cards.map(card => ({
+                        ...card,
+                        deckId: card.deckId || workingDeck.id
+                    }));
+                    workingDeck = {
+                        ...workingDeck,
+                        ...adapted.deck,
+                        cards: updatedCards
+                    };
+                    deckUpdated = true;
+                }
+            }
+        }
+        if (workingDeck.typeHint === 'Sequence') {
+            if (normalizeSequenceDeck(workingDeck)) {
                 deckUpdated = true;
             }
         }
-        for (const card of deck.cards) {
+        for (const card of workingDeck.cards) {
             if (!card.id) {
                 card.id = crypto.randomUUID();
                 deckUpdated = true;
@@ -3578,17 +4200,17 @@ async function loadSavedData() {
             card.fsrs = serializeFsrsCard(prepared);
             // Ensure each card has a reference to its deck
             if (!card.deckId) {
-                card.deckId = deck.id;
+                card.deckId = workingDeck.id;
                 deckUpdated = true;
             }
         }
         if (deckUpdated) {
-            deck.lastModified = new Date().toISOString();
-            await saveDataToDB('decks', deck);
+            workingDeck.lastModified = new Date().toISOString();
+            await saveDataToDB('decks', workingDeck);
         }
-        decks[deck.id] = deck;
+        decks[workingDeck.id] = workingDeck;
         if (window.AccentUtils?.ensureDeckAccentMetadata) {
-            window.AccentUtils.ensureDeckAccentMetadata(deck);
+            window.AccentUtils.ensureDeckAccentMetadata(workingDeck);
         }
     }
 
@@ -3893,10 +4515,12 @@ async function updateDashboard() {
             deckCard.className = 'deck-card';
             deckCard.dataset.category = String(category);
             deckCard.dataset.deckId = String(deck.id);
+            deckCard.dataset.testid = `deck-card-${deck.id}`;
             const isSequenceDeck = deck.typeHint === 'Sequence';
 
             const mainClickable = document.createElement('div');
             mainClickable.className = 'deck-card-main-clickable';
+            mainClickable.dataset.testid = `deck-open-${deck.id}`;
             mainClickable.addEventListener('click', () => showDeckDetail(deck.id, mainClickable.parentElement));
 
             const deckTop = document.createElement('div');
@@ -4036,14 +4660,15 @@ async function updateDashboard() {
                 secondaryLabel = 'Review';
             }
 
-	            const primaryBtn = document.createElement('button');
-	            primaryBtn.className = 'btn deck-action-primary';
-	            primaryBtn.type = 'button';
-	            primaryBtn.textContent = primaryLabel;
-	            primaryBtn.addEventListener('click', (e) => {
-	                e.stopPropagation();
-	                configureStudy(primaryMode, deck.id);
-	            });
+            const primaryBtn = document.createElement('button');
+            primaryBtn.className = 'btn deck-action-primary';
+            primaryBtn.type = 'button';
+            primaryBtn.textContent = primaryLabel;
+            primaryBtn.dataset.testid = `deck-action-${primaryMode}-${deck.id}`;
+            primaryBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                configureStudy(primaryMode, deck.id);
+            });
 	            if (primaryMode === 'spaced') {
 	                primaryBtn.title = dueCount > 0 ? `${dueCount} due` : 'Spaced review';
 	                primaryBtn.setAttribute('aria-label', dueCount > 0 ? `Spaced review. ${dueCount} due.` : 'Spaced review.');
@@ -4051,14 +4676,15 @@ async function updateDashboard() {
 	            actions.appendChild(primaryBtn);
 
 	            if (secondaryMode !== primaryMode) {
-	                const secondaryBtn = document.createElement('button');
-	                secondaryBtn.className = 'btn deck-action-secondary';
-	                secondaryBtn.type = 'button';
-	                secondaryBtn.textContent = secondaryLabel;
-	                secondaryBtn.addEventListener('click', (e) => {
-	                    e.stopPropagation();
-	                    configureStudy(secondaryMode, deck.id);
-	                });
+                const secondaryBtn = document.createElement('button');
+                secondaryBtn.className = 'btn deck-action-secondary';
+                secondaryBtn.type = 'button';
+                secondaryBtn.textContent = secondaryLabel;
+                secondaryBtn.dataset.testid = `deck-action-${secondaryMode}-${deck.id}`;
+                secondaryBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    configureStudy(secondaryMode, deck.id);
+                });
 	                actions.appendChild(secondaryBtn);
 	            }
 
@@ -4134,6 +4760,7 @@ function showDeckDetail(deckId, cardElement) {
         cardsToDisplay.forEach((card, index) => {
             const cardItem = document.createElement('div');
             cardItem.className = 'deck-card-item';
+            cardItem.dataset.testid = `deck-card-item-${card.id}`;
             const originalIndex = deck.cards.findIndex(c => c.id === card.id);
             const orderText = card.order ? `${card.order}. ` : `${index + 1}. `;
 
@@ -4173,12 +4800,14 @@ function showDeckDetail(deckId, cardElement) {
             const editBtn = document.createElement('button');
             editBtn.className = 'deck-card-action-btn edit';
             editBtn.title = 'Edit Card';
+            editBtn.dataset.testid = `deck-card-edit-${card.id}`;
             editBtn.addEventListener('click', (e) => { e.stopPropagation(); editCard(deckId, originalIndex, 'detail'); });
             editBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>`;
 
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'deck-card-action-btn delete';
             deleteBtn.title = 'Delete Card';
+            deleteBtn.dataset.testid = `deck-card-delete-${card.id}`;
             deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteCardFromDetail(deckId, originalIndex); });
             deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>`;
 
@@ -4572,6 +5201,31 @@ function isEditorClean() {
     return true;
 }
 
+function populateEditorAccentButtons(container, textarea) {
+    if (!container || !textarea) return;
+    const accents = [
+        '\u00e0', '\u00e2', '\u00e9', '\u00e8', '\u00ea', '\u00eb', '\u00ee', '\u00ef',
+        '\u00f4', '\u00f9', '\u00fb', '\u00fc', '\u00e7', '\u00f1', '\u00df', '\u00e4', '\u00f6'
+    ];
+    container.innerHTML = accents.map(char => (
+        `<button onclick="insertAccentIntoEditor('${char}', this)" style="background: var(--button-secondary-bg); border: 1px solid var(--border-color); color: var(--button-secondary-text); padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 1rem;">${char}</button>`
+    )).join('');
+    container.classList.remove('hidden');
+}
+
+function insertAccentIntoEditor(char, button) {
+    const container = button?.parentElement;
+    const textarea = container?.previousElementSibling;
+    if (!textarea || !(textarea.classList.contains('question-input') || textarea.classList.contains('solution-input'))) return;
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    textarea.value = textarea.value.substring(0, start) + char + textarea.value.substring(end);
+    const nextPos = start + 1;
+    textarea.selectionStart = nextPos;
+    textarea.selectionEnd = nextPos;
+    textarea.focus();
+}
+
 function editorAddNewStandardCard(card = {}) {
     const { id = null, question = '', answer = '', questionImage = '', answerImage = '', order = '' } = card;
     editorCardCounter++;
@@ -4589,31 +5243,31 @@ function editorAddNewStandardCard(card = {}) {
 
     const orderInputHTML = '';
 
-    newRow.innerHTML = `<div class="flashcard-item" data-original-id="${escapeHtml(String(id || ''))}">
+    newRow.innerHTML = `<div class="flashcard-item" data-original-id="${escapeHtml(String(id || ''))}" data-testid="editor-card-${editorCardCounter}">
                 <div class="flashcard-number" style="display: flex; align-items: center;">
                     ${orderInputHTML}
                     <span>${cardNumber}.</span>
                 </div>
                 
-                <textarea class="question-input" placeholder="Question" data-card-id="${editorCardCounter}">${escapeHtml(String(question))}</textarea>
+                <textarea class="question-input" placeholder="Question" data-card-id="${editorCardCounter}" data-testid="editor-card-question-${editorCardCounter}">${escapeHtml(String(question))}</textarea>
                 <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
                 <div class="image-controls">
-                    <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1">Upload Image</button>
+                    <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1" data-testid="editor-card-question-upload-${editorCardCounter}">Upload Image</button>
                 </div>
                 <div class="question-image-preview image-preview">${questionImagePreview}</div>
                 <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
                 <input type="hidden" class="question-image-input" value="${escapeHtml(String(questionImage))}">
                 
-                <textarea class="solution-input" placeholder="Answer" style="margin-top:20px;" data-card-id="${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
+                <textarea class="solution-input" placeholder="Answer" style="margin-top:20px;" data-card-id="${editorCardCounter}" data-testid="editor-card-answer-${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
                 <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
                 <div class="image-controls">
-                    <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1">Upload Image</button>
+                    <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1" data-testid="editor-card-answer-upload-${editorCardCounter}">Upload Image</button>
                 </div>
                 <div class="answer-image-preview image-preview">${answerImagePreview}</div>
                 <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
                 <input type="hidden" class="answer-image-input" value="${escapeHtml(String(answerImage))}">
             </div>
-            <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
+            <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})" data-testid="editor-card-remove-${editorCardCounter}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
             <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text);">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
@@ -5229,7 +5883,6 @@ async function saveUsername() {
 
 async function saveStudySettings() {
     globalSettings.enableInStudyEditing = document.getElementById('enableInStudyEditing').checked;
-    globalSettings.enableInStudyEditing = document.getElementById('enableInStudyEditing').checked;
     globalSettings.hideExamPlanBanner = !document.getElementById('toggleExamPlanBanner').checked;
     globalSettings.enableToasts = document.getElementById('enableToastsToggle').checked;
     await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
@@ -5426,7 +6079,7 @@ async function startLearnModeWithSetup() {
 
     if (examDate) deck.settings.examDate = examDate;
     deck.settings.targetRetention = retention;
-    deck.settings.learnModeMaxCards = maxCards ? parseInt(maxCards) : null;
+    deck.settings.learnModeMaxCards = parsePositiveInt(maxCards, null);
 
     await saveDataToDB('decks', deck);
     closeLearnModeSetupModal();
@@ -5549,6 +6202,29 @@ function getBaselineChoice(candidates, knowledgeMap) {
     return sorted[0].card;
 }
 
+function parsePositiveInt(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    return fallback;
+}
+
+function buildLearnPool(deck, knowledgeMap, targetDate, maxCards) {
+    if (!deck || !Array.isArray(deck.cards)) {
+        return { activeLearningPool: [], sessionCardIds: [] };
+    }
+
+    const candidates = deck.cards.map(card => {
+        const state = knowledgeMap.get(card.id);
+        const retention = calculateRetentionAtDate(state, targetDate);
+        return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
+    }).filter(entry => !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate));
+
+    candidates.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
+    const poolLimit = Number.isFinite(maxCards) && maxCards > 0 ? maxCards : candidates.length;
+    const activeLearningPool = candidates.slice(0, poolLimit).map(entry => entry.card);
+    return { activeLearningPool, sessionCardIds: activeLearningPool.map(card => card.id) };
+}
+
 async function startLearnMode(deckId) {
     currentMode = 'learn';
     currentDeckId = deckId;
@@ -5606,27 +6282,12 @@ async function startLearnMode(deckId) {
     const now = new Date();
     const targetDate = cortex.buildTargetDate(deck, now);
     logLearnTargetSource(deck, now, targetDate);
-    const candidates = deck.cards.map(card => {
-        const state = knowledgeMap.get(card.id);
-        const retention = calculateRetentionAtDate(state, targetDate);
-        return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
-    }).filter(entry => {
-        const retention = entry.projectedRetention;
-        if (entry.knowledgeState && entry.knowledgeState.mcqStats) {
-            const stats = ensureMcqStats(entry.knowledgeState.mcqStats);
-            const blocked = stats.recognitionDependenceEma > 0.35 || (stats.mcqCorrect > 0 && stats.recallCorrect === 0);
-            if (blocked) return true;
-        }
-        if (retention >= 0.9) return false;
-        return !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate);
-    });
-    candidates.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
-    const learnModeMaxCards = deck.settings.learnModeMaxCards ? parseInt(deck.settings.learnModeMaxCards) : 40;
-    const maxCards = Number.isFinite(learnModeMaxCards) ? learnModeMaxCards : 40;
-    const activeLearningPool = candidates.slice(0, maxCards).map(entry => entry.card);
+    studyState.learnTargetDate = targetDate;
+    const maxCards = parsePositiveInt(deck.settings.learnModeMaxCards, 40);
+    const { activeLearningPool, sessionCardIds } = buildLearnPool(deck, knowledgeMap, targetDate, maxCards);
     studyState.activeLearningPool = activeLearningPool;
     studyState.roundCards = [];
-    studyState.sessionCardIds = activeLearningPool.map(c => c.id);
+    studyState.sessionCardIds = sessionCardIds;
     studyState.examDate = deck.settings.examDate ? new Date(deck.settings.examDate) : null;
     studyState.targetRetention = deck.settings.targetRetention || 0.85;
 
@@ -5656,7 +6317,7 @@ async function startLearnMode(deckId) {
     progressView.classList.remove('hidden');
     const preGenerationView = document.getElementById('preGenerationView');
     const cardView = document.getElementById('cardView');
-    const cardsRequiringGeneration = activeLearningPool.filter(card => card.questionTypeToShow === 'MultipleChoice' && isOnline);
+    const cardsRequiringGeneration = activeLearningPool.filter(card => card.questionTypeToShow === 'MultipleChoice' && isOnline && !isTestMode());
     let transitionSource = progressView;
 
     if (cardsRequiringGeneration.length > 0) {
@@ -5683,7 +6344,7 @@ async function startLearnMode(deckId) {
         transitionSource = progressView;
     }
 
-    studyState.currentCard = await cortex.pickNextCard(activeLearningPool, studyState.sessionState, deck, studyState.knowledgeStates);
+    studyState.currentCard = await pickNextCardWithEval(cortex, deck);
     studyState.currentCardIndex = 0;
     studyState.startTime = new Date();
 
@@ -5817,10 +6478,24 @@ async function updateSessionProgress() {
     }
 
     const deck = decks[currentDeckId];
+    const learnTargetDate = studyState.learnTargetDate;
+    const targetDateOverride = currentMode === 'learn'
+        && learnTargetDate instanceof Date
+        && !Number.isNaN(learnTargetDate.getTime())
+        ? learnTargetDate
+        : null;
+    const scoringTargetOverride = currentMode === 'learn'
+        ? (Number.isFinite(deck?.settings?.targetRetention)
+            ? deck.settings.targetRetention
+            : (Number.isFinite(studyState.targetRetention) ? studyState.targetRetention : 0.85))
+        : null;
+
     const { percent, counts } = computeRetentionProgressPercent({
         cardIds: studyState.sessionCardIds,
         deck,
-        stateMap
+        stateMap,
+        targetDateOverride,
+        scoringTargetOverride
     });
 
     if (globalSettings.devMode) {
@@ -5844,7 +6519,7 @@ async function updateSessionProgress() {
     }
 }
 
-function computeRetentionProgressPercent({ cardIds, deck, stateMap, targetDateOverride = null }) {
+function computeRetentionProgressPercent({ cardIds, deck, stateMap, targetDateOverride = null, scoringTargetOverride = null }) {
     const counts = {
         missingStateCount: 0,
         nonFiniteRetentionCount: 0,
@@ -5874,7 +6549,9 @@ function computeRetentionProgressPercent({ cardIds, deck, stateMap, targetDateOv
     };
 
     let totalScore = 0;
-    const scoringTarget = hasExamDate ? targetRetention : 0.9;
+    const scoringTarget = Number.isFinite(scoringTargetOverride) && scoringTargetOverride > 0
+        ? scoringTargetOverride
+        : (hasExamDate ? targetRetention : 0.9);
 
     cardIds.forEach(id => {
         const state = getState(id);
@@ -6182,22 +6859,15 @@ async function continueStudy() {
         const now = new Date();
         const targetDate = cortex.buildTargetDate(deck, now);
         logLearnTargetSource(deck, now, targetDate);
-        const learnModeMaxCards = deck.settings.learnModeMaxCards ? parseInt(deck.settings.learnModeMaxCards) : 40;
-        const maxCards = Number.isFinite(learnModeMaxCards) ? learnModeMaxCards : 40;
+        studyState.learnTargetDate = targetDate;
+        const maxCards = parsePositiveInt(deck.settings.learnModeMaxCards, 40);
+        const { activeLearningPool, sessionCardIds } = buildLearnPool(deck, knowledgeMap, targetDate, maxCards);
 
-        const nonMasteredCards = allCards.map(card => {
-            const state = knowledgeMap.get(card.id);
-            const retention = calculateRetentionAtDate(state, targetDate);
-            return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
-        }).filter(entry => {
-            if (entry.projectedRetention >= 0.9) return false;
-            return !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate);
-        });
-        nonMasteredCards.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
-
-        studyState.activeLearningPool = nonMasteredCards.slice(0, maxCards).map(entry => entry.card);
+        studyState.activeLearningPool = activeLearningPool;
         studyState.roundCards = [];
-        studyState.sessionCardIds = studyState.activeLearningPool.map(c => c.id);
+        studyState.sessionCardIds = sessionCardIds;
+        studyState.examDate = deck.settings.examDate ? new Date(deck.settings.examDate) : null;
+        studyState.targetRetention = deck.settings.targetRetention || studyState.targetRetention || 0.85;
 
         const poolList = document.getElementById('activePoolList');
         if (studyState.activeLearningPool.length > 0) {
@@ -6281,9 +6951,9 @@ async function continueStudy() {
 
     assignQuestionTypesToCards(cardsForSession, currentMode === 'learn' ? currentDeckId : null);
 
-        if (cardsForSession.length > 0) {
+    if (cardsForSession.length > 0) {
         const cardsRequiringGeneration = cardsForSession.filter(
-            card => card.questionTypeToShow === 'MultipleChoice' && isOnline
+            card => card.questionTypeToShow === 'MultipleChoice' && isOnline && !isTestMode()
         );
 
         const progressView = document.getElementById('progressView');
@@ -6310,7 +6980,7 @@ async function continueStudy() {
         if (currentMode === 'learn') {
             const cortex = await getCortexEngine();
             const deck = decks[currentDeckId];
-            studyState.currentCard = await cortex.pickNextCard(studyState.activeLearningPool, studyState.sessionState, deck, studyState.knowledgeStates);
+            studyState.currentCard = await pickNextCardWithEval(cortex, deck);
         }
         transitionSubView(transitionSource, cardView);
         if (currentMode !== 'learn' || studyState.currentCard) {
@@ -6336,6 +7006,10 @@ function assignQuestionTypesToCards(cards, deckId = null, modeOverride = current
     if (!cards || cards.length === 0) return;
 
     cards.forEach(card => {
+        if (isTestMode() && typeof card.testQuestionType === 'string') {
+            card.questionTypeToShow = card.testQuestionType;
+            return;
+        }
         const resolvedDeck = deckId ? decks[deckId] : decks[card.deckId || currentDeckId];
         card.questionTypeToShow = selectOptimalQuestionType(card, resolvedDeck, modeOverride);
     });
@@ -6606,6 +7280,7 @@ async function showNextCard() {
         }
 
         const card = studyState.roundCards[studyState.currentCardIndex];
+        startInteractionLog(card.id);
 
         if (card && studyState.knowledgeStates) {
             const state = studyState.knowledgeStates.get(card.id);
@@ -6667,6 +7342,8 @@ async function showNextCard() {
                     const mcqQEl = document.getElementById('mcqQuestion');
                     if (mcqQEl) mcqQEl.textContent = card.question || '';
                 }
+                renderMcqOptionsPlaceholder();
+                startInteractionLog(card.id);
                 generateAndDisplayMCQ(card);
                 simpleButtons.classList.add('hidden');
                 break;
@@ -6717,6 +7394,7 @@ async function showNextCard() {
                     if (defQEl) defQEl.textContent = card.question || '';
                 }
                 document.getElementById('showAnswerBtn').classList.remove('hidden');
+                startInteractionLog(card.id);
                 break;
         }
 
@@ -6916,6 +7594,22 @@ function showAnswer() {
 }
 async function logout() {
     try {
+        if (isTestMode()) {
+            clearAuthSession();
+            const userProfileMenu = document.getElementById('userProfileMenu');
+            if (userProfileMenu) userProfileMenu.classList.add('hidden');
+            const guestSignupBtn = document.getElementById('guestSignupBtn');
+            if (guestSignupBtn) guestSignupBtn.classList.remove('hidden');
+            const loggedInView = document.getElementById('loggedInView');
+            if (loggedInView) loggedInView.classList.add('hidden');
+            const loggedOutView = document.getElementById('loggedOutView');
+            if (loggedOutView) loggedOutView.classList.remove('hidden');
+            const appHeader = document.getElementById('appHeader');
+            if (appHeader) appHeader.classList.add('hidden');
+            transitionView('authView', false, null, false);
+            window.__APP_READY__ = true;
+            return;
+        }
         const { domain: auth0Domain, clientId: auth0ClientId } = getBrowserAuthConfig();
 
         if (!window.auth0?.createAuth0Client) {
@@ -7289,21 +7983,34 @@ async function moveCard(card, correct, questionType = 'Flashcard', reviewOptions
     const cardInDeck = deck.cards.find(c => c.id === card.id);
     if (cardInDeck) cardInDeck.isNew = false;
 
-    const lastLog = currentInteractionLog;
+    const lastLog = currentInteractionLog || {};
     const userBaseline = getFsrsBaseline();
+    const backspaceCount = Number.isFinite(lastLog.backspaceCount) ? lastLog.backspaceCount : 0;
+    const deleteCount = Number.isFinite(lastLog.deleteCount) ? lastLog.deleteCount : 0;
+    const attemptCount = (Number.isFinite(lastLog.attemptCount) && lastLog.attemptCount > 0)
+        ? lastLog.attemptCount
+        : 1;
+    const totalCorrections = backspaceCount + deleteCount;
+    const safeInteractionLog = {
+        ...lastLog,
+        backspaceCount,
+        deleteCount,
+        attemptCount,
+        totalCorrections
+    };
 
     const iqs = calculateIQS({
-        recallLatency: lastLog.recallLatency || 2000,
-        answerFluency: lastLog.answerFluency || 5,
-        totalCorrections: lastLog.backspaceCount + lastLog.deleteCount,
-        attemptCount: lastLog.attemptCount || 1
+        recallLatency: Number.isFinite(lastLog.recallLatency) ? lastLog.recallLatency : 2000,
+        answerFluency: Number.isFinite(lastLog.answerFluency) ? lastLog.answerFluency : 5,
+        totalCorrections,
+        attemptCount
     }, userBaseline);
 
     const fsrsResult = await applyFsrsReviewUpdate(
         cardInDeck || card,
         deckIdForThisCard,
         correct,
-        { ...lastLog, questionType },
+        { ...safeInteractionLog, questionType },
         iqs,
         { ...reviewOptions, questionType }
     );
@@ -7326,9 +8033,9 @@ async function moveCard(card, correct, questionType = 'Flashcard', reviewOptions
     }
 
     updateSessionStateMetrics(card.id, correct, {
-        recallLatency: lastLog.recallLatency,
-        totalCorrections: typeof lastLog.totalCorrections === 'number' ? lastLog.totalCorrections : (lastLog.backspaceCount || 0) + (lastLog.deleteCount || 0),
-        answerFluency: lastLog.answerFluency
+        recallLatency: safeInteractionLog.recallLatency,
+        totalCorrections,
+        answerFluency: safeInteractionLog.answerFluency
     });
 
     if (currentMode === 'review') {
@@ -7343,6 +8050,34 @@ async function moveCard(card, correct, questionType = 'Flashcard', reviewOptions
                 studyState.lastRoundIncorrect.push(card);
             }
         }
+    }
+
+    if (currentMode === 'learn') {
+        await saveDataToDB('decks', decks[deckIdForThisCard]);
+        const deckForLearn = decks[currentDeckId] || deck;
+        const cortex = await getCortexEngine();
+        let targetDate = studyState.learnTargetDate;
+        if (!(targetDate instanceof Date) || Number.isNaN(targetDate.getTime())) {
+            const now = new Date();
+            targetDate = cortex.buildTargetDate(deckForLearn, now);
+            studyState.learnTargetDate = targetDate;
+            logLearnTargetSource(deckForLearn, now, targetDate);
+        }
+        const pool = Array.isArray(studyState.activeLearningPool) ? studyState.activeLearningPool : [];
+        studyState.activeLearningPool = pool.filter(poolCard => {
+            const state = studyState.knowledgeStates?.get(poolCard.id);
+            return !isCardMasteredForLearn(state, deckForLearn, targetDate);
+        });
+        await updateSessionProgress();
+        if (studyState.activeLearningPool.length === 0) {
+            studyState.currentCard = null;
+            showComplete();
+        } else {
+            studyState.currentCard = await pickNextCardWithEval(cortex, deckForLearn);
+            showNextCard();
+        }
+        updateFocusMeter();
+        return;
     }
 
     // Advance to next card
@@ -7491,13 +8226,24 @@ async function gradeSpaced(ratingLabel) {
     const recallLatency = typeof currentInteractionLog?.questionLoadTime === 'number'
         ? Math.round(performance.now() - currentInteractionLog.questionLoadTime)
         : null;
-    const totalCorrections = (currentInteractionLog?.backspaceCount || 0) + (currentInteractionLog?.deleteCount || 0);
+    const backspaceCount = Number.isFinite(currentInteractionLog?.backspaceCount)
+        ? currentInteractionLog.backspaceCount
+        : 0;
+    const deleteCount = Number.isFinite(currentInteractionLog?.deleteCount)
+        ? currentInteractionLog.deleteCount
+        : 0;
+    const attemptCount = (Number.isFinite(currentInteractionLog?.attemptCount) && currentInteractionLog.attemptCount > 0)
+        ? currentInteractionLog.attemptCount
+        : 1;
+    const totalCorrections = backspaceCount + deleteCount;
     const baseLog = {
         ...currentInteractionLog,
         recallLatency,
-        answerFluency: currentInteractionLog?.answerFluency || null,
+        answerFluency: Number.isFinite(currentInteractionLog?.answerFluency) ? currentInteractionLog.answerFluency : null,
         totalCorrections,
-        attemptCount: currentInteractionLog?.attemptCount || 1,
+        attemptCount,
+        backspaceCount,
+        deleteCount,
         questionType: 'Spaced'
     };
 
@@ -7558,7 +8304,7 @@ async function gradeSpaced(ratingLabel) {
         meta.seen = true;
     }
 
-    const shouldRequeue = ratingName === 'Again' && studyState.settings?.spacedRequeueAgain;
+    const shouldRequeue = ratingName === 'Again' && studyState.settings?.spacedRequeueAgain && !meta.requeued;
     if (shouldRequeue) {
         studyState.roundCards.push(card);
         if (meta.type === 'new') counts.newRemaining += 1; else counts.dueRemaining += 1;
@@ -8060,7 +8806,8 @@ function showComplete() {
 }
 
 
-async function endSession() {
+async function endSession(options = {}) {
+    const forceDashboard = options.forceDashboard === true;
     if (currentDeckId && studyState.startTime) {
         const deck = decks[currentDeckId];
         const cardIdsInDeck = new Set(deck.cards.map(c => c.id));
@@ -8107,10 +8854,10 @@ async function endSession() {
 
     studyState.isRetypingIncorrect = false;
     studyState.originPlanId = null;
-    if (currentMode === 'exam' && originPlanId) {
+    if (currentMode === 'exam' && originPlanId && !forceDashboard) {
         showPlanDetails(originPlanId);
     } else {
-        backToDashboard(false, true);
+        backToDashboard(forceDashboard, true);
     }
 }
 
@@ -9290,6 +10037,14 @@ function showNextTestQuestion() {
 
     const answerInput = document.getElementById('testAnswerInput');
     const checkAnswerBtn = document.getElementById('testCheckAnswerBtn');
+    const showAnswerBtn = document.getElementById('testShowAnswerBtn');
+    if (showAnswerBtn) {
+        if (modeFlags.allowFeedback) {
+            showAnswerBtn.classList.remove('hidden');
+        } else {
+            showAnswerBtn.classList.add('hidden');
+        }
+    }
 
     if (itemType === 'mcq') {
         const options = generateMultipleChoiceOptions(item, practiceTestState.flatItems);
@@ -9317,9 +10072,15 @@ function generateMultipleChoiceOptions(item, allItems) {
             if (option) options.add(option);
         });
     }
+    const itemCardId = extractIdFromValue(item?.cardId);
     const wrongAnswers = shuffleArray(
         allItems
-            .filter(candidate => candidate.cardId !== item.cardId && candidate.answer)
+            .filter(candidate => {
+                if (!candidate?.answer) return false;
+                const candidateId = extractIdFromValue(candidate?.cardId);
+                if (itemCardId && candidateId) return candidateId !== itemCardId;
+                return candidate.cardId !== item.cardId;
+            })
             .map(candidate => candidate.answer)
     );
     for (const wrongAnswer of wrongAnswers) {
@@ -9337,10 +10098,11 @@ function displayMultipleChoiceOptions(options) {
     optionsContainer.innerHTML = '';
     optionsContainer.classList.remove('hidden');
 
-    options.forEach((option) => {
+    options.forEach((option, index) => {
         const button = document.createElement('button');
         button.className = 'btn btn-secondary';
         button.textContent = option;
+        button.dataset.testid = `test-mcq-option-${index}`;
         button.onclick = () => {
             if (practiceTestState.modeFlags?.submitOnSelect) {
                 submitTestAnswer(option);
@@ -9501,7 +10263,8 @@ async function applyPracticeTestLearningUpdates() {
         for (const response of responses) {
             const deckId = response.deckId || practiceTestState.deckId;
             const deck = decks[deckId];
-            const card = deck?.cards?.find(c => c.id === response.cardId);
+            const responseCardId = extractIdFromValue(response.cardId);
+            const card = deck?.cards?.find(c => extractIdFromValue(c.id) === responseCardId);
             if (!deck || !card) continue;
             const interaction = {
                 recallLatency: response.latencyMs,
@@ -9543,7 +10306,8 @@ async function finishTest() {
     const answeredResponses = responses.filter(response => response && typeof response.wasCorrect === 'boolean');
     const correctCount = answeredResponses.filter(response => response.wasCorrect).length;
     const answeredCount = answeredResponses.length;
-    const accuracy = answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0;
+    const accuracyRatio = answeredCount > 0 ? (correctCount / answeredCount) : 0;
+    const accuracyPct = Math.round(accuracyRatio * 100);
     const marksTotal = practiceTestState.form?.totalMarks
         ?? practiceTestState.flatItems.reduce((sum, item) => sum + (Number.isFinite(item.marksAvailable) ? item.marksAvailable : 1), 0);
     const marksCorrect = answeredResponses.reduce((sum, response) => sum + (Number.isFinite(response.marksAwarded) ? response.marksAwarded : 0), 0);
@@ -9553,7 +10317,7 @@ async function finishTest() {
     document.getElementById('testCorrectFinal').textContent = marksCorrect;
     document.getElementById('testTotalFinal').textContent = marksTotal;
     document.getElementById('testTime').textContent = `${timeTaken}s`;
-    renderMetricInto('testAccuracy', { label: 'Accuracy', value: accuracy, kind: 'accuracy' }, ['compact']);
+    renderMetricInto('testAccuracy', { label: 'Accuracy', value: accuracyPct, kind: 'accuracy' }, ['compact']);
 
     const ciEnabled = Boolean(practiceTestState.blueprint?.scoring?.confidenceInterval?.enabled)
         && Boolean(practiceTestState.confidenceIntervalEnabled);
@@ -9572,12 +10336,14 @@ async function finishTest() {
     }
 
     analyticsData.totalStudyTime += timeTaken;
+    const deckName = decks[practiceTestState.deckId]?.name || practiceTestState.deckName || 'Unknown Deck';
     analyticsData.sessions.unshift({
         date: new Date().toISOString(),
-        deckName: decks[practiceTestState.deckId].name,
-        mode: 'Practice Test',
+        deckName,
+        mode: 'practice-test',
         duration: timeTaken,
-        accuracy: accuracy
+        accuracy: accuracyRatio,
+        scorePct
     });
     if (analyticsData.sessions.length > 50) analyticsData.sessions.pop();
     await saveDataToDB('appData', { key: 'analytics', ...analyticsData });
@@ -9767,6 +10533,7 @@ function formatModeLabel(mode) {
         review: 'Review',
         spaced: 'Spaced',
         practiceTest: 'Practice Test',
+        'practice-test': 'Practice Test',
         exam: 'Exam',
         sequence: 'Sequence'
     };
@@ -10192,7 +10959,10 @@ async function showAnalyticsView() {
             const date = new Date(s.date).toLocaleString();
             const duration = `${Math.round(s.duration / 60)}m`;
             const modeLabel = formatModeLabel(s.mode);
-            const accuracyLabel = typeof s.accuracy === 'number' ? ` | ${Math.round(s.accuracy * 100)}%` : '';
+            const accuracyValue = typeof s.accuracy === 'number'
+                ? (s.accuracy > 1 ? s.accuracy / 100 : s.accuracy)
+                : null;
+            const accuracyLabel = typeof accuracyValue === 'number' ? ` | ${Math.round(accuracyValue * 100)}%` : '';
             const deckName = escapeHtml(s.deckName || 'Unknown');
             return `<div class="deck-card-item">${escapeHtml(date)}: ${escapeHtml(modeLabel)} on "${deckName}" for ${escapeHtml(duration)}${escapeHtml(accuracyLabel)}</div>`;
         }).join('');
@@ -10844,6 +11614,11 @@ function renderMcqOptionsPlaceholder(message = 'Generating options...') {
     optionsContainer.appendChild(placeholder);
 }
 
+async function generateAndDisplayMCQ(correctCard) {
+    const options = await buildMcqOptions(correctCard);
+    displayMCQButtons(options, correctCard);
+}
+
 function startMcqPipeline(card) {
     const token = (studyState.pendingMCQToken || 0) + 1;
     studyState.pendingMCQToken = token;
@@ -11118,10 +11893,11 @@ function displayMCQButtons(options, correctCard) {
     optionsContainer.innerHTML = '';
     optionsContainer.classList.remove('hidden');
 
-    options.forEach(optionText => {
+    options.forEach((optionText, index) => {
         const button = document.createElement('button');
         button.className = 'btn btn-secondary';
         button.textContent = optionText;
+        button.dataset.testid = `mcq-option-${index}`;
         button.onclick = () => handleMcqOptionSelected(optionText, correctCard);
         optionsContainer.appendChild(button);
     });
@@ -11133,10 +11909,11 @@ function displayRemediationButtons(options, task) {
     optionsContainer.innerHTML = '';
     optionsContainer.classList.remove('hidden');
 
-    options.forEach(optionText => {
+    options.forEach((optionText, index) => {
         const button = document.createElement('button');
         button.className = 'btn btn-secondary';
         button.textContent = optionText;
+        button.dataset.testid = `mcq-option-${index}`;
         button.onclick = () => handleRemediationOptionSelected(optionText, task);
         optionsContainer.appendChild(button);
     });
@@ -11384,6 +12161,10 @@ async function handleMcqOptionSelected(optionText, correctCard) {
         attemptCount: 1,
         questionType: 'MultipleChoice'
     });
+
+    if (currentMode === 'learn' && optionsContainer) {
+        optionsContainer.innerHTML = '';
+    }
 
     const { shouldLogMcqExposure } = await getEvalExposureDedupeModule();
     if (shouldLogMcqExposure('recognition', recallWasCorrect)) {
@@ -12370,14 +13151,48 @@ function computeAdaptiveOrderWindow(module, graph, steps, fromIndex, toIndex, op
 }
 
 async function startSequenceMode(deckId) {
-    const deck = decks[deckId];
+    let deck = decks[deckId];
     if (!deck) {
         showToast('Deck not found.', 'error');
         return;
     }
     if (deck.typeHint !== 'Sequence') {
+        if (!window.sequenceStepUtils) {
+            try {
+                await import('../core/sequence-utils.js');
+            } catch (error) {
+                console.warn('Failed to load sequence utilities', error);
+            }
+        }
+        const adapter = window.sequenceStepUtils?.adaptLegacySequenceDeck;
+        if (typeof adapter === 'function') {
+            const adapted = adapter(deck);
+            if (adapted?.deck && Array.isArray(adapted.cards) && adapted.cards.length >= 2) {
+                const updatedCards = adapted.cards.map(card => ({
+                    ...card,
+                    deckId: card.deckId || deck.id
+                }));
+                deck = {
+                    ...deck,
+                    ...adapted.deck,
+                    id: deck.id,
+                    cards: updatedCards
+                };
+                decks[deckId] = deck;
+                await saveDataToDB('decks', deck);
+            }
+        }
+    }
+    if (deck.typeHint !== 'Sequence') {
         showToast('Sequence mode is only available for Sequence decks.', 'error');
         return;
+    }
+    if (deck.typeHint === 'Sequence') {
+        const normalized = normalizeSequenceDeck(deck);
+        if (normalized) {
+            decks[deckId] = deck;
+            await saveDataToDB('decks', deck);
+        }
     }
 
     currentMode = 'sequence';
@@ -12428,9 +13243,11 @@ function renderOrderTask(task) {
     list.className = 'sequence-order-list';
 
     shuffled.forEach(card => {
+        const cardId = String(card.id);
         const row = document.createElement('div');
         row.className = 'sequence-order-item';
-        row.dataset.cardId = card.id;
+        row.dataset.cardId = cardId;
+        row.dataset.testid = `sequence-order-item-${cardId}`;
         const text = document.createElement('div');
         text.className = 'sequence-order-text';
         text.textContent = card.question || '';
@@ -12439,10 +13256,12 @@ function renderOrderTask(task) {
         const up = document.createElement('button');
         up.className = 'btn btn-secondary sequence-move-btn';
         up.textContent = '↑';
+        up.dataset.testid = `sequence-order-up-${cardId}`;
         up.onclick = () => reorderSequenceOrderItem(row, -1);
         const down = document.createElement('button');
         down.className = 'btn btn-secondary sequence-move-btn';
         down.textContent = '↓';
+        down.dataset.testid = `sequence-order-down-${cardId}`;
         down.onclick = () => reorderSequenceOrderItem(row, 1);
         actions.appendChild(up);
         actions.appendChild(down);
@@ -12723,22 +13542,23 @@ async function submitSequenceTask() {
 
     if (task.taskType === 'order') {
         const orderItems = Array.from(document.querySelectorAll('#sequenceOrderList .sequence-order-item'));
-        task.userOrderCardIds = orderItems.map(item => item.dataset.cardId);
+        task.userOrderCardIds = orderItems.map(item => String(item.dataset.cardId ?? ''));
         const expected = [...task.chunk].sort((a, b) => {
             const aIdx = typeof a.stepIndex === 'number' ? a.stepIndex : (a.order || 0);
             const bIdx = typeof b.stepIndex === 'number' ? b.stepIndex : (b.order || 0);
             return aIdx - bIdx;
         });
-        task.expectedOrderCardIds = expected.map(card => card.id);
+        task.expectedOrderCardIds = expected.map(card => String(card.id));
         const byStep = orderItems.map((item, idx) => {
-            const cardId = item.dataset.cardId;
+            const cardId = String(item.dataset.cardId ?? '');
             const correctCard = expected[idx];
-            const isCorrect = cardId === correctCard.id;
+            const correctCardId = correctCard ? String(correctCard.id) : '';
+            const isCorrect = cardId === correctCardId;
             return {
                 cardId,
                 correct: isCorrect,
                 userAnswer: item.querySelector('div')?.textContent || '',
-                correctAnswer: correctCard.question || '',
+                correctAnswer: correctCard?.question || '',
                 questionType: 'Sequence:Order'
             };
         });
@@ -12805,7 +13625,8 @@ async function recordSequenceResults(result) {
     const incorrectCards = [];
 
     const tasks = result.byStep.map(async step => {
-        const card = deck.cards.find(c => c.id === step.cardId);
+        const stepCardId = String(step.cardId ?? '');
+        const card = deck.cards.find(c => String(c.id) === stepCardId);
         if (!card) return;
         const interaction = {
             cardID: card.id,
@@ -12842,15 +13663,15 @@ async function recordSequenceResults(result) {
                 const updatedEdgeKeys = [];
 
                 if (currentTask.taskType === 'order' && Array.isArray(currentTask.userOrderCardIds)) {
-                    const indexById = new Map(sequenceSteps.map((card, idx) => [card.id, idx]));
+                    const indexById = new Map(sequenceSteps.map((card, idx) => [String(card.id), idx]));
                     const expectedIds = Array.isArray(currentTask.expectedOrderCardIds) && currentTask.expectedOrderCardIds.length
-                        ? currentTask.expectedOrderCardIds
+                        ? currentTask.expectedOrderCardIds.map(id => String(id))
                         : [...currentTask.chunk].sort((a, b) => {
                             const aIdx = typeof a.stepIndex === 'number' ? a.stepIndex : (a.order || 0);
                             const bIdx = typeof b.stepIndex === 'number' ? b.stepIndex : (b.order || 0);
                             return aIdx - bIdx;
-                        }).map(card => card.id);
-                    const posById = new Map(currentTask.userOrderCardIds.map((id, idx) => [id, idx]));
+                        }).map(card => String(card.id));
+                    const posById = new Map(currentTask.userOrderCardIds.map((id, idx) => [String(id), idx]));
                     for (let k = 0; k < expectedIds.length - 1; k += 1) {
                         const fromId = expectedIds[k];
                         const toId = expectedIds[k + 1];
@@ -12952,7 +13773,7 @@ async function recordSequenceResults(result) {
     const knowledgeMap = studyState.knowledgeStates || session.knowledgeMap;
     if (knowledgeMap && Array.isArray(result.expected)) {
         result.expected.forEach(card => {
-            const state = knowledgeMap.get(card.id);
+            const state = knowledgeMap.get(card.id) || knowledgeMap.get(String(card.id));
             if (state) {
                 state.masteryScore = getCardMasteryScore(card, knowledgeMap);
             }
@@ -13649,10 +14470,13 @@ async function updateUIAfterLogin(user) {
     document.getElementById('loggedInView').classList.remove('hidden');
     await loadUserDataAndSync();
     initializeAccentModules();
+    setupEventListeners();
+    updateOnlineStatusUI();
 
     loadCookieConsent();
 
     transitionView('dashboard', false, null, false);
+    window.__APP_READY__ = true;
 }
 
 function updateUIAfterLogout() {
@@ -13684,6 +14508,11 @@ function getOrCreateGuestID() {
 }
 
 async function loadUserDataAndSync() {
+    const allowSyncInTest = typeof window !== 'undefined' && window.__TEST_ALLOW_SYNC__ === true;
+    if (isTestMode() && !allowSyncInTest) {
+        await loadSavedData();
+        return;
+    }
     if (!isOnline) {
         console.log("Offline. Skipping sync.");
         await updateDashboard();
@@ -14134,18 +14963,38 @@ async function generateFullDataExport(evt) {
             interactionLogs,
             examPlans,
             userSettings,
-            analytics
+            analytics,
+            atoms,
+            errorAtoms,
+            questions,
+            markSchemes,
+            examSpecs,
+            examPapers,
+            examSittings,
+            markingRecords,
+            contentRevisions
         ] = await Promise.all([
             getAllDataFromDB('decks'),
             getAllDataFromDB('userKnowledgeState'),
             getAllDataFromDB('interactionLogs'), // This is the most valuable data for analysis
             getAllDataFromDB('examPlans'),
             getDataFromDB('appData', 'userSettings'),
-            getDataFromDB('appData', 'analytics')
+            getDataFromDB('appData', 'analytics'),
+            getAllDataFromDB('atoms'),
+            getAllDataFromDB('errorAtoms'),
+            getAllDataFromDB('questions'),
+            getAllDataFromDB('markSchemes'),
+            getAllDataFromDB('examSpecs'),
+            getAllDataFromDB('examPapers'),
+            getAllDataFromDB('examSittings'),
+            getAllDataFromDB('markingRecords'),
+            getAllDataFromDB('contentRevisions')
         ]);
 
         // 3. Construct the Research Object
         const researchData = {
+            exportSchemaVersion: 1,
+            exportedAt: new Date().toISOString(),
             meta: {
                 exportDate: new Date().toISOString(),
                 appVersion: document.querySelector('#welcomeMessage + span')?.textContent || 'Unknown',
@@ -14165,7 +15014,18 @@ async function generateFullDataExport(evt) {
             decks: decks,
             examPlans: examPlans,
             knowledgeStates: knowledgeStates,
-            interactionLogs: interactionLogs
+            interactionLogs: interactionLogs,
+            examEngine: {
+                atoms: atoms || [],
+                errorAtoms: errorAtoms || [],
+                questions: questions || [],
+                markSchemes: markSchemes || [],
+                examSpecs: examSpecs || [],
+                examPapers: examPapers || [],
+                examSittings: examSittings || [],
+                markingRecords: markingRecords || [],
+                contentRevisions: contentRevisions || []
+            }
         };
 
         // 4. Convert to Text (Pretty printed JSON)
@@ -14257,23 +15117,7 @@ async function resetSpecificDeck(deckId) {
 
 // Fix: Add event listener for profile button
 document.addEventListener('DOMContentLoaded', () => {
-    const profileBtn = document.getElementById('userProfileBtn');
-    if (profileBtn) {
-        profileBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const dropdown = document.getElementById('userProfileDropdown');
-            dropdown.classList.toggle('hidden');
-        });
-    }
-
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (e) => {
-        const dropdown = document.getElementById('userProfileDropdown');
-        const btn = document.getElementById('userProfileBtn');
-        if (dropdown && !dropdown.classList.contains('hidden') && !dropdown.contains(e.target) && !btn.contains(e.target)) {
-            dropdown.classList.add('hidden');
-        }
-    });
+    assignTestIds();
 });
 
 async function renderGlobalAnalytics() {
@@ -14817,13 +15661,3 @@ if (typeof window !== 'undefined') {
         }
     });
 }
-
-
-
-
-
-
-
-
-
-

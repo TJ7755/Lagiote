@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+if (process.env.TEST_MODE) {
+    globalThis.__TEST_MODE__ = true;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   isDev: process.env.NODE_ENV !== 'production',
@@ -19,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Keep existing exposure code
   generateDistractors: (args) => ipcRenderer.invoke('generate-distractors', args),
   geminiAutocomplete: (data) => ipcRenderer.invoke('gemini-autocomplete', data),
+  getAuthState: () => ipcRenderer.invoke('get-auth-state'),
   openLoginWindow: () => ipcRenderer.invoke('open-login-window'),
   onAuthWindowClosed: (callback) => ipcRenderer.on('auth-window-closed', callback),
   sendAuthToMain: (data) => ipcRenderer.send('auth-success', data),

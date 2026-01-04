@@ -84,10 +84,18 @@
             ? crypto.randomUUID()
             : `seq-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const id = raw?.id || raw?.cardID || raw?.cardId || baseId;
-        const question = raw?.question || raw?.prompt || raw?.description || '';
-        const answer = cleanStepText(
+        let question = raw?.question || raw?.prompt || raw?.description || '';
+        let answer = cleanStepText(
             raw?.answer ?? raw?.term ?? raw?.step ?? raw?.text ?? raw?.value ?? raw?.label ?? raw
         );
+        const trimmedQuestion = String(question || '').trim();
+        if (!trimmedQuestion && answer) {
+            const notes = raw && typeof raw === 'object'
+                ? cleanStepText(raw.notes ?? raw.note ?? raw.explanation ?? '')
+                : '';
+            question = answer;
+            answer = notes || '';
+        }
         return {
             ...(raw && typeof raw === 'object' ? raw : {}),
             id,

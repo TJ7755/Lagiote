@@ -11,7 +11,7 @@
   "author": "TJ7755",
   "license": "GPL-3.0",
   "scripts": {
-    "start": "node server.js",
+    "start": "vite preview",
     "start:electron": "electron .",
     "make": "electron-forge make",
     "dev:web": "vite",
@@ -20,7 +20,11 @@
     "preview:web": "vite preview",
     "dev:electron": "VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "smoke:web": "npm run build:web && node tests/smoke.build.mjs",
-    "test": "NODE_ENV=test node --no-warnings tests/cortex.test.mjs && NODE_ENV=test node --no-warnings tests/mcq-remediation.test.mjs && NODE_ENV=test node --no-warnings tests/utils.test.mjs && NODE_ENV=test node --no-warnings tests/eval-assignment-stratified.test.mjs"
+    "test": "NODE_ENV=test node --no-warnings tests/cortex.test.mjs && NODE_ENV=test node --no-warnings tests/mcq-remediation.test.mjs && NODE_ENV=test node --no-warnings tests/utils.test.mjs && NODE_ENV=test node --no-warnings tests/eval-assignment-stratified.test.mjs && NODE_ENV=test node --no-warnings tests/sequence-utils.test.mjs",
+    "test:unit": "npm run test && vitest run",
+    "test:e2e:web": "npx playwright install --with-deps && playwright test -c playwright.web.config.mjs",
+    "test:e2e:electron": "npx playwright install --with-deps && playwright test -c playwright.electron.config.mjs",
+    "test:all": "node scripts/test-all.mjs"
   },
   "config": {},
   "keywords": [],
@@ -35,7 +39,11 @@
     "@electron-forge/plugin-fuses": "^7.10.2",
     "@electron-forge/publisher-github": "^7.10.2",
     "@electron/fuses": "^1.8.0",
+    "@playwright/test": "^1.55.0",
     "electron": "^38.1.2",
+    "fake-indexeddb": "^6.2.0",
+    "playwright": "^1.55.0",
+    "vitest": "^3.2.4",
     "vite": "^7.2.7"
   },
   "dependencies": {

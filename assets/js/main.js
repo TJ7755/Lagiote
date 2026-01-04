@@ -683,13 +683,31 @@ function loadCDNScript(src, onload) {
                 return;
             }
 
+            // Check Electron auth state first (if in Electron)
+            if (window.electronAPI && window.electronAPI.getAuthState) {
+                try {
+                    console.log('Checking Electron auth state...');
+                    const authState = await window.electronAPI.getAuthState();
+                    if (authState && authState.isAuthenticated && authState.user) {
+                        console.log('Found authenticated Electron session:', authState.user.email);
+                        // Save to localStorage for consistency
+                        localStorage.setItem('auth0Session', JSON.stringify(authState));
+                        await updateUIAfterLogin(authState.user);
+                        return;
+                    }
+                    console.log('No Electron auth state found');
+                } catch (e) {
+                    console.error('Error checking Electron auth state:', e);
+                }
+            }
+
             if (!navigator.onLine) {
                 console.warn('App is offline. Entering guest mode.');
                 await handleOfflineOrGuest();
                 return;
             }
 
-            // Check for existing Auth0 session
+            // Check for existing Auth0 session (web)
             const savedSession = localStorage.getItem('auth0Session');
             if (savedSession) {
                 try {
