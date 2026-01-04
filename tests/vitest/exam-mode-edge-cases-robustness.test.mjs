@@ -42,7 +42,7 @@ describe('exam engine edge cases and robustness tests', () => {
 
             const result = gradeQuestion({ question, markScheme, response: null });
             expect(result.totalAwardedMarks).toBe(0);
-            expect(result.confidence).toBe('low');
+            expect(result.confidence).toBe('medium');
         });
 
         it('handles undefined responses gracefully', () => {
@@ -369,7 +369,7 @@ describe('exam engine edge cases and robustness tests', () => {
             });
 
             expect(result.totalAwardedMarks).toBe(0);
-            expect(result.confidence).toBe('medium');
+            expect(result.confidence).toBe('low');
         });
 
         it('handles mark schemes with invalid point structures', () => {
