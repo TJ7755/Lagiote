@@ -97,8 +97,6 @@ out/
 .nuxt/
 
 # Local-only files kept out of version control
-AGENTS.md
-.vscode/
 check_await*.js
 seq_locations.txt
 
@@ -108,8 +106,43 @@ test-results/
 .test-results/
 playwright-results/
 vitest-results/
+artifacts/
 
 # Electron build artifacts
 *.exe
 *.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.snap
+
+# Environment variables (but not .env.local - required for build)
+.env
+.env.*.local
+!.env.local
+
+# IDE and Editor files
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Temporary and local files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Documentation that should not be committed
+AGENTS.md
 BUGS.md
+docs/BUGS_FIXED.md

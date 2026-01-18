@@ -15,6 +15,7 @@ import {
     requiresTypedInput,
     getInputMode
 } from '../core/card-types.js';
+import { parseImportText } from '../core/import-utils.js';
 
 console.log('Test 1: Script is starting!');
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
@@ -9921,8 +9922,8 @@ async function importData() {
                         showToast(`Deck "${name}" imported successfully with ${importedData.cards.length} cards!`);
                     }
 
-                } else if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
-                    const parsed = parseTextData(e.target.result, file.name.endsWith('.csv') ? ',' : '\t', typeHint);
+                } else if (file.name.endsWith('.csv') || file.name.endsWith('.txt') || file.name.endsWith('.tsv') || file.name.endsWith('.md')) {
+                    const parsed = parseTextData(e.target.result, null, typeHint);
                     const cards = Array.isArray(parsed) ? parsed : parsed.cards;
                     const sequenceMeta = parsed.sequenceMeta || {};
                     if (cards && cards.length > 0) {
@@ -9937,7 +9938,7 @@ async function importData() {
         reader.readAsText(file);
     } else if (pastedText.trim()) {
         try {
-            const parsed = parseTextData(pastedText.trim(), '\t', typeHint);
+            const parsed = parseTextData(pastedText.trim(), null, typeHint);
             const cards = Array.isArray(parsed) ? parsed : parsed.cards;
             const sequenceMeta = parsed.sequenceMeta || {};
             if (cards && cards.length > 0) {
@@ -9994,129 +9995,7 @@ function convertExternalSequenceJson(payload) {
 }
 
 function parseTextData(text, separator, typeHint = 'General') {
-    if (typeHint === 'Sequence') {
-        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
-        const sequenceMap = new Map();
-        lines.forEach((line) => {
-            const parts = line.split(separator);
-            if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
-                const seqTitle = parts[0].trim();
-                const stepText = parts[1].trim();
-                const notes = parts[2] ? parts[2].trim() : '';
-                if (!stepText) return;
-                if (!sequenceMap.has(seqTitle)) {
-                    sequenceMap.set(seqTitle, { id: crypto.randomUUID(), steps: [] });
-                }
-                sequenceMap.get(seqTitle).steps.push({ question: stepText, answer: notes });
-            }
-        });
-        const cards = [];
-        const sequenceMeta = {};
-        Array.from(sequenceMap.entries()).forEach(([title, data], seqIdx) => {
-            sequenceMeta[data.id] = { title: title || `Sequence ${seqIdx + 1}` };
-            data.steps.forEach((step, stepIdx) => {
-                cards.push({
-                    id: crypto.randomUUID(),
-                    question: step.question,
-                    answer: step.answer || '',
-                    sequenceId: data.id,
-                    sequenceTitle: sequenceMeta[data.id].title,
-                    stepIndex: stepIdx,
-                    order: stepIdx,
-                    cardType: CARD_TYPES.SEQUENCE,
-                    isNew: true
-                });
-            });
-        });
-        return { cards, sequenceMeta };
-    }
-
-    // Use card-types module for advanced parsing with card type detection
-    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
-    if (lines.length === 0) return [];
-
-    // Check for header row to detect Anki-style imports
-    const normalizeHeader = (value) => value.replace(/\s+/g, '').toLowerCase();
-    const headerKeys = new Set(['front', 'back', 'question', 'answer', 'type', 'cloze', 'addreverse']);
-    const firstRowHeaders = lines[0].split(separator).map(h => h.trim());
-    const matchedHeaders = firstRowHeaders
-        .map(h => normalizeHeader(h))
-        .filter(h => headerKeys.has(h));
-    const hasHeader = matchedHeaders.length >= 2;
-
-    let headers = null;
-    let dataStartIndex = 0;
-
-    if (hasHeader) {
-        headers = lines[0].split(separator).map(h => h.trim().toLowerCase());
-        dataStartIndex = 1;
-    }
-
-    const allCards = [];
-
-    for (let i = dataStartIndex; i < lines.length; i++) {
-        const parts = lines[i].split(separator);
-        if (parts.length < 2) continue;
-
-        let rawCard = {};
-
-        if (headers) {
-            // Map by header names
-            headers.forEach((header, idx) => {
-                if (parts[idx] !== undefined) {
-                    // Normalize header names
-                    const normalizedHeader = header.replace(/\s+/g, '').toLowerCase();
-                    rawCard[normalizedHeader] = parts[idx].trim();
-                }
-            });
-            // Map common Anki headers to our format
-            rawCard.front = rawCard.front || rawCard.question || '';
-            rawCard.back = rawCard.back || rawCard.answer || rawCard.definition || '';
-            rawCard.addReverse = rawCard.addreverse || rawCard['add reverse'] || '';
-        } else {
-            // Standard format: Front, Back, [Type], [AddReverse]
-            rawCard.front = parts[0]?.trim() || '';
-            rawCard.back = parts[1]?.trim() || '';
-            if (parts[2]) rawCard.type = parts[2].trim();
-            if (parts[3]) rawCard.addReverse = parts[3].trim();
-        }
-
-        if (!rawCard.front && !rawCard.back) continue;
-
-        // Detect card type from explicit type column or content
-        let cardType = rawCard.type ? normalizeCardType(rawCard.type) : null;
-        if (!cardType) {
-            // Check typeHint mapping
-            if (typeHint === 'Cloze' || typeHint === 'cloze') {
-                cardType = CARD_TYPES.CLOZE;
-            } else if (typeHint === 'Basic (and reversed card)' || typeHint === 'BasicReversed') {
-                cardType = CARD_TYPES.BASIC_REVERSED;
-            } else if (typeHint === 'Basic (type in the answer)' || typeHint === 'TypeAnswer') {
-                cardType = CARD_TYPES.BASIC_TYPE_ANSWER;
-            } else {
-                // Auto-detect from content
-                cardType = detectCardType({ question: rawCard.front, answer: rawCard.back, addReverse: rawCard.addReverse });
-            }
-        }
-
-        const baseCard = {
-            id: crypto.randomUUID(),
-            question: rawCard.front,
-            answer: rawCard.back,
-            front: rawCard.front,
-            back: rawCard.back,
-            cardType: cardType,
-            addReverse: rawCard.addReverse || '',
-            isNew: true,
-            order: 0
-        };
-
-        // Expand cards for reversed and cloze types
-        const expandedCards = expandCard(baseCard);
-        allCards.push(...expandedCards);
-    }
-
-    return allCards;
+    return parseImportText(text, { delimiter: separator, typeHint });
 }
 
 // Use the shared helper compressImage if available; otherwise provide a passthrough
