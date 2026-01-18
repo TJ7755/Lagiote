@@ -326,3 +326,400 @@ body {
     padding: 24px;
     box-shadow: 0 8px 16px var(--shadow-color);
 }
+
+/* Cloze card styles */
+.cloze-blank {
+    background: var(--accent-muted, rgba(102, 126, 234, 0.2));
+    border: 2px dashed var(--accent-color, #667eea);
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: var(--accent-color, #667eea);
+    font-weight: 600;
+    display: inline-block;
+    min-width: 40px;
+    text-align: center;
+}
+
+.cloze-answer {
+    background: var(--correct-bg, rgba(72, 187, 120, 0.15));
+    border: 2px solid var(--correct-border, #48bb78);
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: var(--correct-text, #22543d);
+    font-weight: 600;
+    display: inline-block;
+}
+
+/* Type-in answer input */
+.type-answer-input {
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 1rem;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color, var(--card-bg));
+    color: var(--text-color, var(--primary-text));
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.type-answer-input:focus {
+    outline: none;
+    border-color: var(--accent-color, #667eea);
+    box-shadow: 0 0 0 3px var(--accent-muted, rgba(102, 126, 234, 0.2));
+}
+
+.type-answer-input:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* Type answer feedback */
+.type-answer-feedback {
+    margin-top: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+}
+
+.type-answer-feedback.correct {
+    background: var(--correct-bg, rgba(72, 187, 120, 0.1));
+    border: 1px solid var(--correct-border, #48bb78);
+}
+
+.type-answer-feedback.incorrect {
+    background: var(--incorrect-bg, rgba(245, 101, 101, 0.1));
+    border: 1px solid var(--incorrect-border, #f56565);
+}
+
+/* Correct/Incorrect color variables */
+:root {
+    --correct-bg: rgba(72, 187, 120, 0.1);
+    --correct-border: #48bb78;
+    --correct-text: #22c55e;
+    --incorrect-bg: rgba(245, 101, 101, 0.1);
+    --incorrect-border: #f56565;
+    --incorrect-text: #ef4444;
+}
+
+/* Card type dropdown in editor */
+.card-type-selector {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.card-type-dropdown {
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color, var(--card-bg));
+    color: var(--text-color, var(--primary-text));
+    cursor: pointer;
+    min-width: 180px;
+    transition: all 0.2s ease;
+}
+
+.card-type-dropdown:hover {
+    border-color: var(--accent-color, #667eea);
+    background: var(--surface-hover, rgba(102, 126, 234, 0.05));
+}
+
+.card-type-dropdown:focus {
+    outline: none;
+    border-color: var(--accent-color, #667eea);
+    box-shadow: 0 0 0 3px var(--accent-muted, rgba(102, 126, 234, 0.2));
+}
+
+/* Card templates in editor */
+.card-template {
+    padding-top: 12px;
+    animation: slideIn 0.2s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card-template.hidden {
+    display: none;
+}
+
+.card-template code {
+    background: var(--surface-alt, rgba(0,0,0,0.05));
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
+/* Cloze helper section */
+.cloze-helper-section {
+    background: linear-gradient(135deg, var(--accent-muted, rgba(102, 126, 234, 0.08)) 0%, rgba(102, 126, 234, 0.04) 100%);
+    border: 1px solid var(--accent-muted, rgba(102, 126, 234, 0.2));
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+}
+
+.cloze-helper-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font-weight: 600;
+    color: var(--accent-color, #667eea);
+}
+
+.cloze-counter {
+    font-size: 0.85rem;
+    color: var(--secondary-text);
+    font-weight: 400;
+}
+
+.cloze-helper-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.cloze-button-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.btn.btn-small {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    border: 1px solid var(--accent-color, #667eea);
+    background: var(--accent-color, #667eea);
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.btn.btn-small:hover {
+    background: var(--accent-hover, #5568d3);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.btn.btn-small:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(102, 126, 234, 0.2);
+}
+
+.cloze-hint-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cloze-hint-input {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--surface-color, white);
+    color: var(--text-color);
+    transition: all 0.2s ease;
+}
+
+.cloze-hint-input:focus {
+    outline: none;
+    border-color: var(--accent-color, #667eea);
+    box-shadow: 0 0 0 2px var(--accent-muted, rgba(102, 126, 234, 0.15));
+}
+
+.cloze-help-text {
+    font-size: 0.8rem;
+    color: var(--secondary-text);
+    margin-left: 2px;
+}
+
+/* Cloze text input */
+.cloze-text-input {
+    width: 100%;
+    padding: 12px;
+    font-size: 0.95rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color, white);
+    color: var(--text-color);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.5;
+    transition: all 0.2s ease;
+    resize: vertical;
+}
+
+.cloze-text-input:focus {
+    outline: none;
+    border-color: var(--accent-color, #667eea);
+    box-shadow: 0 0 0 3px var(--accent-muted, rgba(102, 126, 234, 0.15));
+}
+
+.cloze-text-input::placeholder {
+    color: var(--placeholder-text, rgba(0, 0, 0, 0.4));
+    font-style: italic;
+}
+
+/* Cloze preview */
+.cloze-preview {
+    margin-top: 14px;
+    padding: 14px;
+    background: var(--accent-muted, rgba(102, 126, 234, 0.08));
+    border: 1px solid var(--accent-muted, rgba(102, 126, 234, 0.2));
+    border-radius: 8px;
+    animation: slideIn 0.2s ease;
+}
+
+.cloze-preview.hidden {
+    display: none;
+}
+
+.cloze-preview-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--secondary-text);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cloze-preview-content {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text-color);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.cloze-blank {
+    background: var(--accent-color, #667eea);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    display: inline-block;
+    margin: 0 2px;}
+
+/* Template textareas and form fields */
+.template-basic .question-input,
+.template-basic .solution-input,
+.card-template textarea {
+    width: 100%;
+    padding: 12px;
+    font-size: 0.95rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color, white);
+    color: var(--text-color);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.5;
+    transition: all 0.2s ease;
+    resize: vertical;
+}
+
+.template-basic .question-input::placeholder,
+.template-basic .solution-input::placeholder,
+.card-template textarea::placeholder {
+    color: var(--placeholder-text, rgba(0, 0, 0, 0.4));
+    font-style: italic;
+}
+
+.template-basic .question-input:focus,
+.template-basic .solution-input:focus,
+.card-template textarea:focus {
+    outline: none;
+    border-color: var(--accent-color, #667eea);
+    box-shadow: 0 0 0 3px var(--accent-muted, rgba(102, 126, 234, 0.15));
+}
+
+.template-basic .question-input {
+    min-height: 80px;
+}
+
+.template-basic .solution-input {
+    min-height: 100px;
+    margin-top: 16px;
+}
+
+/* Image Occlusion template styling */
+.template-occlusion {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.occlusion-label-input,
+.occlusion-answer-input {
+    padding: 12px;
+    font-size: 0.95rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color, white);
+    color: var(--text-color);
+    transition: all 0.2s ease;
+}
+
+.occlusion-label-input:focus,
+.occlusion-answer-input:focus {
+    outline: none;
+    border-color: var(--accent-color, #667eea);
+    box-shadow: 0 0 0 3px var(--accent-muted, rgba(102, 126, 234, 0.15));
+}
+
+.occlusion-label-input::placeholder,
+.occlusion-answer-input::placeholder {
+    color: var(--placeholder-text, rgba(0, 0, 0, 0.4));
+    font-style: italic;
+}
+
+/* Reverse options and hints */
+.reverse-options {
+    background: linear-gradient(135deg, var(--surface-alt, #f5f5f5), var(--surface-color, white));
+    border: 1px solid var(--border-color);
+    padding: 12px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.reverse-options input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--accent-color, #667eea);
+}
+
+.reverse-options label {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.type-answer-hint {
+    background: linear-gradient(135deg, var(--accent-muted, rgba(102, 126, 234, 0.1)) 0%, rgba(102, 126, 234, 0.05) 100%);
+    border: 1px solid var(--accent-muted, rgba(102, 126, 234, 0.2));
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--secondary-text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

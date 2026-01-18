@@ -160,18 +160,33 @@ export async function generateTestForm(blueprint, allDecks, knowledgeState = {},
                     if (sectionMarks >= sectionConfig.marks) return;
                     const marksAvailable = card.marks || 1;
                     if (sectionMarks + marksAvailable > sectionConfig.marks + 1) return;
-                    const isMcq = isMcqType(card.type || 'mcq');
+                    const isMcq = isMcqType(card.type || card.cardType || 'mcq');
                     const shouldDowngrade = isMcq && insufficientMcqDecks.has(card.deckId);
-                    sectionItems.push({
+                    const resolvedType = shouldDowngrade ? 'type' : normalizeCardTypeForTest(card.type || card.cardType || 'mcq');
+                    
+                    const itemData = {
                         cardId: card.id,
                         deckId: card.deckId,
-                        type: shouldDowngrade ? 'type' : (card.type || 'mcq'),
+                        type: resolvedType,
+                        cardType: card.cardType || card.type || 'basic',
                         marksAvailable: marksAvailable,
                         question: card.question,
                         answer: card.answer,
-                        ...(shouldDowngrade ? {} : { options: card.options }),
                         isAnchor: true
-                    });
+                    };
+                    
+                    // Add type-specific data
+                    if (resolvedType === 'mcq' && !shouldDowngrade) {
+                        itemData.options = card.options;
+                    }
+                    if (resolvedType === 'cloze' || card.cardType === 'cloze') {
+                        itemData.text = card.text || card.question;
+                    }
+                    if (resolvedType === 'sequence' || card.cardType === 'sequence') {
+                        itemData.steps = card.steps;
+                    }
+                    
+                    sectionItems.push(itemData);
                     sectionMarks += marksAvailable;
                     if (remainingSectionQuestions !== null) remainingSectionQuestions -= 1;
                     if (remainingGlobalQuestions !== null) remainingGlobalQuestions -= 1;
@@ -213,18 +228,33 @@ export async function generateTestForm(blueprint, allDecks, knowledgeState = {},
             if (remainingGlobalQuestions !== null && remainingGlobalQuestions <= 0) break;
             if (remainingSectionQuestions !== null && remainingSectionQuestions <= 0) break;
 
-            const isMcq = isMcqType(card.type || 'mcq');
+            const isMcq = isMcqType(card.type || card.cardType || 'mcq');
             const shouldDowngrade = isMcq && insufficientMcqDecks.has(card.deckId);
-            sectionItems.push({
+            const resolvedType = shouldDowngrade ? 'type' : normalizeCardTypeForTest(card.type || card.cardType || 'mcq');
+            
+            const itemData = {
                 cardId: card.id,
                 deckId: card.deckId,
-                type: shouldDowngrade ? 'type' : (card.type || 'mcq'),
+                type: resolvedType,
+                cardType: card.cardType || card.type || 'basic', // Preserve original cardType
                 marksAvailable: marksAvailable,
                 question: card.question, // Snapshot content
                 answer: card.answer,
-                ...(shouldDowngrade ? {} : { options: card.options }), // For MCQs
                 fingerprintAtStart: null // To be filled at runtime if needed
-            });
+            };
+            
+            // Add type-specific data
+            if (resolvedType === 'mcq' && !shouldDowngrade) {
+                itemData.options = card.options;
+            }
+            if (resolvedType === 'cloze' || card.cardType === 'cloze') {
+                itemData.text = card.text || card.question;
+            }
+            if (resolvedType === 'sequence' || card.cardType === 'sequence') {
+                itemData.steps = card.steps;
+            }
+            
+            sectionItems.push(itemData);
             sectionMarks += marksAvailable;
             if (remainingSectionQuestions !== null) remainingSectionQuestions -= 1;
             if (remainingGlobalQuestions !== null) remainingGlobalQuestions -= 1;
@@ -266,4 +296,42 @@ function resolvePositiveInt(value) {
 function isMcqType(type) {
     const normalized = String(type || '').toLowerCase();
     return normalized.includes('mcq') || normalized.includes('multiple');
+}
+
+/**
+ * Maps internal cardType to test form type for rendering
+ * @param {string} cardType The card's cardType field
+ * @returns {string} The normalized type for test forms
+ */
+export function normalizeCardTypeForTest(cardType) {
+    const type = String(cardType || '').toLowerCase();
+    
+    // MCQ types
+    if (type === 'mcq' || type.includes('multiple')) {
+        return 'mcq';
+    }
+    
+    // Cloze cards - render as type-in for tests
+    if (type === 'cloze') {
+        return 'cloze';
+    }
+    
+    // Type-in answer cards
+    if (type === 'basic_type_answer' || type === 'type_answer' || type === 'type') {
+        return 'type';
+    }
+    
+    // Image occlusion - treated as type-in for text-based fallback
+    if (type === 'image_occlusion') {
+        return 'image_occlusion';
+    }
+    
+    // Sequence cards
+    if (type === 'sequence') {
+        return 'sequence';
+    }
+    
+    // All flashcard-like types default to type-in for exams
+    // (basic, basic_reversed, basic_optional_reversed, flashcard, vocab)
+    return 'type';
 }

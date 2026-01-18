@@ -1,5 +1,20 @@
 ﻿import { isTestMode, getTestConfig, getTestSession } from '../../src/platform/shared/test-mode.js';
 import { getTestFixtures } from '../../src/platform/shared/test-fixtures.js';
+import {
+    CARD_TYPES,
+    CARD_TYPE_LABELS,
+    normalizeCardType,
+    detectCardType,
+    expandCard,
+    normalizeCardFromImport,
+    parseTextToCards,
+    parseClozeText,
+    renderClozeText,
+    getClozeAnswer,
+    gradeTypedAnswer,
+    requiresTypedInput,
+    getInputMode
+} from '../core/card-types.js';
 
 console.log('Test 1: Script is starting!');
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
@@ -725,12 +740,6 @@ function bind(id, event, handler, options) {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener(event, handler, options);
-}
-
-function isElementVisible(element) {
-    if (!element) return false;
-    if (keyboardManager?.isVisible) return keyboardManager.isVisible(element);
-    return element.offsetParent !== null && !element.classList.contains('hidden');
 }
 
 function idbRequestToPromise(request) {
@@ -1811,7 +1820,6 @@ window.onload = async function () {
     await initDB();
     await applyTestModeSetup();
     console.log('Database initialized.');
-    initKeyboardShortcuts();
 
     // Initialize analytics manager
     analyticsManager = new AnalyticsManager();
@@ -1896,7 +1904,7 @@ function handleGuestToUserTransition() {
 }
 
 const DB_NAME = 'LagioteDB';
-const DB_VERSION = 13;
+const DB_VERSION = 14;
 const STORE_KEY_REQUIREMENTS = {
     decks: 'id',
     appData: 'key',
@@ -3559,30 +3567,74 @@ function setupEventListeners() {
 
     // Keyboard Shortcuts Handler
     document.addEventListener('keydown', (e) => {
-        // Don't trigger shortcuts when typing in text inputs
-        if (e.target.matches('input[type="text"], textarea, [contenteditable="true"]') && e.target.id !== 'searchInput') {
+        // Global Shortcuts
+        const isMeta = e.ctrlKey || e.metaKey;
+        const isShift = !!e.shiftKey;
+        const keyLower = (e.key || '').toLowerCase();
+        const code = e.code || '';
+
+        // Don't trigger non-meta shortcuts when typing in text inputs.
+        // Meta shortcuts (Ctrl/Cmd+...) should still work everywhere so the app
+        // remains fully keyboard-operable.
+        if (!isMeta && e.target?.matches?.('input[type="text"], textarea, [contenteditable="true"]') && e.target.id !== 'searchInput') {
             return;
         }
 
-        // Global Shortcuts
-        const isMeta = e.ctrlKey || e.metaKey;
+        if (activeView === 'editorView' && isMeta && (keyLower === 's' || code === 'KeyS')) {
+            return;
+        }
 
         // Ctrl/Cmd + K: Search
-        if (isMeta && e.key === 'k') {
+        if (isMeta && (keyLower === 'k' || code === 'KeyK')) {
             e.preventDefault();
-            document.getElementById('searchInput')?.focus();
+            const searchBarElem = document.querySelector('.search-bar');
+            if (searchBarElem && searchBarElem.classList.contains('hidden') && typeof backToDashboard === 'function') {
+                backToDashboard(true);
+                setTimeout(() => {
+                    document.getElementById('searchInput')?.focus();
+                }, 50);
+            } else {
+                document.getElementById('searchInput')?.focus();
+            }
             console.log('[Shortcut] Search activated');
         }
 
+        // Ctrl/Cmd + Shift + A: Analytics
+        if (isMeta && isShift && (keyLower === 'a' || code === 'KeyA')) {
+            e.preventDefault();
+            if (typeof showAnalyticsView === 'function') {
+                showAnalyticsView();
+            }
+            console.log('[Shortcut] Analytics opened');
+        }
+
+        // Ctrl/Cmd + Shift + I: Insights
+        if (isMeta && isShift && (keyLower === 'i' || code === 'KeyI')) {
+            e.preventDefault();
+            if (typeof showInsightsView === 'function') {
+                showInsightsView();
+            }
+            console.log('[Shortcut] Insights opened');
+        }
+
+        // Ctrl/Cmd + Shift + G: Global analytics
+        if (isMeta && isShift && (keyLower === 'g' || code === 'KeyG')) {
+            e.preventDefault();
+            if (typeof renderGlobalAnalytics === 'function') {
+                renderGlobalAnalytics();
+            }
+            console.log('[Shortcut] Global analytics opened');
+        }
+
         // Ctrl/Cmd + N: New Deck
-        if (isMeta && e.key === 'n') {
+        if (isMeta && (keyLower === 'n' || code === 'KeyN')) {
             e.preventDefault();
             showEditor();
             console.log('[Shortcut] New deck');
         }
 
         // Ctrl/Cmd + S: Sync
-        if (isMeta && e.key === 's') {
+        if (isMeta && (keyLower === 's' || code === 'KeyS')) {
             e.preventDefault();
             if (isOnline && getStoredSession()) {
                 loadUserDataAndSync();
@@ -3605,75 +3657,7 @@ function setupEventListeners() {
             console.log('[Shortcut] Closed modals');
         }
 
-        // Study Mode Shortcuts
-        const studyView = document.getElementById('studyMode');
-        if (!studyView.classList.contains('hidden')) {
-            // Space: Show/Check Answer
-            if (e.code === 'Space') {
-                e.preventDefault();
-                const showAnswerBtn = document.getElementById('showAnswerBtn');
-                const checkAnswerBtn = document.getElementById('checkAnswerBtn');
-                const nextBtn = document.getElementById('nextBtn');
-
-                if (!showAnswerBtn.classList.contains('hidden')) {
-                    showAnswerBtn.click();
-                } else if (!checkAnswerBtn.classList.contains('hidden')) {
-                    checkAnswerBtn.click();
-                } else if (!nextBtn.classList.contains('hidden')) {
-                    nextBtn.click();
-                }
-                console.log('[Shortcut] Space pressed in study mode');
-            }
-
-            // H: Show/Hide Answer
-            if (e.key && e.key.toLowerCase() === 'h') {
-                e.preventDefault();
-                const showAnswerBtn = document.getElementById('showAnswerBtn');
-                if (!showAnswerBtn.classList.contains('hidden')) {
-                    showAnswerBtn.click();
-                }
-                console.log('[Shortcut] Show answer toggle');
-            }
-
-            // Arrow Right or N: Next Card
-            if (e.key === 'ArrowRight' || (e.key && e.key.toLowerCase() === 'n')) {
-                e.preventDefault();
-                const nextBtn = document.getElementById('nextBtn');
-                const testNextBtn = document.getElementById('testNextBtn');
-                if (!nextBtn.classList.contains('hidden')) {
-                    nextBtn.click();
-                } else if (!testNextBtn.classList.contains('hidden')) {
-                    testNextBtn.click();
-                }
-                console.log('[Shortcut] Next card');
-            }
-
-            // C: Mark as Correct
-            if (e.key && e.key.toLowerCase() === 'c') {
-                e.preventDefault();
-                const correctBtn = document.getElementById('correctBtn');
-                const testCorrectBtn = document.getElementById('testCorrectBtn');
-                if (!correctBtn.classList.contains('hidden')) {
-                    correctBtn.click();
-                } else if (!testCorrectBtn.classList.contains('hidden')) {
-                    testCorrectBtn.click();
-                }
-                console.log('[Shortcut] Marked correct');
-            }
-
-            // X: Mark as Incorrect
-            if (e.key && e.key.toLowerCase() === 'x') {
-                e.preventDefault();
-                const incorrectBtn = document.getElementById('incorrectBtn');
-                const testIncorrectBtn = document.getElementById('testIncorrectBtn');
-                if (!incorrectBtn.classList.contains('hidden')) {
-                    incorrectBtn.click();
-                } else if (!testIncorrectBtn.classList.contains('hidden')) {
-                    testIncorrectBtn.click();
-                }
-                console.log('[Shortcut] Marked incorrect');
-            }
-        }
+        // Study mode shortcuts are handled centrally in setupKeyboardControls.
     });
 
     // Setup system theme detection
@@ -4986,48 +4970,6 @@ function setupSearch() {
     });
 }
 
-function handleDashboardShortcuts(event) {
-    if (!keyboardManager) return false;
-    if (activeView !== 'dashboard') return false;
-
-    const key = event.key;
-    const decksSection = document.getElementById('decksSection');
-    const deckDetailView = document.getElementById('deckDetailView');
-    const deckListVisible = !!decksSection && !decksSection.classList.contains('hidden');
-    const detailVisible = !!deckDetailView && !deckDetailView.classList.contains('hidden');
-
-    if ((key === 'n' || key === 'N') && (event.ctrlKey || event.metaKey)) {
-        showEditor();
-        return true;
-    }
-
-    if (key === 'Escape') {
-        if (detailVisible) {
-            backToDashboard();
-            return true;
-        }
-        const backBtn = document.getElementById('headerBackBtn');
-        if (backBtn && !backBtn.classList.contains('hidden')) {
-            backBtn.click();
-            return true;
-        }
-    }
-
-    if (!deckListVisible) return false;
-    if (!deckSelectionState.items.length) rebuildDeckSelection();
-
-    if (key === 'ArrowDown') return moveDeckSelection(1);
-    if (key === 'ArrowUp') return moveDeckSelection(-1);
-    if (key === 'Enter') return openSelectedDeck();
-    if (key === 'Delete' || key === 'Backspace') return deleteSelectedDeck();
-
-    return false;
-}
-
-function initKeyboardShortcuts() {
-    keyboardManager?.registerContext('dashboard', handleDashboardShortcuts);
-}
-
 async function createNewDeck(name, category, cards, notes = '', typeHint = 'General', extraDeckFields = {}) {
     const deckId = Date.now().toString();
 
@@ -5226,8 +5168,93 @@ function insertAccentIntoEditor(char, button) {
     textarea.focus();
 }
 
+// Cloze helper functions
+let currentClozeNumber = 1;
+
+function getClozeNumberForCard(cardId) {
+    const textarea = document.querySelector(`.cloze-text-input[data-card-id="${cardId}"]`);
+    if (!textarea) return 1;
+    const text = textarea.value;
+    const matches = text.match(/\{\{c(\d+)::/g);
+    return matches ? Math.max(...matches.map(m => parseInt(m.match(/\d+/)[0]))) + 1 : 1;
+}
+
+function wrapSelectedInCloze(button, action) {
+    const cardItem = button.closest('.flashcard-item');
+    if (!cardItem) return;
+    
+    const textarea = cardItem.querySelector('.cloze-text-input');
+    const hintInput = cardItem.querySelector('.cloze-hint-input');
+    const counter = cardItem.querySelector('.cloze-counter strong');
+    
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+
+    if (action === 'add') {
+        if (!selectedText) {
+            alert('Please select text first');
+            return;
+        }
+        const clozeNum = getClozeNumberForCard(textarea.dataset.cardId);
+        const wrapped = `{{c${clozeNum}::${selectedText}}}`;
+        textarea.value = textarea.value.substring(0, start) + wrapped + textarea.value.substring(end);
+        textarea.selectionStart = start + wrapped.length;
+        textarea.selectionEnd = start + wrapped.length;
+        if (counter) counter.textContent = clozeNum + 1;
+        if (hintInput) hintInput.focus();
+    } else if (action === 'hint') {
+        if (!selectedText.includes('::')) {
+            alert('Please select a cloze deletion first (text between {{ }})');
+            return;
+        }
+        const hint = hintInput?.value.trim();
+        if (!hint) {
+            alert('Please enter a hint first');
+            return;
+        }
+        const updated = selectedText.replace(/::}}$/, `::${hint}}}`);
+        textarea.value = textarea.value.substring(0, start) + updated + textarea.value.substring(end);
+        textarea.selectionStart = start + updated.length;
+        textarea.selectionEnd = start + updated.length;
+        if (hintInput) hintInput.value = '';
+    } else if (action === 'next') {
+        const clozeNum = getClozeNumberForCard(textarea.dataset.cardId);
+        if (counter) counter.textContent = clozeNum;
+    }
+    
+    textarea.focus();
+}
+
+function openClozePreview(button) {
+    const cardItem = button.closest('.flashcard-item');
+    if (!cardItem) return;
+    
+    const textarea = cardItem.querySelector('.cloze-text-input');
+    const preview = cardItem.querySelector('.cloze-preview');
+    const previewContent = preview?.querySelector('.cloze-preview-content');
+    
+    if (!textarea || !preview || !previewContent) return;
+
+    // Parse cloze text and show preview
+    const text = textarea.value;
+    const clozeRegex = /\{\{c\d+::([^}:]+)(?:::([^}]+))?\}\}/g;
+    let previewText = text;
+    let count = 0;
+    
+    previewText = previewText.replace(clozeRegex, () => {
+        count++;
+        return `<span class="cloze-blank">[${count}]</span>`;
+    });
+
+    previewContent.innerHTML = previewText;
+    preview.classList.toggle('hidden');
+}
+
 function editorAddNewStandardCard(card = {}) {
-    const { id = null, question = '', answer = '', questionImage = '', answerImage = '', order = '' } = card;
+    const { id = null, question = '', answer = '', questionImage = '', answerImage = '', order = '', cardType = 'basic', clozeText = '', addReverse = false } = card;
     editorCardCounter++;
     const container = document.getElementById('flashcardsContainer');
 
@@ -5243,29 +5270,113 @@ function editorAddNewStandardCard(card = {}) {
 
     const orderInputHTML = '';
 
+    // Determine which card type to show
+    const effectiveCardType = cardType || 'basic';
+    
     newRow.innerHTML = `<div class="flashcard-item" data-original-id="${escapeHtml(String(id || ''))}" data-testid="editor-card-${editorCardCounter}">
-                <div class="flashcard-number" style="display: flex; align-items: center;">
-                    ${orderInputHTML}
-                    <span>${cardNumber}.</span>
+                <div class="flashcard-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div class="flashcard-number" style="display: flex; align-items: center;">
+                        ${orderInputHTML}
+                        <span>${cardNumber}.</span>
+                    </div>
+                    <div class="card-type-selector">
+                        <label style="font-size: 0.85rem; color: var(--secondary-text); margin-right: 8px;">Card Type:</label>
+                        <select class="card-type-dropdown" onchange="handleCardTypeChange(this)" data-testid="editor-card-type-${editorCardCounter}">
+                            <option value="basic" ${effectiveCardType === 'basic' ? 'selected' : ''}>Basic</option>
+                            <option value="basic_reversed" ${effectiveCardType === 'basic_reversed' ? 'selected' : ''}>Basic (reversed)</option>
+                            <option value="basic_optional_reversed" ${effectiveCardType === 'basic_optional_reversed' ? 'selected' : ''}>Basic (optional reversed)</option>
+                            <option value="basic_type_answer" ${effectiveCardType === 'basic_type_answer' ? 'selected' : ''}>Basic (type answer)</option>
+                            <option value="cloze" ${effectiveCardType === 'cloze' ? 'selected' : ''}>Cloze</option>
+                            <option value="image_occlusion" ${effectiveCardType === 'image_occlusion' ? 'selected' : ''}>Image Occlusion</option>
+                        </select>
+                    </div>
                 </div>
                 
-                <textarea class="question-input" placeholder="Question" data-card-id="${editorCardCounter}" data-testid="editor-card-question-${editorCardCounter}">${escapeHtml(String(question))}</textarea>
-                <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
-                <div class="image-controls">
-                    <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1" data-testid="editor-card-question-upload-${editorCardCounter}">Upload Image</button>
+                <!-- Basic / Type Answer / Reversed template -->
+                <div class="card-template template-basic">
+                    <textarea class="question-input" placeholder="Question" data-card-id="${editorCardCounter}" data-testid="editor-card-question-${editorCardCounter}">${escapeHtml(String(question))}</textarea>
+                    <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
+                    <div class="image-controls">
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1" data-testid="editor-card-question-upload-${editorCardCounter}">Upload Image</button>
+                    </div>
+                    <div class="question-image-preview image-preview">${questionImagePreview}</div>
+                    <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
+                    <input type="hidden" class="question-image-input" value="${escapeHtml(String(questionImage))}">
+                    
+                    <textarea class="solution-input" placeholder="Answer" style="margin-top:20px;" data-card-id="${editorCardCounter}" data-testid="editor-card-answer-${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
+                    <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
+                    <div class="image-controls">
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1" data-testid="editor-card-answer-upload-${editorCardCounter}">Upload Image</button>
+                    </div>
+                    <div class="answer-image-preview image-preview">${answerImagePreview}</div>
+                    <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
+                    <input type="hidden" class="answer-image-input" value="${escapeHtml(String(answerImage))}">
+                    
+                    <!-- Reversed card options (shown for reversed types) -->
+                    <div class="reverse-options hidden" style="margin-top: 12px; padding: 10px; background: var(--surface-alt, #f5f5f5); border-radius: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" class="add-reverse-checkbox" ${addReverse ? 'checked' : ''}>
+                            <span>Also create reversed card (Answer → Question)</span>
+                        </label>
+                    </div>
+                    
+                    <!-- Type answer hint -->
+                    <div class="type-answer-hint hidden" style="margin-top: 12px; padding: 10px; background: var(--accent-muted, rgba(102, 126, 234, 0.1)); border-radius: 8px; font-size: 0.85rem; color: var(--secondary-text);">
+                        Users will type their answer. Keep answers short and specific for best results.
+                    </div>
                 </div>
-                <div class="question-image-preview image-preview">${questionImagePreview}</div>
-                <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
-                <input type="hidden" class="question-image-input" value="${escapeHtml(String(questionImage))}">
                 
-                <textarea class="solution-input" placeholder="Answer" style="margin-top:20px;" data-card-id="${editorCardCounter}" data-testid="editor-card-answer-${editorCardCounter}">${escapeHtml(String(answer))}</textarea>
-                <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
-                <div class="image-controls">
-                    <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="triggerImageUpload(this)" tabindex="-1" data-testid="editor-card-answer-upload-${editorCardCounter}">Upload Image</button>
+                <!-- Cloze template -->
+                <div class="card-template template-cloze hidden">
+                    <div class="cloze-helper-section">
+                        <div class="cloze-helper-title">
+                            <strong>Create Cloze Deletions</strong>
+                            <span class="cloze-counter">Cloze #: <strong>1</strong></span>
+                        </div>
+                        <div class="cloze-helper-controls">
+                            <div class="cloze-button-group">
+                                <button class="btn btn-small" onclick="wrapSelectedInCloze(this, 'add')" title="Wrap selected text in cloze deletion">
+                                    <span>Add Cloze</span>
+                                </button>
+                                <button class="btn btn-small" onclick="wrapSelectedInCloze(this, 'hint')" title="Add hint to selected cloze">
+                                    <span>Add Hint</span>
+                                </button>
+                                <button class="btn btn-small" onclick="wrapSelectedInCloze(this, 'next')" title="Increment cloze number">
+                                    <span>Next Cloze #</span>
+                                </button>
+                                <button class="btn btn-small" onclick="openClozePreview(this)" title="Preview how cloze card will appear">
+                                    <span>Preview</span>
+                                </button>
+                            </div>
+                            <div class="cloze-hint-input-group">
+                                <input type="text" class="cloze-hint-input" placeholder="Optional: Hint for current cloze" data-card-id="${editorCardCounter}">
+                                <small class="cloze-help-text">Select text → Click Add Cloze → Optionally add hint → Click Next Cloze # for more</small>
+                            </div>
+                        </div>
+                    </div>
+                    <textarea class="cloze-text-input" placeholder="Type your text here. Select text and use buttons above to create cloze deletions..." style="min-height: 120px;" data-card-id="${editorCardCounter}" data-testid="editor-card-cloze-${editorCardCounter}">${escapeHtml(String(clozeText || question))}</textarea>
+                    <div class="editor-accent-buttons accent-buttons" style="margin-top: 8px;"></div>
+                    <div class="cloze-preview hidden" data-card-id="${editorCardCounter}">
+                        <div class="cloze-preview-title">Preview (how it will appear to students)</div>
+                        <div class="cloze-preview-content"></div>
+                    </div>
                 </div>
-                <div class="answer-image-preview image-preview">${answerImagePreview}</div>
-                <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
-                <input type="hidden" class="answer-image-input" value="${escapeHtml(String(answerImage))}">
+                
+                <!-- Image Occlusion template -->
+                <div class="card-template template-occlusion hidden">
+                    <div style="margin-bottom: 12px; padding: 10px; background: var(--accent-muted, rgba(102, 126, 234, 0.1)); border-radius: 8px; font-size: 0.85rem;">
+                        <strong>Image Occlusion:</strong> Upload an image and specify the hidden label.
+                    </div>
+                    <div class="image-controls" style="margin-bottom: 12px;">
+                        <button class="btn btn-primary" style="padding: 8px 16px;" onclick="triggerImageUpload(this)">Upload Image</button>
+                    </div>
+                    <div class="occlusion-image-preview image-preview" style="margin-bottom: 12px;">${questionImagePreview}</div>
+                    <input type="file" class="image-upload-input" accept="image/*" style="display:none;" onchange="handleImageFile(this)">
+                    <input type="hidden" class="occlusion-image-input" value="${escapeHtml(String(questionImage))}">
+                    
+                    <input type="text" class="occlusion-label-input" placeholder="Hidden label (what's being tested)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid var(--border-color); border-radius: 8px;" value="${escapeHtml(String(question))}">
+                    <input type="text" class="occlusion-answer-input" placeholder="Answer / Description" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px;" value="${escapeHtml(String(answer))}">
+                </div>
             </div>
             <button class="remove-card-btn" onclick="editorRemoveCard(${editorCardCounter})" data-testid="editor-card-remove-${editorCardCounter}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
             <div class="drag-handle" style="cursor: grab; padding: 0 10px; color: var(--secondary-text);">
@@ -5281,12 +5392,88 @@ function editorAddNewStandardCard(card = {}) {
     });
 
     // Populate accent buttons for this card
-    const questionAccentContainer = newRow.querySelector('.question-input').nextElementSibling;
-    const answerAccentContainer = newRow.querySelector('.solution-input').nextElementSibling;
-    populateEditorAccentButtons(questionAccentContainer, newRow.querySelector('.question-input'));
-    populateEditorAccentButtons(answerAccentContainer, newRow.querySelector('.solution-input'));
+    const questionAccentContainer = newRow.querySelector('.template-basic .question-input')?.nextElementSibling;
+    const answerAccentContainer = newRow.querySelector('.template-basic .solution-input')?.nextElementSibling;
+    const clozeAccentContainer = newRow.querySelector('.template-cloze .cloze-text-input')?.nextElementSibling;
+    
+    if (questionAccentContainer) populateEditorAccentButtons(questionAccentContainer, newRow.querySelector('.template-basic .question-input'));
+    if (answerAccentContainer) populateEditorAccentButtons(answerAccentContainer, newRow.querySelector('.template-basic .solution-input'));
+    if (clozeAccentContainer) populateEditorAccentButtons(clozeAccentContainer, newRow.querySelector('.template-cloze .cloze-text-input'));
 
-    if (!question && !answer) newRow.querySelector('.question-input').focus();
+    // Show the correct template based on card type
+    const dropdown = newRow.querySelector('.card-type-dropdown');
+    if (dropdown) {
+        handleCardTypeChange(dropdown);
+    }
+
+    if (!question && !answer && !clozeText) {
+        const firstInput = newRow.querySelector('.template-basic .question-input');
+        if (firstInput) firstInput.focus();
+    }
+}
+
+function handleCardTypeChange(select) {
+    const cardItem = select.closest('.flashcard-item');
+    if (!cardItem) return;
+    
+    const cardType = select.value;
+    
+    // Get all templates
+    const templateBasic = cardItem.querySelector('.template-basic');
+    const templateCloze = cardItem.querySelector('.template-cloze');
+    const templateOcclusion = cardItem.querySelector('.template-occlusion');
+    const reverseOptions = cardItem.querySelector('.reverse-options');
+    const typeAnswerHint = cardItem.querySelector('.type-answer-hint');
+    
+    // Hide all templates first
+    if (templateBasic) templateBasic.classList.add('hidden');
+    if (templateCloze) templateCloze.classList.add('hidden');
+    if (templateOcclusion) templateOcclusion.classList.add('hidden');
+    if (reverseOptions) reverseOptions.classList.add('hidden');
+    if (typeAnswerHint) typeAnswerHint.classList.add('hidden');
+    
+    // Show the appropriate template
+    switch (cardType) {
+        case 'cloze':
+            if (templateCloze) templateCloze.classList.remove('hidden');
+            break;
+        case 'image_occlusion':
+            if (templateOcclusion) templateOcclusion.classList.remove('hidden');
+            break;
+        case 'basic_reversed':
+            if (templateBasic) templateBasic.classList.remove('hidden');
+            if (reverseOptions) {
+                reverseOptions.classList.remove('hidden');
+                const checkbox = reverseOptions.querySelector('.add-reverse-checkbox');
+                if (checkbox) {
+                    checkbox.checked = true;
+                    checkbox.disabled = true;
+                }
+                // Update label text
+                const label = reverseOptions.querySelector('span');
+                if (label) label.textContent = 'Reversed card will be created automatically';
+            }
+            break;
+        case 'basic_optional_reversed':
+            if (templateBasic) templateBasic.classList.remove('hidden');
+            if (reverseOptions) {
+                reverseOptions.classList.remove('hidden');
+                const checkbox = reverseOptions.querySelector('.add-reverse-checkbox');
+                if (checkbox) checkbox.disabled = false;
+                // Update label text
+                const label = reverseOptions.querySelector('span');
+                if (label) label.textContent = 'Also create reversed card (Answer → Question)';
+            }
+            break;
+        case 'basic_type_answer':
+            if (templateBasic) templateBasic.classList.remove('hidden');
+            if (typeAnswerHint) typeAnswerHint.classList.remove('hidden');
+            break;
+        default:
+            // basic
+            if (templateBasic) templateBasic.classList.remove('hidden');
+            break;
+    }
 }
 
 function setButtonDisabledState(button, isDisabled) {
@@ -5772,16 +5959,63 @@ async function editorSaveDeck() {
         } else {
             cards = Array.from(document.querySelectorAll('#editorView .flashcard-item')).map(el => {
                 const originalId = el.dataset.originalId;
-                return {
+                const cardTypeDropdown = el.querySelector('.card-type-dropdown');
+                const cardType = cardTypeDropdown?.value || 'basic';
+                
+                const baseCard = {
                     id: originalId ? originalId : crypto.randomUUID(),
-                    question: el.querySelector('.question-input').value.trim(),
-                    answer: el.querySelector('.solution-input').value.trim(),
-                    questionImage: el.querySelector('.question-image-input').value.trim(),
-                    answerImage: el.querySelector('.answer-image-input').value.trim(),
+                    cardType: cardType,
                     order: 0,
                     isNew: !originalId
                 };
-            }).filter(c => c.question || c.questionImage);
+                
+                // Handle different card types
+                if (cardType === 'cloze') {
+                    const clozeText = el.querySelector('.cloze-text-input')?.value.trim() || '';
+                    return {
+                        ...baseCard,
+                        question: clozeText,
+                        answer: '', // Derived from cloze markers
+                        text: clozeText,
+                        clozeText: clozeText
+                    };
+                } else if (cardType === 'image_occlusion') {
+                    return {
+                        ...baseCard,
+                        question: el.querySelector('.occlusion-label-input')?.value.trim() || 'Identify the hidden area',
+                        answer: el.querySelector('.occlusion-answer-input')?.value.trim() || '',
+                        questionImage: el.querySelector('.occlusion-image-input')?.value.trim() || '',
+                        answerImage: ''
+                    };
+                } else if (cardType === 'basic_optional_reversed') {
+                    const addReverseCheckbox = el.querySelector('.add-reverse-checkbox');
+                    return {
+                        ...baseCard,
+                        question: el.querySelector('.question-input')?.value.trim() || '',
+                        answer: el.querySelector('.solution-input')?.value.trim() || '',
+                        questionImage: el.querySelector('.question-image-input')?.value.trim() || '',
+                        answerImage: el.querySelector('.answer-image-input')?.value.trim() || '',
+                        addReverse: addReverseCheckbox?.checked ? true : false
+                    };
+                } else {
+                    // basic, basic_reversed, basic_type_answer
+                    return {
+                        ...baseCard,
+                        question: el.querySelector('.question-input')?.value.trim() || '',
+                        answer: el.querySelector('.solution-input')?.value.trim() || '',
+                        questionImage: el.querySelector('.question-image-input')?.value.trim() || '',
+                        answerImage: el.querySelector('.answer-image-input')?.value.trim() || ''
+                    };
+                }
+            }).filter(c => {
+                if (c.cardType === 'cloze') {
+                    return c.clozeText || c.text || c.question;
+                }
+                if (c.cardType === 'image_occlusion') {
+                    return c.questionImage || c.question;
+                }
+                return c.question || c.questionImage;
+            });
         }
 
         if (cards.length === 0) {
@@ -7015,6 +7249,24 @@ function assignQuestionTypesToCards(cards, deckId = null, modeOverride = current
     });
 }
 
+function getClozeStudyPayload(card) {
+    const sourceText = card?.clozeText || card?.text || card?.question || '';
+    const parsed = parseClozeText(sourceText);
+    const indices = [...new Set(parsed.clozes.map(cloze => cloze.index))];
+    const fallbackIndex = indices[0] || 1;
+    let clozeIndex = Number.isFinite(card?.clozeIndex) ? card.clozeIndex : fallbackIndex;
+    if (!indices.includes(clozeIndex)) clozeIndex = fallbackIndex;
+    const normalizedText = parsed.text || sourceText;
+    return {
+        normalizedText,
+        clozeIndex,
+        displayText: renderClozeText(normalizedText, clozeIndex, { showHint: true, placeholder: '___________' }),
+        answerText: getClozeAnswer(normalizedText, clozeIndex) || '',
+        fullText: renderClozeText(normalizedText, -1, { showHint: false, placeholder: '___________' }),
+        hasCloze: parsed.clozes.length > 0
+    };
+}
+
 async function pickNextCardWithEval(cortex, deck) {
     try {
         const { router, probes, store, integrity } = await getEvalModules();
@@ -7254,8 +7506,18 @@ async function showNextCard() {
         document.getElementById('flashcardViewContainer').classList.remove('hidden');
         const cardQuestionEl = document.getElementById('cardQuestion');
         const cardAnswerEl = document.getElementById('cardAnswer');
-        if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
-        if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+        const cardType = detectCardType(card);
+        if (cardType === CARD_TYPES.CLOZE) {
+            const clozePayload = getClozeStudyPayload(card);
+            card.clozeIndex = clozePayload.clozeIndex;
+            card.answer = clozePayload.answerText || card.answer || '';
+            card.clozeFullText = clozePayload.fullText || card.clozeFullText;
+            if (cardQuestionEl) cardQuestionEl.textContent = clozePayload.displayText;
+            if (cardAnswerEl) cardAnswerEl.textContent = clozePayload.fullText || card.answer || '';
+        } else {
+            if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
+            if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+        }
 
         document.getElementById('showAnswerBtn').classList.remove('hidden');
         document.querySelector('#cardView .flashcard').classList.remove('is-flipped');
@@ -7312,8 +7574,18 @@ async function showNextCard() {
         document.getElementById('flashcardViewContainer').classList.remove('hidden');
         const cardQuestionEl = document.getElementById('cardQuestion');
         const cardAnswerEl = document.getElementById('cardAnswer');
-        if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
-        if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+        const cardType = detectCardType(card);
+        if (cardType === CARD_TYPES.CLOZE) {
+            const clozePayload = getClozeStudyPayload(card);
+            card.clozeIndex = clozePayload.clozeIndex;
+            card.answer = clozePayload.answerText || card.answer || '';
+            card.clozeFullText = clozePayload.fullText || card.clozeFullText;
+            if (cardQuestionEl) cardQuestionEl.textContent = clozePayload.displayText;
+            if (cardAnswerEl) cardAnswerEl.textContent = clozePayload.fullText || card.answer || '';
+        } else {
+            if (cardQuestionEl) cardQuestionEl.textContent = card.question || '';
+            if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+        }
 
         document.getElementById('showAnswerBtn').classList.remove('hidden');
 
@@ -7350,17 +7622,14 @@ async function showNextCard() {
 
             case 'Cloze':
                 document.getElementById('flashcardViewContainer').classList.remove('hidden');
-                let clozeText = escapeHtml(String(card.question || ''));
-                if (clozeText.includes('___')) {
-                    clozeText = clozeText.replace(/___/g, '___________');
-                } else if (clozeText.includes('...')) {
-                    clozeText = clozeText.replace(/\.{3}/g, '___________');
-                } else {
-                    clozeText = clozeText.replace(new RegExp(escapeRegExp(escapeHtml(String(card.answer || ''))), 'ig'), '___________');
+                {
+                    const clozePayload = getClozeStudyPayload(card);
+                    card.clozeIndex = clozePayload.clozeIndex;
+                    card.answer = clozePayload.answerText || card.answer || '';
+                    card.clozeFullText = clozePayload.fullText || card.clozeFullText;
+                    const clozeQEl = document.getElementById('cardQuestion');
+                    if (clozeQEl) clozeQEl.textContent = clozePayload.displayText;
                 }
-
-                const clozeQEl = document.getElementById('cardQuestion');
-                if (clozeQEl) clozeQEl.textContent = clozeText;
 
                 document.getElementById('writeAnswerInput').classList.remove('hidden');
                 document.getElementById('checkAnswerBtn').classList.remove('hidden');
@@ -7401,7 +7670,13 @@ async function showNextCard() {
         const flashcardElem = document.querySelector('#cardView .flashcard');
         flashcardElem.classList.remove('is-flipped');
         const cardAnswerEl = document.getElementById('cardAnswer');
-        if (cardAnswerEl) cardAnswerEl.textContent = card.answer || '';
+        if (cardAnswerEl) {
+            if (questionType === 'Cloze' && card.clozeFullText) {
+                cardAnswerEl.textContent = card.clozeFullText;
+            } else {
+                cardAnswerEl.textContent = card.answer || '';
+            }
+        }
         document.getElementById('cardAnswerContent').classList.add('hidden');
 
         const writeInput = document.getElementById('writeAnswerInput');
@@ -7462,19 +7737,13 @@ async function showNextCard() {
 
         case 'Cloze':
             document.getElementById('flashcardViewContainer').classList.remove('hidden');
-            let clozeText = card.question;
-
-            if (clozeText.includes('___')) {
-                clozeText = clozeText.replace(/___/g, '___________');
-            } else if (clozeText.includes('...')) {
-                clozeText = clozeText.replace(/\.{3}/g, '___________');
-            } else {
-                clozeText = clozeText.replace(new RegExp(escapeRegExp(card.answer), 'ig'), '___________');
-            }
-
             {
+                const clozePayload = getClozeStudyPayload(card);
+                card.clozeIndex = clozePayload.clozeIndex;
+                card.answer = clozePayload.answerText || card.answer || '';
+                card.clozeFullText = clozePayload.fullText || card.clozeFullText;
                 const cardQuestionEl = document.getElementById('cardQuestion');
-                if (cardQuestionEl) cardQuestionEl.textContent = clozeText;
+                if (cardQuestionEl) cardQuestionEl.textContent = clozePayload.displayText;
             }
 
             document.getElementById('writeAnswerInput').classList.remove('hidden');
@@ -7515,7 +7784,13 @@ async function showNextCard() {
     const flashcardElem = document.querySelector('#cardView .flashcard');
     flashcardElem.classList.remove('is-flipped');
     const cardAnswerEl2 = document.getElementById('cardAnswer');
-    if (cardAnswerEl2) cardAnswerEl2.textContent = card.answer || '';
+    if (cardAnswerEl2) {
+        if (questionType === 'Cloze' && card.clozeFullText) {
+            cardAnswerEl2.textContent = card.clozeFullText;
+        } else {
+            cardAnswerEl2.textContent = card.answer || '';
+        }
+    }
     document.getElementById('cardAnswerContent').classList.add('hidden');
 
     const writeInput = document.getElementById('writeAnswerInput');
@@ -7748,7 +8023,14 @@ async function autoCheckAnswer() {
         }
     }
     const userAnswer = userInput.value.trim();
-    const correctAnswer = card.answer.trim();
+    let correctAnswer = card.answer.trim();
+    if (detectCardType(card) === CARD_TYPES.CLOZE) {
+        const clozePayload = getClozeStudyPayload(card);
+        card.clozeIndex = clozePayload.clozeIndex;
+        card.answer = clozePayload.answerText || card.answer || '';
+        card.clozeFullText = clozePayload.fullText || card.clozeFullText;
+        correctAnswer = card.answer.trim();
+    }
 
     if (studyState.isRetypingIncorrect) {
         if (userAnswer.toLowerCase() === correctAnswer.toLowerCase()) {
@@ -7828,7 +8110,10 @@ async function autoCheckAnswer() {
     document.getElementById('cardAnswerContent').classList.remove('hidden');
     document.getElementById('checkAnswerBtn').classList.add('hidden');
     document.getElementById('dontKnowBtn').classList.add('hidden');
-    const questionTypeForLog = document.getElementById('mcqView').classList.contains('hidden') ? 'Type' : 'MultipleChoice';
+    let questionTypeForLog = document.getElementById('mcqView').classList.contains('hidden') ? 'Type' : 'MultipleChoice';
+    if (detectCardType(card) === CARD_TYPES.CLOZE) {
+        questionTypeForLog = 'Cloze';
+    }
 
     switch (checkResult.result) {
         case 'CORRECT':
@@ -8123,7 +8408,10 @@ async function dontKnowAnswer() {
     if (settings.retypeIncorrect) {
         studyState.isRetypingIncorrect = true;
 
-        feedbackMessage.innerHTML = `<strong>The correct answer is:</strong> <span style="color:var(--primary-color)">${escapeHtml(String(card.answer))}</span>`;
+        const clozeReveal = (detectCardType(card) === CARD_TYPES.CLOZE)
+            ? (card.clozeFullText || card.answer)
+            : card.answer;
+        feedbackMessage.innerHTML = `<strong>The correct answer is:</strong> <span style="color:var(--primary-color)">${escapeHtml(String(clozeReveal))}</span>`;
 
         writeInput.value = '';
         writeInput.disabled = false;
@@ -8935,98 +9223,290 @@ function isActionAllowed() {
     return correctBtnVisible || incorrectBtnVisible;
 }
 
+/**
+ * Check if an element is visible (not hidden, not display:none)
+ */
+function isElementVisible(element) {
+    if (!element) return false;
+    if (element.disabled) return false;
+    if (element.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+/**
+ * Check if user is currently typing in a text field
+ */
+function isUserTyping() {
+    const active = document.activeElement;
+    if (!active) return false;
+    
+    const tag = active.tagName.toUpperCase();
+    if (tag === 'TEXTAREA') return true;
+    if (tag === 'INPUT') {
+        const type = (active.type || '').toLowerCase();
+        return ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type);
+    }
+    if (active.isContentEditable) return true;
+    
+    return false;
+}
+
 function setupKeyboardControls() {
+    // === DIRECT INPUT HANDLERS ===
+    // These handle Enter key specifically for text inputs without intercepting other keys
+    
+    // Learn mode write input - Enter to check/don't know
+    const writeInput = document.getElementById('writeAnswerInput');
+    if (writeInput) {
+        writeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (writeInput.value.trim() === '') {
+                    // Empty input - call don't know
+                    if (currentMode === 'learn') {
+                        const handler = window.dontKnowAnswer || dontKnowAnswer;
+                        handler();
+                    } else {
+                        showToast('Please enter an answer', 'error');
+                    }
+                } else {
+                    // Has answer - check it
+                    const handler = window.autoCheckAnswer || autoCheckAnswer;
+                    handler();
+                }
+            }
+            // All other keys (including Space) type naturally
+        });
+    }
+    
+    // Practice test input - Enter to check
+    const testAnswerInput = document.getElementById('testAnswerInput');
+    if (testAnswerInput) {
+        testAnswerInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const checkBtn = document.getElementById('testCheckAnswerBtn');
+                if (isElementVisible(checkBtn)) {
+                    checkBtn.click();
+                }
+            }
+        });
+    }
+    
+    // Sequence mode inputs - Enter to submit
+    const sequenceNextInput = document.getElementById('sequenceNextInput');
+    if (sequenceNextInput) {
+        sequenceNextInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const submitBtn = document.getElementById('sequenceSubmitBtn');
+                if (isElementVisible(submitBtn)) {
+                    submitBtn.click();
+                }
+            }
+        });
+    }
+
+    // === GLOBAL KEYBOARD HANDLER ===
+    // Only handles shortcuts when NOT typing
     document.addEventListener('keydown', (e) => {
+        // Don't handle if a modal is open (let keyboard.js handle it)
         if (document.querySelector('.modal.show')) return;
-        const active = document.activeElement;
-        const tag = (active?.tagName || '').toUpperCase();
-        const type = (active?.type || '').toLowerCase();
-        const isTextInput = tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'search', 'email', 'password', 'tel', 'url'].includes(type));
-        const isContentEditable = active?.isContentEditable;
-        const isSequenceAnswer = active?.id === 'writeAnswerInput';
-        const isPracticeAnswer = active?.id === 'testAnswerInput';
-        const isTyping = isTextInput || isContentEditable;
-        const allowWhileTyping = isSequenceAnswer || isPracticeAnswer;
-        if (isTyping && !allowWhileTyping) {
-            if (e.key === 'Escape') active?.blur();
+        
+        const isMeta = e.ctrlKey || e.metaKey;
+        const keyLower = (e.key || '').toLowerCase();
+        
+        // === ESCAPE - Always works ===
+        if (e.key === 'Escape') {
+            if (isUserTyping()) {
+                document.activeElement.blur();
+                e.preventDefault();
+            }
             return;
         }
 
+        // === EDITOR VIEW SHORTCUTS ===
+        if (activeView === 'editorView') {
+            if (isMeta && keyLower === 's') {
+                e.preventDefault();
+                const handler = window.editorSaveDeck || editorSaveDeck;
+                handler();
+                return;
+            }
+            if (isMeta && e.key === 'Enter') {
+                e.preventDefault();
+                document.querySelector('#editorView .add-question-btn')?.click();
+                return;
+            }
+        }
+        
+        // === IF TYPING, ONLY ALLOW CTRL/CMD SHORTCUTS ===
+        if (isUserTyping()) {
+            if (!isMeta) {
+                return; // Let keys type naturally
+            }
+        }
+
+        // === GLOBAL CTRL/CMD SHORTCUTS ===
+        if (isMeta) {
+            if (keyLower === 'k') {
+                e.preventDefault();
+                document.getElementById('searchInput')?.focus();
+                return;
+            }
+            if (keyLower === 'n') {
+                e.preventDefault();
+                showEditor();
+                return;
+            }
+            if (keyLower === ',') {
+                e.preventDefault();
+                showSettings();
+                return;
+            }
+            if (e.shiftKey) {
+                if (keyLower === 'a') {
+                    e.preventDefault();
+                    showAnalyticsView();
+                    return;
+                }
+                if (keyLower === 'i') {
+                    e.preventDefault();
+                    showInsightsView();
+                    return;
+                }
+                if (keyLower === 'g') {
+                    e.preventDefault();
+                    renderGlobalAnalytics();
+                    return;
+                }
+            }
+            return; // Don't process other shortcuts for meta combos
+        }
+
+        // === PRACTICE TEST VIEW SHORTCUTS ===
         const practiceTestView = document.getElementById('practiceTestView');
         if (practiceTestView && !practiceTestView.classList.contains('hidden')) {
-            if (e.key === 'Enter' || e.key === 'ArrowUp') {
-                const nextBtn = document.getElementById('testNextBtn');
-                const checkBtn = document.getElementById('testCheckAnswerBtn');
-                const showBtn = document.getElementById('testShowAnswerBtn');
-                if (nextBtn && !nextBtn.classList.contains('hidden')) {
+            const nextBtn = document.getElementById('testNextBtn');
+            const showBtn = document.getElementById('testShowAnswerBtn');
+            const correctBtn = document.getElementById('testCorrectBtn');
+            const incorrectBtn = document.getElementById('testIncorrectBtn');
+            
+            if (e.key === 'Enter' || e.key === ' ') {
+                if (isElementVisible(nextBtn)) {
                     e.preventDefault();
                     nextBtn.click();
                     return;
                 }
-                if (checkBtn && !checkBtn.classList.contains('hidden')) {
-                    if (isPracticeAnswer) e.preventDefault();
-                    checkBtn.click();
-                    return;
-                }
-                if (showBtn && !showBtn.classList.contains('hidden')) {
+                if (isElementVisible(showBtn)) {
                     e.preventDefault();
                     showBtn.click();
                     return;
                 }
             }
-            return;
-        }
-
-        if (activeView === 'studyMode' && !document.getElementById('progressView').classList.contains('hidden')) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('continueBtn').click();
+            if (e.key === '1' || e.key === 'ArrowLeft') {
+                if (isElementVisible(incorrectBtn)) {
+                    e.preventDefault();
+                    incorrectBtn.click();
+                }
+                return;
+            }
+            if (e.key === '2' || e.key === 'ArrowRight') {
+                if (isElementVisible(correctBtn)) {
+                    e.preventDefault();
+                    correctBtn.click();
+                }
+                return;
             }
             return;
         }
 
-        if (activeView !== 'studyMode' || document.getElementById('cardView').classList.contains('hidden')) return;
-
-        const writeInput = document.getElementById('writeAnswerInput');
-
-        const canSubmitAnswer = writeInput && !writeInput.classList.contains('hidden') && !writeInput.disabled;
-        if (canSubmitAnswer && ((e.key === 'Enter' && !e.shiftKey) || e.key === 'ArrowUp')) {
-            e.preventDefault();
-            if (writeInput.value.trim() === '') {
-                showToast('Please enter an answer', 'error');
-            } else {
-                autoCheckAnswer();
-            }
-            return;
-        }
-        if (isTyping) return;
-
-        const simpleCorrectBtn = document.getElementById('correctBtn');
-        const showAnswerBtn = document.getElementById('showAnswerBtn');
-        const spacedButtons = document.getElementById('spacedRatingButtons');
-        const spacedVisible = currentMode === 'spaced' && spacedButtons && !spacedButtons.classList.contains('hidden');
-
-        if (spacedVisible) {
-            const ratingKeyMap = { '1': 'Again', 'a': 'Again', '2': 'Hard', 'h': 'Hard', '3': 'Good', 'g': 'Good', '4': 'Easy', 'e': 'Easy' };
-            const key = (e.key || '').toLowerCase();
-            if (ratingKeyMap[key]) {
-                e.preventDefault();
-                gradeSpaced(ratingKeyMap[key]);
+        // === STUDY MODE PROGRESS VIEW ===
+        if (activeView === 'studyMode') {
+            const progressView = document.getElementById('progressView');
+            if (progressView && !progressView.classList.contains('hidden')) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    document.getElementById('continueBtn')?.click();
+                }
                 return;
             }
         }
 
-        if (!simpleCorrectBtn.classList.contains('hidden')) {
-            e.preventDefault();
-            if (e.key === 'ArrowLeft' || e.key === '1') markIncorrect();
-            else if (e.key === 'ArrowRight' || e.key === '2') markCorrect();
+        // === SEQUENCE MODE SHORTCUTS ===
+        const sequenceTaskView = document.getElementById('sequenceTaskView');
+        if (activeView === 'studyMode' && sequenceTaskView && !sequenceTaskView.classList.contains('hidden')) {
+            const submitBtn = document.getElementById('sequenceSubmitBtn');
+            const continueBtn = document.getElementById('sequenceContinueBtn');
+            
+            if (e.key === 'Enter' || e.key === ' ') {
+                if (isElementVisible(submitBtn)) {
+                    e.preventDefault();
+                    submitBtn.click();
+                    return;
+                }
+                if (isElementVisible(continueBtn)) {
+                    e.preventDefault();
+                    continueBtn.click();
+                    return;
+                }
+            }
             return;
         }
 
-        if (!showAnswerBtn.classList.contains('hidden')) {
-            if (e.key === ' ' || e.key === 'Enter') {
+        // === LEARN/REVIEW MODE CARD VIEW SHORTCUTS ===
+        if (activeView !== 'studyMode') return;
+        const cardView = document.getElementById('cardView');
+        if (!cardView || cardView.classList.contains('hidden')) return;
+
+        const simpleCorrectBtn = document.getElementById('correctBtn');
+        const simpleIncorrectBtn = document.getElementById('incorrectBtn');
+        const showAnswerBtn = document.getElementById('showAnswerBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        
+        // Spaced repetition rating buttons
+        const spacedButtons = document.getElementById('spacedRatingButtons');
+        if (currentMode === 'spaced' && spacedButtons && !spacedButtons.classList.contains('hidden')) {
+            const ratingMap = { '1': 'Again', 'a': 'Again', '2': 'Hard', 'h': 'Hard', '3': 'Good', 'g': 'Good', '4': 'Easy', 'e': 'Easy' };
+            if (ratingMap[keyLower]) {
                 e.preventDefault();
-                showAnswer();
+                gradeSpaced(ratingMap[keyLower]);
+                return;
+            }
+        }
+
+        // Correct/Incorrect buttons visible
+        if (isElementVisible(simpleCorrectBtn)) {
+            if (e.key === '1' || e.key === 'ArrowLeft' || keyLower === 'x') {
+                e.preventDefault();
+                const handler = window.markIncorrect || markIncorrect;
+                handler();
+                return;
+            }
+            if (e.key === '2' || e.key === 'ArrowRight' || keyLower === 'c' || e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                const handler = window.markCorrect || markCorrect;
+                handler();
+                return;
+            }
+        }
+
+        // Next button visible
+        if (isElementVisible(nextBtn)) {
+            if (keyLower === 'n' || e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                nextBtn.click();
+                return;
+            }
+        }
+
+        // Show answer button visible
+        if (isElementVisible(showAnswerBtn)) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                const handler = window.showAnswer || showAnswer;
+                handler();
             }
         }
     });
@@ -9543,6 +10023,7 @@ function parseTextData(text, separator, typeHint = 'General') {
                     sequenceTitle: sequenceMeta[data.id].title,
                     stepIndex: stepIdx,
                     order: stepIdx,
+                    cardType: CARD_TYPES.SEQUENCE,
                     isNew: true
                 });
             });
@@ -9550,22 +10031,92 @@ function parseTextData(text, separator, typeHint = 'General') {
         return { cards, sequenceMeta };
     }
 
-    return text.split('\n').map((line, index) => {
-        const parts = line.split(separator);
-        if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
-            const card = {
-                id: crypto.randomUUID(),
-                question: parts[0].trim(),
-                answer: parts[1].trim(),
-                isNew: true
-            };
+    // Use card-types module for advanced parsing with card type detection
+    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
 
-            card.order = 0;
+    // Check for header row to detect Anki-style imports
+    const normalizeHeader = (value) => value.replace(/\s+/g, '').toLowerCase();
+    const headerKeys = new Set(['front', 'back', 'question', 'answer', 'type', 'cloze', 'addreverse']);
+    const firstRowHeaders = lines[0].split(separator).map(h => h.trim());
+    const matchedHeaders = firstRowHeaders
+        .map(h => normalizeHeader(h))
+        .filter(h => headerKeys.has(h));
+    const hasHeader = matchedHeaders.length >= 2;
 
-            return card;
+    let headers = null;
+    let dataStartIndex = 0;
+
+    if (hasHeader) {
+        headers = lines[0].split(separator).map(h => h.trim().toLowerCase());
+        dataStartIndex = 1;
+    }
+
+    const allCards = [];
+
+    for (let i = dataStartIndex; i < lines.length; i++) {
+        const parts = lines[i].split(separator);
+        if (parts.length < 2) continue;
+
+        let rawCard = {};
+
+        if (headers) {
+            // Map by header names
+            headers.forEach((header, idx) => {
+                if (parts[idx] !== undefined) {
+                    // Normalize header names
+                    const normalizedHeader = header.replace(/\s+/g, '').toLowerCase();
+                    rawCard[normalizedHeader] = parts[idx].trim();
+                }
+            });
+            // Map common Anki headers to our format
+            rawCard.front = rawCard.front || rawCard.question || '';
+            rawCard.back = rawCard.back || rawCard.answer || rawCard.definition || '';
+            rawCard.addReverse = rawCard.addreverse || rawCard['add reverse'] || '';
+        } else {
+            // Standard format: Front, Back, [Type], [AddReverse]
+            rawCard.front = parts[0]?.trim() || '';
+            rawCard.back = parts[1]?.trim() || '';
+            if (parts[2]) rawCard.type = parts[2].trim();
+            if (parts[3]) rawCard.addReverse = parts[3].trim();
         }
-        return null;
-    }).filter(Boolean);
+
+        if (!rawCard.front && !rawCard.back) continue;
+
+        // Detect card type from explicit type column or content
+        let cardType = rawCard.type ? normalizeCardType(rawCard.type) : null;
+        if (!cardType) {
+            // Check typeHint mapping
+            if (typeHint === 'Cloze' || typeHint === 'cloze') {
+                cardType = CARD_TYPES.CLOZE;
+            } else if (typeHint === 'Basic (and reversed card)' || typeHint === 'BasicReversed') {
+                cardType = CARD_TYPES.BASIC_REVERSED;
+            } else if (typeHint === 'Basic (type in the answer)' || typeHint === 'TypeAnswer') {
+                cardType = CARD_TYPES.BASIC_TYPE_ANSWER;
+            } else {
+                // Auto-detect from content
+                cardType = detectCardType({ question: rawCard.front, answer: rawCard.back, addReverse: rawCard.addReverse });
+            }
+        }
+
+        const baseCard = {
+            id: crypto.randomUUID(),
+            question: rawCard.front,
+            answer: rawCard.back,
+            front: rawCard.front,
+            back: rawCard.back,
+            cardType: cardType,
+            addReverse: rawCard.addReverse || '',
+            isNew: true,
+            order: 0
+        };
+
+        // Expand cards for reversed and cloze types
+        const expandedCards = expandCard(baseCard);
+        allCards.push(...expandedCards);
+    }
+
+    return allCards;
 }
 
 // Use the shared helper compressImage if available; otherwise provide a passthrough
@@ -11297,6 +11848,10 @@ async function processDeckContent(deck) {
 function selectOptimalQuestionType(card, deckOverride = null, modeOverride = currentMode) {
     const resolvedDeck = deckOverride || decks[card.deckId || currentDeckId];
 
+    const detectedType = detectCardType(card);
+    if (detectedType === CARD_TYPES.CLOZE) return 'Cloze';
+    if (detectedType === CARD_TYPES.BASIC_TYPE_ANSWER) return 'Type';
+
     if (!resolvedDeck) {
         console.error(`Could not find deck for card "${card.question}". Defaulting to Flashcard.`);
         return 'Flashcard';
@@ -12290,9 +12845,14 @@ function canGenerateQuestionType(type, card, allCardsInDeck) {
         case 'MultipleChoice':
             return allCardsInDeck.length >= 4;
         case 'Cloze':
-            return card.question.toLowerCase().includes(card.answer.toLowerCase()) ||
-                card.question.includes('___') ||
-                card.question.includes('...');
+            if (detectCardType(card) === CARD_TYPES.CLOZE) return true;
+            {
+                const sourceText = card?.clozeText || card?.text || card?.question || '';
+                const parsed = parseClozeText(sourceText);
+                return parsed.clozes.length > 0 ||
+                    sourceText.includes('___') ||
+                    sourceText.includes('...');
+            }
         case 'Type':
             return true;
         default:
@@ -13289,6 +13849,24 @@ function reorderSequenceOrderItem(item, direction) {
     }
 }
 
+function bindSequenceTaskInputShortcuts(element) {
+    if (!element) return;
+    element.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.shiftKey) return;
+        const submitBtn = document.getElementById('sequenceSubmitBtn');
+        const continueBtn = document.getElementById('sequenceContinueBtn');
+        if (submitBtn && !submitBtn.classList.contains('hidden')) {
+            event.preventDefault();
+            submitBtn.click();
+            return;
+        }
+        if (continueBtn && !continueBtn.classList.contains('hidden')) {
+            event.preventDefault();
+            continueBtn.click();
+        }
+    });
+}
+
 function renderNextStepTask(task) {
     const body = document.getElementById('sequenceTaskBody');
     const anchorCard = task.chunk[task.anchorIndex] || task.chunk[0];
@@ -13306,6 +13884,7 @@ function renderNextStepTask(task) {
     body.appendChild(wrapper);
     setActiveStudyInput(input);
     input.addEventListener('focus', () => setActiveStudyInput(input));
+    bindSequenceTaskInputShortcuts(input);
 }
 
 function renderGapTask(task) {
@@ -13343,6 +13922,7 @@ function renderGapTask(task) {
     selectWrapper.appendChild(select);
     body.appendChild(selectWrapper);
     task.missingCardId = missingCard?.id;
+    bindSequenceTaskInputShortcuts(select);
 }
 
 function renderSequenceTask(task) {
@@ -15599,7 +16179,9 @@ const inlineHandlers = {
     endSession,
     endTest,
     generateFullDataExport,
+    getClozeNumberForCard,
     gradeSpaced,
+    handleCardTypeChange,
     handleImageFile,
     handleNextCard,
     handleNotesImageUpload,
@@ -15610,6 +16192,7 @@ const inlineHandlers = {
     markTestCorrect,
     markTestIncorrect,
     nextTestQuestion,
+    openClozePreview,
     openDeckSettingsModal,
     openPracticeTestModal,
     processAllDocuments,
@@ -15650,7 +16233,8 @@ const inlineHandlers = {
     togglePomodoro,
     toggleStudyMode,
     triggerImageUpload,
-    triggerNotesImageUpload
+    triggerNotesImageUpload,
+    wrapSelectedInCloze
 };
 
 // Expose handlers used by inline HTML attributes and generated markup.

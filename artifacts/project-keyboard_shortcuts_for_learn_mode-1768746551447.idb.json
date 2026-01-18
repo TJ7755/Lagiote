@@ -1,0 +1,67 @@
+{
+  "storeNames": [
+    "analyticsQueue",
+    "appData",
+    "atoms",
+    "concepts",
+    "contentRevisions",
+    "cortexTrainingData",
+    "decks",
+    "errorAtoms",
+    "examPapers",
+    "examPlans",
+    "examSittings",
+    "examSpecs",
+    "interactionLogs",
+    "markSchemes",
+    "markingRecords",
+    "questions",
+    "userKnowledgeState"
+  ],
+  "summary": {
+    "decks": {
+      "missing": false,
+      "count": 6,
+      "sampleKeys": [
+        "deck-learn",
+        "deck-practice",
+        "deck-review",
+        "deck-sequence",
+        "deck-sequence-legacy",
+        "deck-sequence-order"
+      ]
+    },
+    "reviewHistory": {
+      "missing": true,
+      "count": 0,
+      "sampleKeys": []
+    },
+    "interactionLogs": {
+      "missing": false,
+      "count": 0,
+      "sampleKeys": []
+    },
+    "appData": {
+      "missing": false,
+      "count": 4,
+      "sampleKeys": [
+        "analytics",
+        "categories",
+        "cortexModelV1",
+        "eval:events:default_user"
+      ]
+    },
+    "analytics": {
+      "missing": false,
+      "count": 1,
+      "sampleKeys": [
+        "appData:analytics"
+      ]
+    },
+    "analyticsQueue": {
+      "missing": false,
+      "count": 0,
+      "sampleKeys": []
+    }
+  }
+}

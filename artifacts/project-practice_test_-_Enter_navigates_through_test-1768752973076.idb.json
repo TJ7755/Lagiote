@@ -1,0 +1,30 @@
+{
+  "storeNames": [],
+  "summary": {
+    "decks": {
+      "missing": true,
+      "count": 0,
+      "sampleKeys": []
+    },
+    "reviewHistory": {
+      "missing": true,
+      "count": 0,
+      "sampleKeys": []
+    },
+    "interactionLogs": {
+      "missing": true,
+      "count": 0,
+      "sampleKeys": []
+    },
+    "appData": {
+      "missing": true,
+      "count": 0,
+      "sampleKeys": []
+    },
+    "analytics": {
+      "missing": false,
+      "count": 0,
+      "sampleKeys": []
+    }
+  }
+}

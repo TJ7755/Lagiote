@@ -112,3 +112,4 @@ vitest-results/
 # Electron build artifacts
 *.exe
 *.msi
+BUGS.md

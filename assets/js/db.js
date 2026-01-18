@@ -6,8 +6,8 @@ export function getDB() {
 
 export function initDB(isRetry = false) {
     return new Promise((resolve, reject) => {
-        // Incremented DB version to 8 to force onupgradeneeded
-        const request = indexedDB.open('LagioteDB', 8);
+        // Incremented DB version to 14 to force onupgradeneeded
+        const request = indexedDB.open('LagioteDB', 14);
 
         request.onerror = event => {
             console.error("DB Open Error:", event.target.error);

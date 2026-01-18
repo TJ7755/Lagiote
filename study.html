@@ -48,15 +48,40 @@
             <div id="cardView" class="sub-view hidden">
                 <div class="flashcard">
                     <div class="card-face">
+                        <!-- Standard question display -->
                         <div id="cardQuestion" style="font-size: 1.2rem; font-weight: 600; margin-bottom: 16px;"></div>
+                        
+                        <!-- Cloze display (shows text with blanks) -->
+                        <div id="clozeDisplay" class="hidden" style="font-size: 1.2rem; font-weight: 600; margin-bottom: 16px;"></div>
+                        
+                        <!-- Type-in answer input -->
+                        <div id="typeAnswerContainer" class="hidden" style="margin-top: 16px;">
+                            <input type="text" id="typeAnswerInput" class="type-answer-input" 
+                                   placeholder="Type your answer..." 
+                                   style="width: 100%; padding: 12px; font-size: 1rem; border: 2px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--primary-text);">
+                        </div>
+                        
+                        <!-- Type answer feedback -->
+                        <div id="typeAnswerFeedback" class="hidden" style="margin-top: 12px; padding: 12px; border-radius: 8px;">
+                            <div id="typeAnswerResult" style="font-weight: 600; margin-bottom: 8px;"></div>
+                            <div id="typeAnswerCorrect" style="color: var(--secondary-text);"></div>
+                        </div>
+                        
+                        <!-- Standard answer display -->
                         <div id="cardAnswerContent" class="hidden" style="margin-top: 12px; color: var(--secondary-text);">
                             <div id="cardAnswer"></div>
+                        </div>
+                        
+                        <!-- Cloze answer display (shows filled blanks) -->
+                        <div id="clozeAnswerContent" class="hidden" style="margin-top: 12px;">
+                            <div id="clozeAnswerFull" style="font-size: 1.1rem; color: var(--primary-text);"></div>
                         </div>
                     </div>
                 </div>
 
                 <div class="card-actions" style="margin-top: 16px;">
                     <button class="btn btn-secondary" id="showAnswerBtn">Show Answer</button>
+                    <button class="btn btn-primary hidden" id="checkAnswerBtn">Check Answer</button>
                     <button class="btn btn-primary hidden" id="correctBtn">Correct</button>
                     <button class="btn btn-danger hidden" id="incorrectBtn">Incorrect</button>
                 </div>

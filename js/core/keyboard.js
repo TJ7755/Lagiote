@@ -1,33 +1,55 @@
+/**
+ * Keyboard Manager - Clean implementation for global keyboard shortcuts
+ * 
+ * Key Principles:
+ * 1. NEVER intercept keys when user is typing in text inputs (except Escape)
+ * 2. Use direct event listeners on specific elements for Enter in inputs
+ * 3. Global shortcuts only apply when not typing
+ */
+
 class KeyboardManager {
     constructor() {
-        this.contexts = [];
-        this.handleKeydown = this.handleKeydown.bind(this);
-        document.addEventListener('keydown', this.handleKeydown);
+        this.initialized = false;
     }
 
-    registerContext(name, handler) {
-        this.contexts = this.contexts.filter(ctx => ctx.name !== name);
-        this.contexts.push({ name, handler });
+    init() {
+        if (this.initialized) return;
+        this.initialized = true;
+        document.addEventListener('keydown', this.handleGlobalKeydown.bind(this));
     }
 
-    removeContext(name) {
-        this.contexts = this.contexts.filter(ctx => ctx.name !== name);
+    /**
+     * Check if user is currently typing in a text field
+     */
+    isTyping() {
+        const active = document.activeElement;
+        if (!active) return false;
+        
+        const tag = active.tagName.toUpperCase();
+        if (tag === 'TEXTAREA') return true;
+        if (tag === 'INPUT') {
+            const type = (active.type || '').toLowerCase();
+            return ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type);
+        }
+        if (active.isContentEditable) return true;
+        
+        return false;
     }
 
-    shouldIgnore(event) {
-        const target = event.target;
-        if (!target) return false;
-        const editable = target.matches?.('input, textarea, [contenteditable="true"]') || target.closest?.('input, textarea, [contenteditable="true"]');
-        return editable && event.key !== 'Escape';
-    }
-
+    /**
+     * Check if element is visible and can be clicked
+     */
     isVisible(element) {
         if (!element) return false;
         if (element.disabled) return false;
+        if (element.classList.contains('hidden')) return false;
         const style = window.getComputedStyle(element);
-        return style.display !== 'none' && style.visibility !== 'hidden' && element.offsetParent !== null;
+        return style.display !== 'none' && style.visibility !== 'hidden';
     }
 
+    /**
+     * Click element if visible, return true if clicked
+     */
     clickIfVisible(element) {
         if (this.isVisible(element)) {
             element.click();
@@ -36,72 +58,92 @@ class KeyboardManager {
         return false;
     }
 
-    getActiveModal() {
-        const modals = Array.from(document.querySelectorAll('.modal.show'));
-        if (!modals.length) return null;
-        return modals[modals.length - 1];
-    }
-
-    confirmModal(modal) {
-        const selectors = [
-            '[data-primary]',
-            '.modal-actions .btn-prominent',
-            '.modal-actions .btn-primary',
-            '.modal-actions .btn-success',
-            '.modal-actions .btn-danger',
-            '.modal-actions button:not(.btn-secondary)'
-        ];
-        for (const selector of selectors) {
-            const btn = modal.querySelector(selector);
-            if (this.clickIfVisible(btn)) return true;
-        }
-        return false;
-    }
-
-    closeModal(modal) {
-        const selectors = [
-            '[data-close]',
-            '.close',
-            '.modal-actions .btn-secondary',
-            '.modal-actions button.cancel',
-            '.modal-actions button[data-action="cancel"]'
-        ];
-        for (const selector of selectors) {
-            const btn = modal.querySelector(selector);
-            if (this.clickIfVisible(btn)) return true;
-        }
-        if (modal.classList.contains('show')) {
-            modal.classList.remove('show');
-            return true;
-        }
-        return false;
-    }
-
-    handleModalShortcut(event) {
-        const modal = this.getActiveModal();
-        if (!modal) return false;
-        if (event.key === 'Escape') return this.closeModal(modal);
-        if (event.key === 'Enter') return this.confirmModal(modal);
-        return false;
-    }
-
-    handleKeydown(event) {
-        if (this.shouldIgnore(event)) return;
-        if (this.handleModalShortcut(event)) {
-            event.preventDefault();
-            return;
-        }
-        for (let i = this.contexts.length - 1; i >= 0; i -= 1) {
-            const ctx = this.contexts[i];
-            if (typeof ctx.handler === 'function' && ctx.handler(event) === true) {
+    /**
+     * Handle global keyboard shortcuts
+     * Only fires when user is NOT typing
+     */
+    handleGlobalKeydown(event) {
+        // Always allow Escape to work
+        if (event.key === 'Escape') {
+            // Close any open modal
+            const modal = document.querySelector('.modal.show');
+            if (modal) {
+                const closeBtn = modal.querySelector('.close, [data-close]');
+                if (closeBtn) closeBtn.click();
+                else modal.classList.remove('show');
                 event.preventDefault();
                 return;
+            }
+            // Blur active element if typing
+            if (this.isTyping()) {
+                document.activeElement.blur();
+                event.preventDefault();
+                return;
+            }
+        }
+
+        // If typing, only allow Ctrl/Cmd shortcuts through
+        if (this.isTyping()) {
+            if (!(event.ctrlKey || event.metaKey)) {
+                return; // Let the key be typed naturally
+            }
+        }
+
+        // Handle modal Enter to confirm
+        const modal = document.querySelector('.modal.show');
+        if (modal && event.key === 'Enter' && !this.isTyping()) {
+            const primaryBtn = modal.querySelector('.modal-actions .btn-primary, .modal-actions .btn-success, [data-primary]');
+            if (this.clickIfVisible(primaryBtn)) {
+                event.preventDefault();
+                return;
+            }
+        }
+
+        // Global Ctrl/Cmd shortcuts
+        const isMeta = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+
+        if (isMeta) {
+            if (key === 'k') {
+                event.preventDefault();
+                document.getElementById('searchInput')?.focus();
+                return;
+            }
+            if (key === 'n') {
+                event.preventDefault();
+                window.createNewDeck?.();
+                return;
+            }
+            if (key === ',') {
+                event.preventDefault();
+                window.showView?.('settings');
+                return;
+            }
+            if (event.shiftKey) {
+                if (key === 'a') {
+                    event.preventDefault();
+                    window.showView?.('analytics');
+                    return;
+                }
+                if (key === 'i') {
+                    event.preventDefault();
+                    window.showView?.('insights');
+                    return;
+                }
+                if (key === 'g') {
+                    event.preventDefault();
+                    window.showView?.('globalAnalytics');
+                    return;
+                }
             }
         }
     }
 }
 
-const keyboardManager = window.keyboardManager || new KeyboardManager();
+const keyboardManager = new KeyboardManager();
+keyboardManager.init();
+
+// Expose globally
 window.keyboardManager = keyboardManager;
 
 export { KeyboardManager, keyboardManager };

@@ -5,7 +5,7 @@ import {
 } from './fsrs-utils.js';
 
 const DB_NAME = 'LagioteDB';
-const DB_VERSION = 13;
+const DB_VERSION = 14;
 let db;
 
 const EXAM_ENGINE_STORES = new Set([

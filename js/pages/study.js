@@ -5,6 +5,7 @@ import { FSRSAlgorithm } from '../core/fsrs.js';
 import Cortex from '../core/cortex.js';
 import keyboardManager from '../core/keyboard.js';
 import { pickConfusableCard } from '../core/interference.js';
+import { CARD_TYPES, parseClozeText, gradeTypedAnswer } from '../core/card-types.js';
 
 const fsrsEngine = new FSRSAlgorithm();
 
@@ -215,13 +216,69 @@ function showCard() {
     const q = document.getElementById('cardQuestion');
     const a = document.getElementById('cardAnswer');
     const answerContent = document.getElementById('cardAnswerContent');
-    if (q) q.textContent = card.question || '';
-    if (a) a.textContent = card.answer || '';
-    if (answerContent) answerContent.classList.add('hidden');
+    const clozeDisplay = document.getElementById('clozeDisplay');
+    const clozeAnswerContent = document.getElementById('clozeAnswerContent');
+    const clozeAnswerFull = document.getElementById('clozeAnswerFull');
+    const typeAnswerContainer = document.getElementById('typeAnswerContainer');
+    const typeAnswerInput = document.getElementById('typeAnswerInput');
+    const typeAnswerFeedback = document.getElementById('typeAnswerFeedback');
+    const showAnswerBtn = document.getElementById('showAnswerBtn');
+    const checkAnswerBtn = document.getElementById('checkAnswerBtn');
+    const correctBtn = document.getElementById('correctBtn');
+    const incorrectBtn = document.getElementById('incorrectBtn');
 
-    document.getElementById('showAnswerBtn')?.classList.remove('hidden');
-    document.getElementById('correctBtn')?.classList.add('hidden');
-    document.getElementById('incorrectBtn')?.classList.add('hidden');
+    // Reset all displays
+    if (q) { q.textContent = ''; q.classList.add('hidden'); }
+    if (a) a.textContent = '';
+    if (answerContent) answerContent.classList.add('hidden');
+    if (clozeDisplay) { clozeDisplay.innerHTML = ''; clozeDisplay.classList.add('hidden'); }
+    if (clozeAnswerContent) clozeAnswerContent.classList.add('hidden');
+    if (clozeAnswerFull) clozeAnswerFull.innerHTML = '';
+    if (typeAnswerContainer) typeAnswerContainer.classList.add('hidden');
+    if (typeAnswerInput) typeAnswerInput.value = '';
+    if (typeAnswerFeedback) typeAnswerFeedback.classList.add('hidden');
+    showAnswerBtn?.classList.add('hidden');
+    checkAnswerBtn?.classList.add('hidden');
+    correctBtn?.classList.add('hidden');
+    incorrectBtn?.classList.add('hidden');
+
+    const cardType = card.cardType || CARD_TYPES.BASIC;
+
+    // Render based on card type
+    if (cardType === CARD_TYPES.CLOZE) {
+        // Cloze card: show text with blanks
+        const clozeData = parseClozeText(card.text || card.question || '');
+        if (clozeDisplay) {
+            clozeDisplay.innerHTML = clozeData.displayText;
+            clozeDisplay.classList.remove('hidden');
+        }
+        if (clozeAnswerFull) {
+            clozeAnswerFull.innerHTML = clozeData.fullText;
+        }
+        showAnswerBtn?.classList.remove('hidden');
+    } else if (cardType === CARD_TYPES.BASIC_TYPE_ANSWER) {
+        // Type-in answer card
+        if (q) {
+            q.textContent = card.question || '';
+            q.classList.remove('hidden');
+        }
+        if (a) a.textContent = card.answer || '';
+        if (typeAnswerContainer) typeAnswerContainer.classList.remove('hidden');
+        if (typeAnswerInput) {
+            typeAnswerInput.value = '';
+            setTimeout(() => typeAnswerInput.focus(), 100);
+        }
+        checkAnswerBtn?.classList.remove('hidden');
+    } else {
+        // Standard flashcard types (basic, basic_reversed, basic_optional_reversed, flashcard, vocab)
+        if (q) {
+            q.textContent = card.question || '';
+            q.classList.remove('hidden');
+        }
+        if (a) a.textContent = card.answer || '';
+        showAnswerBtn?.classList.remove('hidden');
+    }
+
     renderProgress();
 
     // Reset interaction metrics
@@ -233,21 +290,93 @@ function showCard() {
         backspaceCount: 0,
         attemptCount: 1,
         totalCorrections: 0,
-        hesitationPauses: 0
+        hesitationPauses: 0,
+        typedAnswer: null,
+        cardType: cardType
     };
 }
 
 function showAnswer() {
-    document.getElementById('cardAnswerContent')?.classList.remove('hidden');
+    const card = getCurrentCard();
+    const cardType = card?.cardType || CARD_TYPES.BASIC;
+
+    if (cardType === CARD_TYPES.CLOZE) {
+        // Show the full cloze text with answers
+        document.getElementById('clozeAnswerContent')?.classList.remove('hidden');
+    } else {
+        // Standard answer reveal
+        document.getElementById('cardAnswerContent')?.classList.remove('hidden');
+    }
+
     document.getElementById('showAnswerBtn')?.classList.add('hidden');
+    document.getElementById('checkAnswerBtn')?.classList.add('hidden');
     document.getElementById('correctBtn')?.classList.remove('hidden');
     document.getElementById('incorrectBtn')?.classList.remove('hidden');
+
     if (studyState.currentInteraction) {
         studyState.currentInteraction.answerShownAt = performance.now();
         // If no action yet, this is the first action
         if (!studyState.currentInteraction.firstActionAt) {
             studyState.currentInteraction.firstActionAt = performance.now();
         }
+    }
+}
+
+function checkTypedAnswer() {
+    const card = getCurrentCard();
+    if (!card) return;
+
+    const typeAnswerInput = document.getElementById('typeAnswerInput');
+    const typeAnswerFeedback = document.getElementById('typeAnswerFeedback');
+    const typeAnswerResult = document.getElementById('typeAnswerResult');
+    const typeAnswerCorrect = document.getElementById('typeAnswerCorrect');
+
+    const userAnswer = typeAnswerInput?.value || '';
+    const correctAnswer = card.answer || '';
+    const gradeResult = gradeTypedAnswer(userAnswer, correctAnswer);
+
+    if (studyState.currentInteraction) {
+        studyState.currentInteraction.typedAnswer = userAnswer;
+        studyState.currentInteraction.answerShownAt = performance.now();
+        if (!studyState.currentInteraction.firstActionAt) {
+            studyState.currentInteraction.firstActionAt = performance.now();
+        }
+    }
+
+    // Show feedback
+    if (typeAnswerFeedback) {
+        typeAnswerFeedback.classList.remove('hidden');
+        if (gradeResult.isCorrect) {
+            typeAnswerFeedback.style.backgroundColor = 'var(--correct-bg, rgba(34, 197, 94, 0.1))';
+            typeAnswerFeedback.style.border = '1px solid var(--correct-border, #22c55e)';
+        } else {
+            typeAnswerFeedback.style.backgroundColor = 'var(--incorrect-bg, rgba(239, 68, 68, 0.1))';
+            typeAnswerFeedback.style.border = '1px solid var(--incorrect-border, #ef4444)';
+        }
+    }
+
+    if (typeAnswerResult) {
+        if (gradeResult.isCorrect) {
+            typeAnswerResult.textContent = '✓ Correct!';
+            typeAnswerResult.style.color = 'var(--correct-text, #22c55e)';
+        } else {
+            typeAnswerResult.textContent = `✗ Incorrect (${Math.round(gradeResult.similarity * 100)}% match)`;
+            typeAnswerResult.style.color = 'var(--incorrect-text, #ef4444)';
+        }
+    }
+
+    if (typeAnswerCorrect) {
+        typeAnswerCorrect.textContent = `Correct answer: ${correctAnswer}`;
+    }
+
+    // Show correct/incorrect buttons
+    document.getElementById('checkAnswerBtn')?.classList.add('hidden');
+    document.getElementById('correctBtn')?.classList.remove('hidden');
+    document.getElementById('incorrectBtn')?.classList.remove('hidden');
+
+    // Disable input
+    if (typeAnswerInput) {
+        typeAnswerInput.disabled = true;
     }
 }
 
@@ -545,52 +674,112 @@ async function loadKnowledge(deckId) {
 
 function isVisible(element) {
     if (!element) return false;
-    if (keyboardManager?.isVisible) return keyboardManager.isVisible(element);
-    return !element.classList.contains('hidden');
+    if (element.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
 }
 
-function handleStudyShortcuts(event) {
-    const key = event.key;
-    const progressView = document.getElementById('progressView');
-    const cardView = document.getElementById('cardView');
-    const completeView = document.getElementById('completeView');
-
-    if (key === 'Escape') {
-        const backBtn = document.getElementById('backToDashboardBtn');
-        return keyboardManager?.clickIfVisible(backBtn) || false;
+/**
+ * Set up keyboard shortcuts for the study page.
+ * Uses direct event listeners for maximum reliability.
+ */
+function setupStudyKeyboard() {
+    const typeAnswerInput = document.getElementById('typeAnswerInput');
+    
+    // Direct Enter handler on the type answer input
+    if (typeAnswerInput) {
+        typeAnswerInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                checkTypedAnswer();
+            }
+            // All other keys (including Space) type naturally - no interception
+        });
     }
 
-    if (isVisible(progressView)) {
-        if (key === ' ' || key === 'Spacebar' || key === 'Enter') {
-            return keyboardManager?.clickIfVisible(document.getElementById('startSessionBtn')) || false;
+    // Global keyboard handler for non-typing shortcuts
+    document.addEventListener('keydown', (e) => {
+        const active = document.activeElement;
+        const isTypingInInput = active && (
+            active.tagName === 'INPUT' || 
+            active.tagName === 'TEXTAREA' || 
+            active.isContentEditable
+        );
+
+        // When typing, only allow Escape
+        if (isTypingInInput && e.key !== 'Escape') {
+            return; // Let keys type naturally
         }
-        return false;
-    }
 
-    if (isVisible(completeView)) {
-        if (key === 'Enter') {
-            return keyboardManager?.clickIfVisible(document.getElementById('finishBtn')) || false;
+        const progressView = document.getElementById('progressView');
+        const cardView = document.getElementById('cardView');
+        const completeView = document.getElementById('completeView');
+
+        // Escape - go back
+        if (e.key === 'Escape') {
+            const backBtn = document.getElementById('backToDashboardBtn');
+            if (backBtn) {
+                e.preventDefault();
+                backBtn.click();
+            }
+            return;
         }
-        return false;
-    }
 
-    if (!isVisible(cardView)) return false;
-
-    const answerVisible = isVisible(document.getElementById('cardAnswerContent'));
-    if (!answerVisible) {
-        if (key === ' ' || key === 'Spacebar' || key === 'Enter') {
-            return keyboardManager?.clickIfVisible(document.getElementById('showAnswerBtn')) || false;
+        // Progress view - Enter/Space to start
+        if (isVisible(progressView)) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                document.getElementById('startSessionBtn')?.click();
+            }
+            return;
         }
-        return false;
-    }
 
-    if (key === '1') return keyboardManager?.clickIfVisible(document.getElementById('incorrectBtn')) || false;
-    if (key === '2') return keyboardManager?.clickIfVisible(document.getElementById('correctBtn')) || false;
-    if (key === 'Enter' || key === ' ' || key === 'Spacebar' || key === 'ArrowRight') {
-        return keyboardManager?.clickIfVisible(document.getElementById('correctBtn')) || false;
-    }
-    return false;
+        // Complete view - Enter to finish
+        if (isVisible(completeView)) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('finishBtn')?.click();
+            }
+            return;
+        }
+
+        // Card view shortcuts
+        if (!isVisible(cardView)) return;
+
+        const showAnswerBtn = document.getElementById('showAnswerBtn');
+        const checkAnswerBtn = document.getElementById('checkAnswerBtn');
+        const correctBtn = document.getElementById('correctBtn');
+        const incorrectBtn = document.getElementById('incorrectBtn');
+
+        // Check if we're showing the answer already
+        const answerVisible = isVisible(document.getElementById('cardAnswerContent')) ||
+                             isVisible(document.getElementById('clozeAnswerContent')) ||
+                             isVisible(document.getElementById('typeAnswerFeedback'));
+
+        if (!answerVisible) {
+            // Before answer is shown
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (isVisible(showAnswerBtn)) {
+                    showAnswerBtn.click();
+                } else if (isVisible(checkAnswerBtn)) {
+                    checkAnswerBtn.click();
+                }
+            }
+            return;
+        }
+
+        // After answer is shown - grade the card
+        if (e.key === '1' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            incorrectBtn?.click();
+        } else if (e.key === '2' || e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            correctBtn?.click();
+        }
+    });
 }
+
 
 async function init() {
     await initDB();
@@ -625,12 +814,14 @@ async function init() {
 
     document.getElementById('startSessionBtn')?.addEventListener('click', startSession);
     document.getElementById('showAnswerBtn')?.addEventListener('click', showAnswer);
+    document.getElementById('checkAnswerBtn')?.addEventListener('click', checkTypedAnswer);
     document.getElementById('correctBtn')?.addEventListener('click', () => markAnswer(true));
     document.getElementById('incorrectBtn')?.addEventListener('click', () => markAnswer(false));
     document.getElementById('finishBtn')?.addEventListener('click', () => window.location.href = 'index.html');
     document.getElementById('backToDashboardBtn')?.addEventListener('click', () => window.location.href = 'index.html');
 
-    keyboardManager?.registerContext('study', handleStudyShortcuts);
+    // Set up keyboard shortcuts
+    setupStudyKeyboard();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

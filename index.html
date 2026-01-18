@@ -1831,13 +1831,140 @@
             color: var(--secondary-text);
         }
 
-        .question-input {
-            border-color: var(--border-color) !important;
+        .question-input,
+        .solution-input {
+            font-family: 'Inter', sans-serif;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 15px;
+            font-size: 1rem;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            width: 100%;
+            resize: vertical;
+            min-height: 100px;
+            transition: all 0.3s ease;
+        }
+
+        .question-input:focus,
+        .solution-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: var(--input-focus-bg);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
         }
 
         .solution-input {
-            border-color: var(--border-color) !important;
             margin-bottom: 0;
+        }
+
+        .card-type-dropdown {
+            font-family: 'Inter', sans-serif;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 0.95rem;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 180px;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 18px;
+            padding-right: 35px;
+        }
+
+        .dark-mode .card-type-dropdown {
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+        }
+
+        .card-type-dropdown:hover {
+            border-color: var(--primary-color);
+        }
+
+        .card-type-dropdown:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: var(--input-focus-bg);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .card-type-dropdown option {
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            padding: 10px;
+        }
+
+        .cloze-text-input {
+            font-family: 'Inter', sans-serif;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 15px;
+            font-size: 1rem;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            width: 100%;
+            resize: vertical;
+            min-height: 120px;
+            transition: all 0.3s ease;
+        }
+
+        .cloze-text-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: var(--input-focus-bg);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .cloze-hint-input {
+            font-family: 'Inter', sans-serif;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 0.95rem;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            width: 100%;
+            transition: all 0.3s ease;
+        }
+
+        .cloze-hint-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: var(--input-focus-bg);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .cloze-hint-input::placeholder {
+            color: var(--secondary-text);
+            opacity: 0.7;
+        }
+
+        .occlusion-label-input {
+            font-family: 'Inter', sans-serif;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 0.95rem;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            width: 100%;
+            transition: all 0.3s ease;
+        }
+
+        .occlusion-label-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background-color: var(--input-focus-bg);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .occlusion-label-input::placeholder {
+            color: var(--secondary-text);
+            opacity: 0.7;
         }
 
         .remove-card-btn {
@@ -2954,8 +3081,7 @@
                     <div class="form-group">
                         <label for="deckTypeHint">Deck Type</label>
                         <select id="deckTypeHint">
-                            <option value="General">General / Q&A</option>
-                            <option value="Vocabulary">Vocabulary</option>
+                            <option value="General">General</option>
                             <option value="Sequence">Sequence</option>
                         </select>
                     </div>
@@ -3495,14 +3621,20 @@
                     <label for="importDeckTypeHint">Deck Type</label>
                     <select id="importDeckTypeHint">
                         <option value="General">General / Q&A</option>
+                        <option value="Basic">Basic</option>
+                        <option value="BasicReversed">Basic (and reversed card)</option>
+                        <option value="BasicOptionalReversed">Basic (optional reversed card)</option>
+                        <option value="TypeAnswer">Basic (type in the answer)</option>
+                        <option value="Cloze">Cloze</option>
+                        <option value="ImageOcclusion">Image Occlusion</option>
                         <option value="Vocabulary">Vocabulary</option>
                         <option value="Sequence">Sequence</option>
                     </select>
                 </div>
             </div>
             <p style="font-size: 0.95rem; color: var(--secondary-text); text-align: left; margin-top: 8px;">
-                Sequence imports: JSON with {"type":"sequence","sequences":[{"title":"","steps":["",""]}]} or TSV/CSV with
-                columns "Sequence Title" &rarr; "Step Text" [&rarr; "Notes"] grouped by title.</p>
+                <strong>Anki-compatible formats:</strong> CSV/TSV with Front, Back, [Type], [Add Reverse] columns.
+                Cloze uses {{c1::text}} syntax. Sequence imports: JSON with {"type":"sequence","sequences":[...]}.</p>
             <div class="modal-actions">
                 <button class="btn btn-success" onclick="importData()">Import and Create Deck</button>
             </div>
@@ -3637,7 +3769,7 @@
             <span class="close" onclick="closeLearnModeSetupModal()">&times;</span>
             <h2>Learn Mode Setup</h2>
             <p>Configure your learning session for this deck.</p>
-            <div class="form-group" hidden>
+            <div class="form-group">
                 <label for="learnModeExamDate">Exam Date (Optional)</label>
                 <input type="date" id="learnModeExamDate">
                 <small style="color: var(--secondary-text);">Set this to prioritise cards you're likely to forget before
@@ -3847,18 +3979,44 @@
         <div class="modal-content">
             <span class="close" onclick="this.parentElement.parentElement.classList.remove('show')">&times;</span>
             <h2>Keyboard Shortcuts</h2>
-            <p style="text-align: left; margin-top: 20px; line-height: 1.8;">
-                <b>During Simple Flashcard Mode:</b><br>
-                - <b>Space / Enter</b>: Show Answer<br>
-                - <b>? / 2</b>: Mark as Correct<br>
-                - <b>? / 1</b>: Mark as Incorrect<br><br>
-                <b>During Type Mode:</b><br>
-                - <b>Enter / ?</b>: Check Answer<br>
-                - <b>? / 2</b>: Mark as Correct (after checking)<br>
-                - <b>? / 1</b>: Mark as Incorrect (after checking)<br><br>
-                <b>On Progress Screen:</b><br>
-                - <b>Enter</b>: Start Next Round
-            </p>
+            <div style="text-align: left; margin-top: 20px; line-height: 1.8;">
+                <div style="margin-bottom: 16px;">
+                    <b>Global (Dashboard):</b><br>
+                    - <b>Ctrl/Cmd + K</b>: Focus search<br>
+                    - <b>Ctrl/Cmd + N</b>: New deck<br>
+                    - <b>Ctrl/Cmd + ,</b>: Open settings
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <b>Learn Mode:</b><br>
+                    - <b>Space / Enter</b>: Show answer (flashcards)<br>
+                    - <b>Enter</b>: Check answer (typed); if empty, mark “Don’t know”<br>
+                    - <b>1 / ←</b>: Incorrect<br>
+                    - <b>2 / →</b>: Correct
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <b>Review & Exam Modes:</b><br>
+                    - <b>Space / Enter</b>: Show answer (flashcards)<br>
+                    - <b>Enter</b>: Check answer (typed)<br>
+                    - <b>1 / ←</b>: Incorrect<br>
+                    - <b>2 / →</b>: Correct
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <b>Practice Test Mode:</b><br>
+                    - <b>Enter / ↑ / Space</b>: Show answer / Check answer / Next (contextual)<br>
+                    - <b>1 / ←</b>: Incorrect<br>
+                    - <b>2 / →</b>: Correct
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <b>Sequence Mode:</b><br>
+                    - <b>Enter / Space</b>: Submit task<br>
+                    - <b>Enter / Space</b>: Continue (after feedback)
+                </div>
+                <div>
+                    <b>Editor:</b><br>
+                    - <b>Ctrl/Cmd + S</b>: Save deck<br>
+                    - <b>Ctrl/Cmd + Enter</b>: Add card/sequence
+                </div>
+            </div>
         </div>
     </div>
 
