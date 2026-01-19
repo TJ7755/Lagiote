@@ -18,11 +18,11 @@ import {
     composeOptimalSession,
     createExamKeyboardHandler,
     EXAM_MODE_SHORTCUTS
-} from '../../core/exam/exam-mode.js';
+} from '../../../js/core/exam/exam-mode.js';
 
-import { gradeQuestion } from '../../core/exam/marking.js';
-import { applyMarkingRecordToAtoms } from '../../core/exam/atom-updates.js';
-import { initDB, getDataFromDB, saveDataToDB, getAllDataFromDB } from '../../core/db.js';
+import { gradeQuestion } from '../../../js/core/exam/marking.js';
+import { applyMarkingRecordToAtoms } from '../../../js/core/exam/atom-updates.js';
+import { initDB, getDataFromDB, saveDataToDB, getAllDataFromDB } from '../../../js/core/db.js';
 
 /**
  * Exam Mode State

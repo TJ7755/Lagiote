@@ -7,6 +7,7 @@
  */
 
 import { computeEffectiveMasteryMap, clamp01 } from './atom-dynamics.js';
+import { generateUUID } from './exam-mode.js';
 
 /**
  * Creates a path node from a cluster of atoms.
@@ -23,7 +24,7 @@ export function createPathNode({
     metadata = {}
 } = {}) {
     return {
-        id: id || crypto.randomUUID(),
+        id: id || generateUUID(),
         name,
         type, // 'topic', 'technique', 'representation', 'checkpoint'
         atomIds: Array.isArray(atomIds) ? atomIds : [],
@@ -160,7 +161,7 @@ export function createPathMap({
     metadata = {}
 } = {}) {
     return {
-        id: id || crypto.randomUUID(),
+        id: id || generateUUID(),
         name,
         nodes: Array.isArray(nodes) ? nodes : [],
         layout, // 'vertical', 'horizontal', 'graph'
