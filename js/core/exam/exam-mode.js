@@ -133,6 +133,7 @@ export function createQuestion({
     variationProfile = {},
     atomMap = [],
     markSchemeId = null,
+    marksAvailable = 1,
     tags = [],
     metadata = {}
 } = {}) {
@@ -161,6 +162,7 @@ export function createQuestion({
         atomMap: Array.isArray(atomMap) ? atomMap : [],
         atomIds,
         markSchemeId,
+        marksAvailable: Math.max(0, Number.isFinite(Number(marksAvailable)) ? Number(marksAvailable) : 1),
         tags: Array.isArray(tags) ? tags : [],
         metadata: metadata && typeof metadata === 'object' ? metadata : {},
         createdAt: new Date().toISOString(),

@@ -135,7 +135,42 @@ class KeyboardManager {
                     window.showView?.('globalAnalytics');
                     return;
                 }
+                // Ctrl+Shift+E: Open Exam Hub
+                if (key === 'e') {
+                    event.preventDefault();
+                    this.openExamHubWithDeckSelection();
+                    return;
+                }
+                // Ctrl+Shift+? or Ctrl+Shift+/: Show keyboard shortcuts help
+                if (key === '?' || key === '/') {
+                    event.preventDefault();
+                    window.showKeyboardShortcutsHelp?.();
+                    return;
+                }
             }
+        }
+    }
+
+    /**
+     * Opens the Exam Hub with deck selection if needed.
+     * If a deck is currently selected, opens the hub for that deck.
+     * Otherwise, shows a modal to select a deck.
+     */
+    openExamHubWithDeckSelection() {
+        // Check if there's a currently viewing deck
+        const currentDeckId = window.currentViewingDeckId || window.currentDeckId;
+        
+        if (currentDeckId && typeof window.openExamModeHub === 'function') {
+            window.openExamModeHub(currentDeckId);
+            return;
+        }
+        
+        // Show deck selection modal for Exam Hub
+        if (typeof window.showExamHubDeckSelector === 'function') {
+            window.showExamHubDeckSelector();
+        } else {
+            // Fallback: notify user to select a deck first
+            window.alert('Please select a deck first to open Exam Hub.');
         }
     }
 }

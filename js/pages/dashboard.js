@@ -4673,6 +4673,24 @@ async function updateDashboard() {
 	                actions.appendChild(secondaryBtn);
 	            }
 
+            // Add Exam Hub button to each deck card
+            const examHubBtn = document.createElement('button');
+            examHubBtn.className = 'btn deck-action-exam-hub';
+            examHubBtn.type = 'button';
+            examHubBtn.textContent = 'Exam Hub';
+            examHubBtn.title = 'Open Exam Hub for exam preparation and predictions';
+            examHubBtn.setAttribute('aria-label', 'Open Exam Hub for exam preparation and predictions');
+            examHubBtn.dataset.testid = `deck-action-exam-hub-${deck.id}`;
+            examHubBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof window.openExamModeHub === 'function') {
+                    window.openExamModeHub(deck.id);
+                } else {
+                    showToast('Exam Hub is not available.', 'error');
+                }
+            });
+            actions.appendChild(examHubBtn);
+
             deckCard.appendChild(mainClickable);
             deckCard.appendChild(actions);
             decksGrid.appendChild(deckCard);
@@ -16018,6 +16036,109 @@ function closeCardHistoryModal() {
     if (modal) modal.classList.remove('show');
 }
 
+/**
+ * Shows the keyboard shortcuts help modal.
+ */
+function showKeyboardShortcutsHelp() {
+    const modal = document.getElementById('keyboardShortcutsModal');
+    if (modal) {
+        modal.classList.add('show');
+    }
+}
+
+/**
+ * Closes the keyboard shortcuts help modal.
+ */
+function closeKeyboardShortcutsHelp() {
+    const modal = document.getElementById('keyboardShortcutsModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+/**
+ * Shows the Exam Hub deck selector modal.
+ * Populates the list with available decks.
+ */
+function showExamHubDeckSelector() {
+    const modal = document.getElementById('examHubDeckSelectorModal');
+    const list = document.getElementById('examHubDeckSelectorList');
+    
+    if (!modal || !list) {
+        showToast('Unable to open deck selector.', 'error');
+        return;
+    }
+    
+    // Clear existing items
+    list.innerHTML = '';
+    
+    // Get all decks (including empty ones)
+    const rawEntries = decks ? Object.entries(decks) : [];
+    const deckEntries = rawEntries.filter(([, deck]) => !!deck);
+    
+    if (deckEntries.length === 0) {
+        list.innerHTML = `
+            <div class="exam-empty-state">
+                <h3>No decks available</h3>
+                <p>Create a deck and add cards to use the Exam Hub.</p>
+            </div>
+        `;
+        modal.classList.add('show');
+        return;
+    }
+    
+    // Populate with decks (disabling those without cards)
+    deckEntries.forEach(([deckId, deck]) => {
+        const cardCount = deck.cards?.length || 0;
+        const hasCards = cardCount > 0;
+        
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'deck-select-item';
+        item.dataset.deckId = deckId;
+        if (!hasCards) {
+            item.disabled = true;
+        }
+        item.innerHTML = `
+            <div>
+                <div class="deck-name">${escapeHtml(deck.name || 'Untitled Deck')}</div>
+                <div class="deck-meta">
+                    ${cardCount} ${cardCount === 1 ? 'card' : 'cards'}${!hasCards ? ' - Add cards to use Exam Hub' : ''}
+                </div>
+            </div>
+            <span class="deck-select-action">${hasCards ? 'Open' : 'No cards'}</span>
+        `;
+        item.addEventListener('click', () => {
+            if (!hasCards) return;
+            if (typeof window.openExamModeHub === 'function') {
+                modal.classList.remove('show');
+                window.openExamModeHub(deckId);
+            } else {
+                showToast('Exam Hub is unavailable. Please try again later.', 'error');
+            }
+        });
+        list.appendChild(item);
+    });
+    
+    modal.classList.add('show');
+}
+
+/**
+ * Closes the Exam Hub deck selector modal.
+ */
+function closeExamHubDeckSelector() {
+    const modal = document.getElementById('examHubDeckSelectorModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+// Expose the keyboard shortcuts and deck selector functions globally
+window.showKeyboardShortcutsHelp = showKeyboardShortcutsHelp;
+window.closeKeyboardShortcutsHelp = closeKeyboardShortcutsHelp;
+window.showExamHubDeckSelector = showExamHubDeckSelector;
+window.closeExamHubDeckSelector = closeExamHubDeckSelector;
+
 window.toggleCortexDebug = async function () {
     studyState.cortexDebugEnabled = !studyState.cortexDebugEnabled;
     const cortex = await getCortexEngine();
@@ -16093,6 +16214,7 @@ const inlineHandlers = {
     saveUsername,
     selectTestPreset,
     showAiGenerator,
+    showAnalyticsView,
     showAnswer,
     showEditor,
     showExamPlanModal,

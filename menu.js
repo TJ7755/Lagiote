@@ -50,6 +50,61 @@ const template = [
     ]
   },
   {
+    label: 'Study',
+    submenu: [
+      {
+        label: 'Exam Hub',
+        accelerator: 'CmdOrCtrl+Shift+E',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.keyboardManager?.openExamHubWithDeckSelection === 'function') {
+                  window.keyboardManager.openExamHubWithDeckSelection();
+                } else if (typeof window.showExamHubDeckSelector === 'function') {
+                  window.showExamHubDeckSelector();
+                }
+              `);
+            } catch (err) {
+              console.error('Failed to open Exam Hub:', err);
+            }
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Analytics',
+        accelerator: 'CmdOrCtrl+Shift+A',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.showAnalyticsView === 'function') window.showAnalyticsView();
+              `);
+            } catch (err) {
+              console.error('Failed to open Analytics:', err);
+            }
+          }
+        }
+      },
+      {
+        label: 'Memory Insights',
+        accelerator: 'CmdOrCtrl+Shift+I',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.showInsightsView === 'function') window.showInsightsView();
+              `);
+            } catch (err) {
+              console.error('Failed to open Memory Insights:', err);
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
     label: 'Window',
     submenu: [
       { role: 'minimize' },
@@ -67,6 +122,24 @@ const template = [
   {
     role: 'help',
     submenu: [
+      {
+        label: 'Keyboard Shortcuts',
+        accelerator: 'CmdOrCtrl+Shift+/',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.showKeyboardShortcutsHelp === 'function') {
+                  window.showKeyboardShortcutsHelp();
+                }
+              `);
+            } catch (err) {
+              console.error('Failed to open Keyboard Shortcuts:', err);
+            }
+          }
+        }
+      },
+      { type: 'separator' },
       {
         label: 'Learn More',
         click: async () => {

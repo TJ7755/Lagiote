@@ -2798,7 +2798,7 @@
 	
 	                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
 	                            <button class="btn learn-btn hidden" id="deckDetailSequenceBtn" onclick="configureStudy('sequence')">Sequence</button>
-	                            <button class="btn btn-prominent" id="deckDetailExamModeBtn" onclick="openExamModeHub(currentViewingDeckId)">Exam Mode</button>
+	                            <button class="btn btn-prominent" id="deckDetailExamHubBtn" onclick="if(typeof window.openExamModeHub==='function'){window.openExamModeHub(currentViewingDeckId)}else{showToast('Exam Hub is unavailable. Please try again later.','error')}" title="Open Exam Hub for exam preparation (Ctrl/Cmd+Shift+E)">Exam Hub</button>
 	                            <button class="btn" id="deckDetailSpacedBtn" onclick="configureStudy('spaced')">Spaced Learning</button>
 	                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
 	                            <button class="btn btn-secondary" id="deckDetailResetBtn"
@@ -4603,6 +4603,64 @@
             </div>
             <div id="cardHistoryTableContainer">
                 <!-- History table will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Help Modal -->
+    <div id="keyboardShortcutsModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <button type="button" class="close" aria-label="Close" onclick="closeKeyboardShortcutsHelp()">&times;</button>
+            <h2>Keyboard Shortcuts</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                <div>
+                    <h3 style="margin-bottom: 10px; color: var(--primary-color);">Dashboard</h3>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+K</kbd> <span>Search</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+N</kbd> <span>New deck</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+,</kbd> <span>Settings</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+Shift+A</kbd> <span>Analytics</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+Shift+I</kbd> <span>Memory insights</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+Shift+G</kbd> <span>Global analytics</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+Shift+E</kbd> <span>Exam Hub</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+Shift+/</kbd> <span>This help</span></div>
+                    <div class="shortcut-item"><kbd>Esc</kbd> <span>Close modal</span></div>
+                </div>
+                <div>
+                    <h3 style="margin-bottom: 10px; color: var(--primary-color);">Exam Hub</h3>
+                    <div class="shortcut-item"><kbd>S</kbd> <span>Start session</span></div>
+                    <div class="shortcut-item"><kbd>T</kbd> <span>Topic map</span></div>
+                    <div class="shortcut-item"><kbd>E</kbd> <span>Editors</span></div>
+                    <div class="shortcut-item"><kbd>Esc</kbd> <span>Back / pause</span></div>
+                </div>
+                <div>
+                    <h3 style="margin-bottom: 10px; color: var(--primary-color);">Session Player</h3>
+                    <div class="shortcut-item"><kbd>Left/Right</kbd> <span>Navigate questions</span></div>
+                    <div class="shortcut-item"><kbd>1-4</kbd> <span>Select option</span></div>
+                    <div class="shortcut-item"><kbd>Enter</kbd> <span>Submit answer</span></div>
+                    <div class="shortcut-item"><kbd>F</kbd> <span>Flag question</span></div>
+                    <div class="shortcut-item"><kbd>Ctrl/Cmd+S</kbd> <span>Submit exam</span></div>
+                    <div class="shortcut-item"><kbd>Esc</kbd> <span>Pause</span></div>
+                </div>
+                <div>
+                    <h3 style="margin-bottom: 10px; color: var(--primary-color);">Marking</h3>
+                    <div class="shortcut-item"><kbd>1</kbd> <span>Mark incorrect</span></div>
+                    <div class="shortcut-item"><kbd>2</kbd> <span>Mark partial</span></div>
+                    <div class="shortcut-item"><kbd>3</kbd> <span>Mark correct</span></div>
+                    <div class="shortcut-item"><kbd>N</kbd> <span>Next question</span></div>
+                    <div class="shortcut-item"><kbd>P</kbd> <span>Previous question</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exam Hub Deck Selector Modal -->
+    <div id="examHubDeckSelectorModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <button type="button" class="close" aria-label="Close" onclick="closeExamHubDeckSelector()">&times;</button>
+            <h2>Select a Deck</h2>
+            <p style="color: var(--secondary-text); margin-bottom: 15px;">Choose a deck to open in Exam Hub</p>
+            <div id="examHubDeckSelectorList" class="deck-cards-list" style="max-height: 400px; overflow-y: auto;">
+                <!-- Decks will be rendered here -->
             </div>
         </div>
     </div>
