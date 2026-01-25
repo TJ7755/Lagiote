@@ -4673,6 +4673,24 @@ async function updateDashboard() {
 	                actions.appendChild(secondaryBtn);
 	            }
 
+            // Add Exam Hub button to each deck card
+            const examHubBtn = document.createElement('button');
+            examHubBtn.className = 'btn deck-action-exam-hub';
+            examHubBtn.type = 'button';
+            examHubBtn.textContent = 'Exam Hub';
+            examHubBtn.title = 'Open Exam Hub for exam preparation and predictions';
+            examHubBtn.setAttribute('aria-label', 'Open Exam Hub for exam preparation and predictions');
+            examHubBtn.dataset.testid = `deck-action-exam-hub-${deck.id}`;
+            examHubBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof window.openExamModeHub === 'function') {
+                    window.openExamModeHub(deck.id);
+                } else {
+                    showToast('Exam Hub is not available.', 'error');
+                }
+            });
+            actions.appendChild(examHubBtn);
+
             deckCard.appendChild(mainClickable);
             deckCard.appendChild(actions);
             decksGrid.appendChild(deckCard);
@@ -16017,6 +16035,96 @@ function closeCardHistoryModal() {
     const modal = document.getElementById('cardHistoryModal');
     if (modal) modal.classList.remove('show');
 }
+
+/**
+ * Shows the keyboard shortcuts help modal.
+ */
+function showKeyboardShortcutsHelp() {
+    const modal = document.getElementById('keyboardShortcutsModal');
+    if (modal) {
+        modal.classList.add('show');
+    }
+}
+
+/**
+ * Closes the keyboard shortcuts help modal.
+ */
+function closeKeyboardShortcutsHelp() {
+    const modal = document.getElementById('keyboardShortcutsModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+/**
+ * Shows the Exam Hub deck selector modal.
+ * Populates the list with available decks.
+ */
+function showExamHubDeckSelector() {
+    const modal = document.getElementById('examHubDeckSelectorModal');
+    const list = document.getElementById('examHubDeckSelectorList');
+    
+    if (!modal || !list) {
+        showToast('Unable to open deck selector.', 'error');
+        return;
+    }
+    
+    // Clear existing items
+    list.innerHTML = '';
+    
+    // Get all decks
+    const deckEntries = Object.entries(decks).filter(([, deck]) => deck && deck.cards && deck.cards.length > 0);
+    
+    if (deckEntries.length === 0) {
+        list.innerHTML = `
+            <div class="exam-empty-state">
+                <h3>No decks available</h3>
+                <p>Create a deck first to use the Exam Hub.</p>
+            </div>
+        `;
+        modal.classList.add('show');
+        return;
+    }
+    
+    // Populate with decks
+    deckEntries.forEach(([deckId, deck]) => {
+        const item = document.createElement('div');
+        item.className = 'deck-select-item';
+        item.dataset.deckId = deckId;
+        item.innerHTML = `
+            <div>
+                <div class="deck-name">${escapeHtml(deck.name || 'Untitled Deck')}</div>
+                <div class="deck-meta">${deck.cards?.length || 0} cards</div>
+            </div>
+            <button class="btn btn-primary">Open</button>
+        `;
+        item.addEventListener('click', () => {
+            modal.classList.remove('show');
+            if (typeof window.openExamModeHub === 'function') {
+                window.openExamModeHub(deckId);
+            }
+        });
+        list.appendChild(item);
+    });
+    
+    modal.classList.add('show');
+}
+
+/**
+ * Closes the Exam Hub deck selector modal.
+ */
+function closeExamHubDeckSelector() {
+    const modal = document.getElementById('examHubDeckSelectorModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+// Expose the keyboard shortcuts and deck selector functions globally
+window.showKeyboardShortcutsHelp = showKeyboardShortcutsHelp;
+window.closeKeyboardShortcutsHelp = closeKeyboardShortcutsHelp;
+window.showExamHubDeckSelector = showExamHubDeckSelector;
+window.closeExamHubDeckSelector = closeExamHubDeckSelector;
 
 window.toggleCortexDebug = async function () {
     studyState.cortexDebugEnabled = !studyState.cortexDebugEnabled;

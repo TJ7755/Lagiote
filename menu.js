@@ -50,6 +50,51 @@ const template = [
     ]
   },
   {
+    label: 'Study',
+    submenu: [
+      {
+        label: 'Exam Hub',
+        accelerator: 'CmdOrCtrl+Shift+E',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            browserWindow.webContents.executeJavaScript(`
+              if (typeof window.keyboardManager?.openExamHubWithDeckSelection === 'function') {
+                window.keyboardManager.openExamHubWithDeckSelection();
+              } else if (typeof window.showExamHubDeckSelector === 'function') {
+                window.showExamHubDeckSelector();
+              } else if (typeof window.showToast === 'function') {
+                window.showToast('Please select a deck first to open Exam Hub.', 'info');
+              }
+            `);
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Analytics',
+        accelerator: 'CmdOrCtrl+Shift+A',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            browserWindow.webContents.executeJavaScript(`
+              if (typeof window.showView === 'function') window.showView('analytics');
+            `);
+          }
+        }
+      },
+      {
+        label: 'Memory Insights',
+        accelerator: 'CmdOrCtrl+Shift+I',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            browserWindow.webContents.executeJavaScript(`
+              if (typeof window.showView === 'function') window.showView('insights');
+            `);
+          }
+        }
+      }
+    ]
+  },
+  {
     label: 'Window',
     submenu: [
       { role: 'minimize' },
@@ -67,6 +112,20 @@ const template = [
   {
     role: 'help',
     submenu: [
+      {
+        label: 'Keyboard Shortcuts',
+        accelerator: 'CmdOrCtrl+Shift+?',
+        click: async (menuItem, browserWindow) => {
+          if (browserWindow) {
+            browserWindow.webContents.executeJavaScript(`
+              if (typeof window.showKeyboardShortcutsHelp === 'function') {
+                window.showKeyboardShortcutsHelp();
+              }
+            `);
+          }
+        }
+      },
+      { type: 'separator' },
       {
         label: 'Learn More',
         click: async () => {

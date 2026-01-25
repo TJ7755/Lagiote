@@ -778,3 +778,112 @@ body .btn-prominent {
     background: var(--button-secondary-hover);
     color: var(--text-color);
 }
+
+/* Exam Hub Button on Deck Cards */
+#decksContainer .deck-action-exam-hub {
+    background: linear-gradient(135deg, var(--primary-color), #6366f1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+#decksContainer .deck-action-exam-hub:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+}
+
+/* Keyboard Shortcuts Modal Styles */
+.shortcut-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.shortcut-item:last-child {
+    border-bottom: none;
+}
+
+.shortcut-item kbd {
+    display: inline-block;
+    padding: 4px 8px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--primary-color);
+    box-shadow: 0 2px 4px var(--shadow-color);
+    white-space: nowrap;
+}
+
+.shortcut-item span {
+    color: var(--secondary-text);
+    font-size: 0.9rem;
+}
+
+/* Exam Hub Deck Selector Modal */
+#examHubDeckSelectorList .deck-select-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#examHubDeckSelectorList .deck-select-item:hover {
+    background: var(--card-bg);
+    border-color: var(--primary-color);
+    transform: translateY(-1px);
+}
+
+#examHubDeckSelectorList .deck-select-item .deck-name {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+#examHubDeckSelectorList .deck-select-item .deck-meta {
+    font-size: 0.85rem;
+    color: var(--secondary-text);
+}
+
+/* Empty state for Exam Hub */
+.exam-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--secondary-text);
+}
+
+.exam-empty-state h3 {
+    margin-bottom: 10px;
+    color: var(--text-color);
+}
+
+.exam-empty-state p {
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+/* Exam Mode Toast Styles */
+.toast.exam-toast {
+    border-left: 4px solid var(--primary-color);
+}
+
+.toast.exam-toast.error {
+    border-left-color: var(--danger-color);
+}
+
+.toast.exam-toast.success {
+    border-left-color: var(--success-color);
+}
