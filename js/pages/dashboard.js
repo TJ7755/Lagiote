@@ -16110,9 +16110,11 @@ function showExamHubDeckSelector() {
         `;
         item.addEventListener('click', () => {
             if (!hasCards) return;
-            modal.classList.remove('show');
             if (typeof window.openExamModeHub === 'function') {
+                modal.classList.remove('show');
                 window.openExamModeHub(deckId);
+            } else {
+                showToast('Exam Hub is unavailable. Please try again later.', 'error');
             }
         });
         list.appendChild(item);

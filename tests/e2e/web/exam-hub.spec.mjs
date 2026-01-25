@@ -40,7 +40,7 @@ test('Exam Hub button exists in deck detail view', async ({ page }) => {
     await openDeckById(page, 'deck-learn', 'Learn Mode Deck');
     
     // Check for the Exam Hub button in deck detail
-    const examHubBtn = page.locator('#deckDetailExamModeBtn');
+    const examHubBtn = page.locator('#deckDetailExamHubBtn');
     await expect(examHubBtn).toBeVisible({ timeout: 5000 });
     await expect(examHubBtn).toHaveText('Exam Hub');
 });
