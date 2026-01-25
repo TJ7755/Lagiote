@@ -39,9 +39,9 @@ describe('Exam Mode - Predicted Score Distribution', () => {
         expect(prediction.confidenceInterval.lower).toBeLessThan(prediction.expectedMarks);
         expect(prediction.confidenceInterval.upper).toBeGreaterThan(prediction.expectedMarks);
         
-        // Variance should be positive (non-degenerate)
-        const variance = prediction.confidenceInterval.upper - prediction.confidenceInterval.lower;
-        expect(variance).toBeGreaterThan(0);
+        // Confidence interval width should be positive (non-degenerate)
+        const intervalWidth = prediction.confidenceInterval.upper - prediction.confidenceInterval.lower;
+        expect(intervalWidth).toBeGreaterThan(0);
     });
     
     it('predictions change with exam date distance', () => {
