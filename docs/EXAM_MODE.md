@@ -179,7 +179,7 @@ Optimal sessions follow a structured pattern:
 - `1-4` - Select MCQ option
 - `Enter` - Submit answer
 - `F` - Flag question for review
-- `Ctrl+S` - Submit exam
+- `Ctrl/Cmd+S` - Submit exam
 - `Esc` - Pause
 
 ### Marking

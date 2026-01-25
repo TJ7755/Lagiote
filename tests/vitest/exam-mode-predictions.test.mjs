@@ -94,14 +94,15 @@ describe('Exam Mode - Predicted Score Distribution', () => {
         
         const prediction = predictExamScore(spec, questions, atoms, now, examDate);
         
-        if (prediction.gradeProbabilities && Object.keys(prediction.gradeProbabilities).length > 0) {
-            // Grade probabilities represent cumulative probabilities of achieving at least that grade,
-            // so they should be between 0 and 1 for each grade
-            Object.values(prediction.gradeProbabilities).forEach(prob => {
-                expect(prob).toBeGreaterThanOrEqual(0);
-                expect(prob).toBeLessThanOrEqual(1);
-            });
-        }
+        // Assert that grade probabilities object exists and has expected keys
+        expect(prediction.gradeProbabilities).toBeTruthy();
+        const expectedGrades = ['A*', 'A', 'B', 'C', 'D', 'U'];
+        expectedGrades.forEach(grade => {
+            expect(prediction.gradeProbabilities).toHaveProperty(grade);
+            const prob = prediction.gradeProbabilities[grade];
+            expect(prob).toBeGreaterThanOrEqual(0);
+            expect(prob).toBeLessThanOrEqual(1);
+        });
     });
 });
 

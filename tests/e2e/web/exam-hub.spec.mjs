@@ -8,7 +8,7 @@ import {
 import { createTestLogger } from '../test-logging.mjs';
 
 let logger;
-const MOD = 'Control';
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 test.beforeEach(async ({ page }, testInfo) => {
     await applyTestMode(page);
