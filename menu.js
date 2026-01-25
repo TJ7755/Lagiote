@@ -57,15 +57,17 @@ const template = [
         accelerator: 'CmdOrCtrl+Shift+E',
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
-            browserWindow.webContents.executeJavaScript(`
-              if (typeof window.keyboardManager?.openExamHubWithDeckSelection === 'function') {
-                window.keyboardManager.openExamHubWithDeckSelection();
-              } else if (typeof window.showExamHubDeckSelector === 'function') {
-                window.showExamHubDeckSelector();
-              } else if (typeof window.showToast === 'function') {
-                window.showToast('Please select a deck first to open Exam Hub.', 'info');
-              }
-            `);
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.keyboardManager?.openExamHubWithDeckSelection === 'function') {
+                  window.keyboardManager.openExamHubWithDeckSelection();
+                } else if (typeof window.showExamHubDeckSelector === 'function') {
+                  window.showExamHubDeckSelector();
+                }
+              `);
+            } catch (err) {
+              console.error('Failed to open Exam Hub:', err);
+            }
           }
         }
       },
@@ -75,9 +77,13 @@ const template = [
         accelerator: 'CmdOrCtrl+Shift+A',
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
-            browserWindow.webContents.executeJavaScript(`
-              if (typeof window.showAnalyticsView === 'function') window.showAnalyticsView();
-            `);
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.showAnalyticsView === 'function') window.showAnalyticsView();
+              `);
+            } catch (err) {
+              console.error('Failed to open Analytics:', err);
+            }
           }
         }
       },
@@ -86,9 +92,13 @@ const template = [
         accelerator: 'CmdOrCtrl+Shift+I',
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
-            browserWindow.webContents.executeJavaScript(`
-              if (typeof window.showInsightsView === 'function') window.showInsightsView();
-            `);
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.showInsightsView === 'function') window.showInsightsView();
+              `);
+            } catch (err) {
+              console.error('Failed to open Memory Insights:', err);
+            }
           }
         }
       }
@@ -117,11 +127,15 @@ const template = [
         accelerator: 'CmdOrCtrl+Shift+/',
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
-            browserWindow.webContents.executeJavaScript(`
-              if (typeof window.showKeyboardShortcutsHelp === 'function') {
-                window.showKeyboardShortcutsHelp();
-              }
-            `);
+            try {
+              await browserWindow.webContents.executeJavaScript(`
+                if (typeof window.showKeyboardShortcutsHelp === 'function') {
+                  window.showKeyboardShortcutsHelp();
+                }
+              `);
+            } catch (err) {
+              console.error('Failed to open Keyboard Shortcuts:', err);
+            }
           }
         }
       },

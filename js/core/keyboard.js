@@ -168,9 +168,9 @@ class KeyboardManager {
         // Show deck selection modal for Exam Hub
         if (typeof window.showExamHubDeckSelector === 'function') {
             window.showExamHubDeckSelector();
-        } else if (typeof window.openExamModeHub === 'function') {
-            // Fallback: show toast asking user to select a deck first
-            window.showToast?.('Please select a deck first to open Exam Hub.', 'info');
+        } else {
+            // Fallback: notify user to select a deck first
+            window.alert('Please select a deck first to open Exam Hub.');
         }
     }
 }

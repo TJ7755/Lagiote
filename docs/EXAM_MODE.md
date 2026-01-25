@@ -165,8 +165,8 @@ Optimal sessions follow a structured pattern:
 ## Keyboard Shortcuts
 
 ### Dashboard
-- `Ctrl+Shift+E` - Open Exam Hub
-- `Ctrl+Shift+?` - Show keyboard shortcuts help
+- `Ctrl/Cmd+Shift+E` - Open Exam Hub
+- `Ctrl/Cmd+Shift+/` - Show keyboard shortcuts help
 
 ### Exam Hub
 - `S` - Start optimal session

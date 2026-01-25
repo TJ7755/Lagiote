@@ -840,12 +840,26 @@ body .btn-prominent {
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.15s ease;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    font-size: inherit;
 }
 
-#examHubDeckSelectorList .deck-select-item:hover {
+#examHubDeckSelectorList .deck-select-item:hover:not(:disabled) {
     background: var(--card-bg);
     border-color: var(--primary-color);
     transform: translateY(-1px);
+}
+
+#examHubDeckSelectorList .deck-select-item:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#examHubDeckSelectorList .deck-select-item:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
 }
 
 #examHubDeckSelectorList .deck-select-item .deck-name {
@@ -856,6 +870,19 @@ body .btn-prominent {
 #examHubDeckSelectorList .deck-select-item .deck-meta {
     font-size: 0.85rem;
     color: var(--secondary-text);
+}
+
+#examHubDeckSelectorList .deck-select-item .deck-select-action {
+    padding: 6px 12px;
+    background: var(--primary-color);
+    color: #fff;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+#examHubDeckSelectorList .deck-select-item:disabled .deck-select-action {
+    background: var(--secondary-text);
 }
 
 /* Empty state for Exam Hub */
@@ -873,17 +900,4 @@ body .btn-prominent {
 .exam-empty-state p {
     margin-bottom: 20px;
     line-height: 1.5;
-}
-
-/* Exam Mode Toast Styles */
-.toast.exam-toast {
-    border-left: 4px solid var(--primary-color);
-}
-
-.toast.exam-toast.error {
-    border-left-color: var(--danger-color);
-}
-
-.toast.exam-toast.success {
-    border-left-color: var(--success-color);
 }

@@ -16072,33 +16072,44 @@ function showExamHubDeckSelector() {
     // Clear existing items
     list.innerHTML = '';
     
-    // Get all decks
-    const deckEntries = Object.entries(decks).filter(([, deck]) => deck && deck.cards && deck.cards.length > 0);
+    // Get all decks (including empty ones)
+    const rawEntries = decks ? Object.entries(decks) : [];
+    const deckEntries = rawEntries.filter(([, deck]) => !!deck);
     
     if (deckEntries.length === 0) {
         list.innerHTML = `
             <div class="exam-empty-state">
-                <h3>No decks with cards available</h3>
-                <p>Add cards to a deck to use the Exam Hub.</p>
+                <h3>No decks available</h3>
+                <p>Create a deck and add cards to use the Exam Hub.</p>
             </div>
         `;
         modal.classList.add('show');
         return;
     }
     
-    // Populate with decks
+    // Populate with decks (disabling those without cards)
     deckEntries.forEach(([deckId, deck]) => {
-        const item = document.createElement('div');
+        const cardCount = deck.cards?.length || 0;
+        const hasCards = cardCount > 0;
+        
+        const item = document.createElement('button');
+        item.type = 'button';
         item.className = 'deck-select-item';
         item.dataset.deckId = deckId;
+        if (!hasCards) {
+            item.disabled = true;
+        }
         item.innerHTML = `
             <div>
                 <div class="deck-name">${escapeHtml(deck.name || 'Untitled Deck')}</div>
-                <div class="deck-meta">${deck.cards?.length || 0} cards</div>
+                <div class="deck-meta">
+                    ${cardCount} ${cardCount === 1 ? 'card' : 'cards'}${!hasCards ? ' - Add cards to use Exam Hub' : ''}
+                </div>
             </div>
-            <button class="btn btn-primary">Open</button>
+            <span class="deck-select-action">${hasCards ? 'Open' : 'No cards'}</span>
         `;
         item.addEventListener('click', () => {
+            if (!hasCards) return;
             modal.classList.remove('show');
             if (typeof window.openExamModeHub === 'function') {
                 window.openExamModeHub(deckId);
