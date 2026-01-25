@@ -2798,6 +2798,7 @@
 	
 	                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
 	                            <button class="btn learn-btn hidden" id="deckDetailSequenceBtn" onclick="configureStudy('sequence')">Sequence</button>
+	                            <button class="btn btn-prominent" id="deckDetailExamModeBtn" onclick="openExamModeHub(currentViewingDeckId)">Exam Mode</button>
 	                            <button class="btn" id="deckDetailSpacedBtn" onclick="configureStudy('spaced')">Spaced Learning</button>
 	                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
 	                            <button class="btn btn-secondary" id="deckDetailResetBtn"
@@ -2944,6 +2945,518 @@
             </div>
         </div>
     </div>
+
+    <!-- Exam Mode Hub View -->
+    <div id="examModeHubView" class="container view-container hidden">
+        <div class="exam-hub-header" style="display: flex; justify-content: space-between; align-items: flex-start; padding-top: 20px; margin-bottom: 30px;">
+            <div>
+                <h2 class="section-title" style="margin: 0; padding: 0;">Exam Mode</h2>
+                <p id="examHubDeckName" style="color: var(--secondary-text); margin-top: 5px;"></p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-secondary" onclick="showExamModeSettings()">Settings</button>
+                <button class="btn btn-secondary" onclick="closeExamModeHub()">Back to Deck</button>
+            </div>
+        </div>
+
+        <!-- Exam Date Countdown and Target -->
+        <div class="exam-hub-countdown-section" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+            <div class="stat-card" style="background: var(--card-bg); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid var(--border-color);">
+                <div id="examHubCountdownValue" style="font-size: 2.5rem; font-weight: 700; color: var(--primary-color);">--</div>
+                <div style="color: var(--secondary-text); font-size: 0.9rem;">Days Until Exam</div>
+                <div id="examHubExamDate" style="color: var(--secondary-text); font-size: 0.8rem; margin-top: 5px;"></div>
+            </div>
+            <div class="stat-card" style="background: var(--card-bg); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid var(--border-color);">
+                <div id="examHubPredictedScore" style="font-size: 2.5rem; font-weight: 700; color: var(--success-color);">--%</div>
+                <div style="color: var(--secondary-text); font-size: 0.9rem;">Predicted Score</div>
+                <div id="examHubScoreRange" style="color: var(--secondary-text); font-size: 0.8rem; margin-top: 5px;"></div>
+            </div>
+            <div class="stat-card" style="background: var(--card-bg); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid var(--border-color);">
+                <div id="examHubGradeProbability" style="font-size: 2.5rem; font-weight: 700; color: var(--primary-color);">--%</div>
+                <div style="color: var(--secondary-text); font-size: 0.9rem;">Probability of Target</div>
+                <div id="examHubTargetGrade" style="color: var(--secondary-text); font-size: 0.8rem; margin-top: 5px;"></div>
+            </div>
+        </div>
+
+        <!-- Revision Completeness and Time Remaining -->
+        <div class="exam-hub-progress-section" style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 30px;">
+            <div class="settings-container" style="padding: 20px;">
+                <h3 style="margin-top: 0;">Revision Completeness</h3>
+                <div style="margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span>Overall Progress</span>
+                        <span id="examHubCompletionPercent">0%</span>
+                    </div>
+                    <div style="background: var(--border-color); border-radius: 8px; height: 12px; overflow: hidden;">
+                        <div id="examHubCompletionBar" style="background: var(--success-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-top: 20px;">
+                    <div style="text-align: center;">
+                        <div id="examHubCoverageScore" style="font-size: 1.5rem; font-weight: 600;">--</div>
+                        <div style="color: var(--secondary-text); font-size: 0.8rem;">Coverage</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div id="examHubFragilityScore" style="font-size: 1.5rem; font-weight: 600;">--</div>
+                        <div style="color: var(--secondary-text); font-size: 0.8rem;">Fragility Risk</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div id="examHubTechniqueScore" style="font-size: 1.5rem; font-weight: 600;">--</div>
+                        <div style="color: var(--secondary-text); font-size: 0.8rem;">Technique</div>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-container" style="padding: 20px;">
+                <h3 style="margin-top: 0;">Time Remaining</h3>
+                <div id="examHubTimeEstimate" style="text-align: center; padding: 20px 0;">
+                    <div id="examHubHoursNeeded" style="font-size: 2rem; font-weight: 700; color: var(--primary-color);">-- hrs</div>
+                    <div style="color: var(--secondary-text); font-size: 0.9rem;">Likely hours needed</div>
+                    <div id="examHubSafeHours" style="color: var(--secondary-text); font-size: 0.8rem; margin-top: 10px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start Session Actions -->
+        <div class="exam-hub-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+            <div class="settings-container" style="padding: 25px; text-align: center;">
+                <h3 style="margin-top: 0;">Optimal Practice Session</h3>
+                <p style="color: var(--secondary-text); margin-bottom: 20px;">AI-crafted session targeting your weakest areas for maximum exam improvement.</p>
+                <button class="btn btn-prominent" id="examHubStartOptimalBtn" onclick="startExamModeOptimalSession()" style="font-size: 1.1rem; padding: 15px 30px;">
+                    Start Optimal Session
+                </button>
+                <div style="margin-top: 15px; font-size: 0.85rem; color: var(--secondary-text);">
+                    Press <kbd style="background: var(--border-color); padding: 2px 6px; border-radius: 4px;">S</kbd> to start
+                </div>
+            </div>
+            <div class="settings-container" style="padding: 25px; text-align: center;">
+                <h3 style="margin-top: 0;">Topic-Focused Practice</h3>
+                <p style="color: var(--secondary-text); margin-bottom: 20px;">Choose specific topics or techniques to practise in a targeted session.</p>
+                <button class="btn btn-secondary" id="examHubBrowseTopicsBtn" onclick="showExamModePathMap()" style="font-size: 1.1rem; padding: 15px 30px;">
+                    Browse Topics
+                </button>
+                <div style="margin-top: 15px; font-size: 0.85rem; color: var(--secondary-text);">
+                    Press <kbd style="background: var(--border-color); padding: 2px 6px; border-radius: 4px;">T</kbd> to browse
+                </div>
+            </div>
+        </div>
+
+        <!-- Weak Areas and Recommendations -->
+        <div class="settings-container" style="padding: 20px; margin-bottom: 30px;">
+            <h3 style="margin-top: 0;">Weak Areas Requiring Attention</h3>
+            <p style="color: var(--secondary-text); margin-bottom: 15px;">These areas have the highest potential for mark improvement.</p>
+            <div id="examHubWeakAreasList" style="display: grid; gap: 10px;">
+                <!-- Weak areas will be populated dynamically -->
+                <div class="weak-area-placeholder" style="text-align: center; padding: 40px; color: var(--secondary-text);">
+                    Loading weak areas analysis...
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Atoms / Failure Patterns -->
+        <div class="settings-container" style="padding: 20px; margin-bottom: 30px;">
+            <h3 style="margin-top: 0;">Common Failure Patterns</h3>
+            <p style="color: var(--secondary-text); margin-bottom: 15px;">Recurring error types that cause mark loss in exams.</p>
+            <div id="examHubErrorAtomsList" style="display: grid; gap: 10px;">
+                <!-- Error atoms will be populated dynamically -->
+                <div class="error-atom-placeholder" style="text-align: center; padding: 40px; color: var(--secondary-text);">
+                    No failure patterns detected yet. Complete some practice sessions to identify patterns.
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Sittings History -->
+        <div class="settings-container" style="padding: 20px;">
+            <h3 style="margin-top: 0;">Recent Practice History</h3>
+            <div id="examHubSittingsHistory">
+                <div style="text-align: center; padding: 30px; color: var(--secondary-text);">
+                    No practice sessions completed yet.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exam Mode Session Player View -->
+    <div id="examModeSessionView" class="container view-container hidden">
+        <div class="exam-session-header" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <span id="examSessionPhaseLabel" style="background: var(--primary-color); color: white; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">Warm-up</span>
+                <span id="examSessionProgress" style="color: var(--secondary-text);">Question 1 of 10</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <div id="examSessionTimer" style="font-size: 1.5rem; font-weight: 700; font-family: monospace;">30:00</div>
+                <button class="btn btn-secondary" id="examSessionPauseBtn" onclick="pauseExamSession()">Pause</button>
+                <button class="btn btn-danger" id="examSessionEndBtn" onclick="endExamSession()">End Session</button>
+            </div>
+        </div>
+
+        <!-- Question Display -->
+        <div class="exam-session-question-container" style="max-width: 800px; margin: 0 auto;">
+            <div id="examSessionQuestionCard" class="flashcard" style="min-height: 300px; margin-bottom: 20px;">
+                <div class="card-face">
+                    <div id="examSessionQuestionPrompt" style="font-size: 1.2rem; font-weight: 600; margin-bottom: 16px;"></div>
+                    
+                    <!-- MCQ Options -->
+                    <div id="examSessionMcqOptions" class="hidden" style="display: grid; gap: 10px; margin-top: 20px;">
+                    </div>
+                    
+                    <!-- Text Input -->
+                    <div id="examSessionTextInput" class="hidden" style="margin-top: 20px;">
+                        <textarea id="examSessionAnswerText" rows="4" style="width: 100%; padding: 12px; font-size: 1rem; border: 2px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-color); resize: vertical;" placeholder="Type your answer here..."></textarea>
+                    </div>
+                    
+                    <!-- Numeric Input -->
+                    <div id="examSessionNumericInput" class="hidden" style="margin-top: 20px;">
+                        <input type="text" id="examSessionAnswerNumeric" style="width: 100%; padding: 12px; font-size: 1.2rem; text-align: center; border: 2px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-color);" placeholder="Enter your answer">
+                    </div>
+                    
+                    <!-- Answer Display -->
+                    <div id="examSessionAnswerDisplay" class="hidden" style="margin-top: 20px; padding: 15px; background: var(--input-bg); border-radius: 8px; border-left: 4px solid var(--success-color);">
+                        <div style="font-weight: 600; margin-bottom: 8px;">Correct Answer:</div>
+                        <div id="examSessionCorrectAnswer"></div>
+                    </div>
+                    
+                    <!-- Marking Feedback -->
+                    <div id="examSessionMarkingFeedback" class="hidden" style="margin-top: 20px; padding: 15px; background: var(--input-bg); border-radius: 8px;">
+                        <div style="font-weight: 600; margin-bottom: 8px;">Mark Scheme Breakdown:</div>
+                        <div id="examSessionMarkSchemePoints"></div>
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                            <span style="font-weight: 600;">Marks Awarded: </span>
+                            <span id="examSessionMarksAwarded">0</span> / <span id="examSessionTotalMarks">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Actions -->
+            <div class="exam-session-actions" style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+                <button class="btn btn-secondary" id="examSessionShowAnswerBtn" onclick="showExamSessionAnswer()">Show Answer</button>
+                <button class="btn btn-primary hidden" id="examSessionSubmitBtn" onclick="submitExamSessionAnswer()">Submit Answer</button>
+                <button class="btn btn-primary hidden" id="examSessionNextBtn" onclick="nextExamSessionQuestion()">Next Question</button>
+            </div>
+            
+            <!-- Self-Assessment (when answer shown) -->
+            <div id="examSessionSelfAssessment" class="hidden" style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+                <button class="btn btn-danger" onclick="markExamSessionQuestion(false)">Incorrect (1 / Left)</button>
+                <button class="btn btn-success" onclick="markExamSessionQuestion(true)">Correct (2 / Right)</button>
+            </div>
+            
+            <!-- Flag and Navigation -->
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <button class="btn btn-secondary" id="examSessionFlagBtn" onclick="flagExamSessionQuestion()">Flag for Review (F)</button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-secondary" onclick="prevExamSessionQuestion()">Previous (Left)</button>
+                    <button class="btn btn-secondary" onclick="nextExamSessionQuestion()">Next (Right)</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Why This Question -->
+        <div id="examSessionWhyThis" class="hidden" style="max-width: 800px; margin: 20px auto; padding: 15px; background: var(--input-bg); border-radius: 8px; border-left: 4px solid var(--primary-color);">
+            <div style="font-weight: 600; margin-bottom: 8px;">Why this question?</div>
+            <div id="examSessionWhyThisExplanation" style="color: var(--secondary-text);"></div>
+        </div>
+    </div>
+
+    <!-- Exam Mode Path Map View -->
+    <div id="examModePathMapView" class="container view-container hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 20px; margin-bottom: 30px;">
+            <div>
+                <h2 class="section-title" style="margin: 0; padding: 0;">Topic Map</h2>
+                <p style="color: var(--secondary-text); margin-top: 5px;">Browse topics and techniques by readiness and priority.</p>
+            </div>
+            <button class="btn btn-secondary" onclick="closeExamModePathMap()">Back to Hub</button>
+        </div>
+        
+        <!-- Filter Controls -->
+        <div class="settings-container" style="padding: 15px; margin-bottom: 20px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+            <div>
+                <label style="font-size: 0.9rem; color: var(--secondary-text);">Sort by:</label>
+                <select id="pathMapSortBy" style="margin-left: 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-color);">
+                    <option value="priority">Priority (Recommended)</option>
+                    <option value="mastery">Mastery (Low to High)</option>
+                    <option value="coverage">Coverage</option>
+                    <option value="fragility">Fragility Risk</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size: 0.9rem; color: var(--secondary-text);">Filter:</label>
+                <select id="pathMapFilter" style="margin-left: 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-color);">
+                    <option value="all">All Topics</option>
+                    <option value="weak">Weak Areas Only</option>
+                    <option value="fragile">High Fragility</option>
+                    <option value="untouched">Untouched Topics</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- Topic Nodes Grid -->
+        <div id="pathMapNodesContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
+            <!-- Topic nodes will be populated dynamically -->
+            <div class="path-map-placeholder" style="grid-column: 1 / -1; text-align: center; padding: 60px; color: var(--secondary-text);">
+                Loading topic map...
+            </div>
+        </div>
+    </div>
+
+    <!-- Exam Mode Editors View -->
+    <div id="examModeEditorsView" class="container view-container hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 20px; margin-bottom: 30px;">
+            <div>
+                <h2 class="section-title" style="margin: 0; padding: 0;">Exam Content Editor</h2>
+                <p style="color: var(--secondary-text); margin-top: 5px;">Manage atoms, questions, and mark schemes.</p>
+            </div>
+            <button class="btn btn-secondary" onclick="closeExamModeEditors()">Back to Hub</button>
+        </div>
+        
+        <!-- Editor Tabs -->
+        <div class="editor-tabs" style="display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid var(--border-color);">
+            <button class="editor-tab active" id="editorTabAtoms" onclick="showEditorTab('atoms')" style="padding: 12px 24px; border: none; background: none; cursor: pointer; font-weight: 600; color: var(--primary-color); border-bottom: 2px solid var(--primary-color); margin-bottom: -2px;">Atoms</button>
+            <button class="editor-tab" id="editorTabQuestions" onclick="showEditorTab('questions')" style="padding: 12px 24px; border: none; background: none; cursor: pointer; color: var(--secondary-text);">Questions</button>
+            <button class="editor-tab" id="editorTabMarkSchemes" onclick="showEditorTab('markSchemes')" style="padding: 12px 24px; border: none; background: none; cursor: pointer; color: var(--secondary-text);">Mark Schemes</button>
+            <button class="editor-tab" id="editorTabErrorAtoms" onclick="showEditorTab('errorAtoms')" style="padding: 12px 24px; border: none; background: none; cursor: pointer; color: var(--secondary-text);">Error Atoms</button>
+        </div>
+        
+        <!-- Atoms Editor Panel -->
+        <div id="editorPanelAtoms" class="editor-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <input type="text" id="atomSearchInput" placeholder="Search atoms..." style="flex: 1; max-width: 400px; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-color);">
+                <button class="btn btn-primary" onclick="createNewAtom()">Create Atom</button>
+            </div>
+            <div id="atomsListContainer" style="display: grid; gap: 10px;">
+                <div style="text-align: center; padding: 40px; color: var(--secondary-text);">No atoms created yet. Click "Create Atom" to add your first atom.</div>
+            </div>
+        </div>
+        
+        <!-- Questions Editor Panel -->
+        <div id="editorPanelQuestions" class="editor-panel hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <input type="text" id="questionSearchInput" placeholder="Search questions..." style="flex: 1; max-width: 400px; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-color);">
+                <button class="btn btn-primary" onclick="createNewQuestion()">Create Question</button>
+            </div>
+            <div id="questionsListContainer" style="display: grid; gap: 10px;">
+                <div style="text-align: center; padding: 40px; color: var(--secondary-text);">No questions created yet. Click "Create Question" to add your first question.</div>
+            </div>
+        </div>
+        
+        <!-- Mark Schemes Editor Panel -->
+        <div id="editorPanelMarkSchemes" class="editor-panel hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <input type="text" id="markSchemeSearchInput" placeholder="Search mark schemes..." style="flex: 1; max-width: 400px; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-color);">
+                <button class="btn btn-primary" onclick="createNewMarkScheme()">Create Mark Scheme</button>
+            </div>
+            <div id="markSchemesListContainer" style="display: grid; gap: 10px;">
+                <div style="text-align: center; padding: 40px; color: var(--secondary-text);">No mark schemes created yet. Click "Create Mark Scheme" to add your first mark scheme.</div>
+            </div>
+        </div>
+        
+        <!-- Error Atoms Editor Panel -->
+        <div id="editorPanelErrorAtoms" class="editor-panel hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <input type="text" id="errorAtomSearchInput" placeholder="Search error atoms..." style="flex: 1; max-width: 400px; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-color);">
+                <button class="btn btn-primary" onclick="createNewErrorAtom()">Create Error Atom</button>
+            </div>
+            <div id="errorAtomsListContainer" style="display: grid; gap: 10px;">
+                <div style="text-align: center; padding: 40px; color: var(--secondary-text);">No error atoms created yet. These are automatically detected during practice sessions.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Atom Editor Modal -->
+    <div id="atomEditorModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <span class="close" onclick="closeAtomEditorModal()">&times;</span>
+            <h2 id="atomEditorTitle">Create Atom</h2>
+            <form id="atomEditorForm">
+                <div class="form-group">
+                    <label for="atomEditorName">Name *</label>
+                    <input type="text" id="atomEditorName" required placeholder="e.g., Quadratic formula application">
+                </div>
+                <div class="form-group">
+                    <label for="atomEditorType">Type</label>
+                    <select id="atomEditorType">
+                        <option value="knowledge">Knowledge (fact, definition)</option>
+                        <option value="procedure">Procedure (step-by-step skill)</option>
+                        <option value="exam_technique">Exam Technique (method marks)</option>
+                        <option value="representation">Representation (graph, table, notation)</option>
+                    </select>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label for="atomEditorDifficulty">Difficulty: <span id="atomEditorDifficultyValue">0.5</span></label>
+                        <input type="range" id="atomEditorDifficulty" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('atomEditorDifficultyValue').textContent = this.value">
+                    </div>
+                    <div class="form-group">
+                        <label for="atomEditorDepth">Depth: <span id="atomEditorDepthValue">0.5</span></label>
+                        <input type="range" id="atomEditorDepth" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('atomEditorDepthValue').textContent = this.value">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label for="atomEditorTransferability">Transferability: <span id="atomEditorTransferabilityValue">0.5</span></label>
+                        <input type="range" id="atomEditorTransferability" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('atomEditorTransferabilityValue').textContent = this.value">
+                    </div>
+                    <div class="form-group">
+                        <label for="atomEditorTimeSensitivity">Time Sensitivity: <span id="atomEditorTimeSensitivityValue">0.5</span></label>
+                        <input type="range" id="atomEditorTimeSensitivity" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('atomEditorTimeSensitivityValue').textContent = this.value">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="atomEditorTags">Tags (comma-separated)</label>
+                    <input type="text" id="atomEditorTags" placeholder="e.g., algebra, quadratics, factorisation">
+                </div>
+                <div class="form-group">
+                    <label for="atomEditorPrerequisites">Prerequisites (atom IDs, comma-separated)</label>
+                    <input type="text" id="atomEditorPrerequisites" placeholder="e.g., atom-123, atom-456">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Save Atom</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeAtomEditorModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Question Editor Modal -->
+    <div id="questionEditorModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <span class="close" onclick="closeQuestionEditorModal()">&times;</span>
+            <h2 id="questionEditorTitle">Create Question</h2>
+            <form id="questionEditorForm">
+                <div class="form-group">
+                    <label for="questionEditorPrompt">Question Prompt *</label>
+                    <textarea id="questionEditorPrompt" rows="4" required placeholder="Enter the question text..."></textarea>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label for="questionEditorType">Question Type</label>
+                        <select id="questionEditorType" onchange="updateQuestionTypeFields()">
+                            <option value="mcq_single">Multiple Choice (Single Answer)</option>
+                            <option value="mcq_multi">Multiple Choice (Multiple Answers)</option>
+                            <option value="numeric">Numeric</option>
+                            <option value="short_text">Short Text</option>
+                            <option value="structured">Structured Response</option>
+                            <option value="essay">Essay</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="questionEditorDifficulty">Difficulty: <span id="questionEditorDifficultyValue">0.5</span></label>
+                        <input type="range" id="questionEditorDifficulty" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('questionEditorDifficultyValue').textContent = this.value">
+                    </div>
+                </div>
+                <div id="questionEditorMcqOptions" style="margin-bottom: 15px;">
+                    <label>Answer Options</label>
+                    <div id="questionEditorOptionsContainer" style="display: grid; gap: 10px; margin-top: 10px;">
+                        <!-- Options will be added dynamically -->
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addQuestionOption()" style="margin-top: 10px;">Add Option</button>
+                </div>
+                <div class="form-group">
+                    <label for="questionEditorAtomMap">Linked Atoms (JSON format)</label>
+                    <textarea id="questionEditorAtomMap" rows="3" placeholder='[{"atomId": "atom-123", "weight": 1.0}]'></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="questionEditorTags">Tags (comma-separated)</label>
+                    <input type="text" id="questionEditorTags" placeholder="e.g., algebra, exam-style">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Save Question</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeQuestionEditorModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Mark Scheme Editor Modal -->
+    <div id="markSchemeEditorModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <span class="close" onclick="closeMarkSchemeEditorModal()">&times;</span>
+            <h2 id="markSchemeEditorTitle">Create Mark Scheme</h2>
+            <form id="markSchemeEditorForm">
+                <div class="form-group">
+                    <label for="markSchemeEditorName">Mark Scheme Name *</label>
+                    <input type="text" id="markSchemeEditorName" required placeholder="e.g., Q1a Mark Scheme">
+                </div>
+                <div class="form-group">
+                    <label for="markSchemeEditorType">Scheme Type</label>
+                    <select id="markSchemeEditorType" onchange="updateMarkSchemeTypeFields()">
+                        <option value="points">Points-Based (Method/Accuracy Marks)</option>
+                        <option value="rubric">Levels-Based Rubric</option>
+                    </select>
+                </div>
+                
+                <!-- Points-Based Section -->
+                <div id="markSchemePointsSection">
+                    <h4 style="margin-top: 20px;">Mark Scheme Points</h4>
+                    <div id="markSchemePointsContainer" style="display: grid; gap: 15px;">
+                        <!-- Points will be added dynamically -->
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addMarkSchemePoint()" style="margin-top: 15px;">Add Point</button>
+                </div>
+                
+                <!-- Rubric Section -->
+                <div id="markSchemeRubricSection" class="hidden">
+                    <h4 style="margin-top: 20px;">Rubric Levels</h4>
+                    <div id="markSchemeRubricContainer" style="display: grid; gap: 15px;">
+                        <!-- Rubric levels will be added dynamically -->
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addRubricLevel()" style="margin-top: 15px;">Add Level</button>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Save Mark Scheme</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeMarkSchemeEditorModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Exam Mode Settings Modal -->
+    <div id="examModeSettingsModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" onclick="closeExamModeSettingsModal()">&times;</span>
+            <h2>Exam Mode Settings</h2>
+            <form id="examModeSettingsForm">
+                <div class="form-group">
+                    <label for="examModeExamDate">Exam Date *</label>
+                    <input type="date" id="examModeExamDate" required>
+                </div>
+                <div class="form-group">
+                    <label for="examModeTargetScore">Target Score: <span id="examModeTargetScoreValue">70</span>%</label>
+                    <input type="range" id="examModeTargetScore" min="40" max="100" value="70" oninput="document.getElementById('examModeTargetScoreValue').textContent = this.value">
+                </div>
+                <div class="form-group">
+                    <label for="examModeTotalMarks">Total Marks Available</label>
+                    <input type="number" id="examModeTotalMarks" value="100" min="1" max="1000">
+                </div>
+                <div class="form-group">
+                    <label for="examModeDuration">Exam Duration (minutes)</label>
+                    <input type="number" id="examModeDuration" value="120" min="10" max="600">
+                </div>
+                <div class="form-group">
+                    <label>Grade Boundaries</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px;">
+                        <div>
+                            <label style="font-size: 0.85rem; color: var(--secondary-text);">A* / 9</label>
+                            <input type="number" id="examModeGradeA" value="90" min="0" max="100">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.85rem; color: var(--secondary-text);">A / 7-8</label>
+                            <input type="number" id="examModeGradeB" value="80" min="0" max="100">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.85rem; color: var(--secondary-text);">B / 5-6</label>
+                            <input type="number" id="examModeGradeC" value="70" min="0" max="100">
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeExamModeSettingsModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="aiGenerator" class="container view-container">
         <div class="section-title" style="padding-top: 20px;">AI Flashcard Generator</div>
         <div class="ai-generator-grid">
@@ -3802,7 +4315,7 @@
                 <div class="settings-section" hidden>
                     <div
                         style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                        <h4 style="margin: 0;">Exam Mode</h4>
+                        <h4 style="margin: 0;">Legacy Exam Mode</h4>
                         <label class="switch">
                             <input type="checkbox" id="deckSettingsExamModeToggle"
                                 onchange="toggleExamSettingsVisibility()">
@@ -3994,22 +4507,35 @@
                     - <b>2 / →</b>: Correct
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <b>Review & Exam Modes:</b><br>
+                    <b>Review and Legacy Exam Modes:</b><br>
                     - <b>Space / Enter</b>: Show answer (flashcards)<br>
                     - <b>Enter</b>: Check answer (typed)<br>
-                    - <b>1 / ←</b>: Incorrect<br>
-                    - <b>2 / →</b>: Correct
+                    - <b>1 / Left arrow</b>: Incorrect<br>
+                    - <b>2 / Right arrow</b>: Correct
                 </div>
                 <div style="margin-bottom: 16px;">
                     <b>Practice Test Mode:</b><br>
-                    - <b>Enter / ↑ / Space</b>: Show answer / Check answer / Next (contextual)<br>
-                    - <b>1 / ←</b>: Incorrect<br>
-                    - <b>2 / →</b>: Correct
+                    - <b>Enter / Up arrow / Space</b>: Show answer / Check answer / Next (contextual)<br>
+                    - <b>1 / Left arrow</b>: Incorrect<br>
+                    - <b>2 / Right arrow</b>: Correct
                 </div>
                 <div style="margin-bottom: 16px;">
                     <b>Sequence Mode:</b><br>
                     - <b>Enter / Space</b>: Submit task<br>
                     - <b>Enter / Space</b>: Continue (after feedback)
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <b>Exam Mode:</b><br>
+                    - <b>S</b>: Start optimal session (Hub)<br>
+                    - <b>T</b>: Browse topics (Hub)<br>
+                    - <b>Left / Right arrows</b>: Previous / Next question<br>
+                    - <b>1-4</b>: Select MCQ option<br>
+                    - <b>Enter</b>: Submit answer<br>
+                    - <b>F</b>: Flag question for review<br>
+                    - <b>E</b>: Show explanation<br>
+                    - <b>H</b>: Show hint<br>
+                    - <b>Escape</b>: Pause session<br>
+                    - <b>Ctrl/Cmd + S</b>: Submit exam
                 </div>
                 <div>
                     <b>Editor:</b><br>

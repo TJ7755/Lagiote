@@ -3446,7 +3446,7 @@ function setupEventListeners() {
                     return;
                 }
 
-                // Original behavior: if on solution-input of last card, add new card
+                // Original behaviour: if on solution-input of last card, add new card
                 if (activeElement.classList.contains('solution-input')) {
                     if (cardRow === this.lastElementChild) {
                         event.preventDefault();

@@ -18,7 +18,7 @@ function clamp01(value) {
     return clampNumber(value, 0, 1);
 }
 
-function normalizeVariationScore(profile) {
+function normaliseVariationScore(profile) {
     const base = profile && typeof profile === 'object' ? profile : {};
     const values = [
         base.numbers ? 1 : 0,
@@ -102,7 +102,7 @@ export async function applyMarkingRecordToAtoms({ markingRecordId, nowIso, allow
     const qDiff = clamp01(question?.difficulty ?? 0.5);
     const qDepth = clamp01(question?.depth ?? 0.5);
     const pressure = clamp01(question?.timeProfile?.pressure ?? 0);
-    const variationScore = normalizeVariationScore(question?.variationProfile);
+    const variationScore = normaliseVariationScore(question?.variationProfile);
 
     const difficultyFactor = 0.6 + 0.8 * qDiff;
     const depthFactor = 0.7 + 0.6 * qDepth;

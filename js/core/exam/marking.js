@@ -2,6 +2,34 @@ import { initDB, getDataFromDB, saveDataToDB } from '../db.js';
 
 const SUPPORTED_KINDS = new Set(['mcq_single', 'mcq_multi', 'numeric', 'short_text']);
 
+export function createMarkScheme(options = {}) {
+    return {
+        id: options.id || generateId(),
+        deckId: options.deckId || null,
+        questionId: options.questionId || null,
+        schemeType: options.schemeType || 'points', // 'points' or 'rubric'
+        points: Array.isArray(options.points) ? options.points : [],
+        rubric: Array.isArray(options.rubric) ? options.rubric : [], // for backward compatibility/mixing
+        levels: Array.isArray(options.levels) ? options.levels : (Array.isArray(options.rubric) ? options.rubric : []),
+        author: options.author || 'system',
+        version: options.version || 1,
+        createdAt: options.createdAt || new Date().toISOString(),
+        updatedAt: options.updatedAt || new Date().toISOString(),
+        isDeleted: false
+    };
+}
+
+export function createPointsSchemePoint(options = {}) {
+    return {
+        id: options.id || `point-${Math.random().toString(36).slice(2, 9)}`,
+        marks: Number.isFinite(options.marks) ? options.marks : 1,
+        condition: options.condition || '',
+        requires: Array.isArray(options.requires) ? options.requires : [],
+        allowECF: options.allowECF === true,
+        grading: options.grading || null
+    };
+}
+
 function generateId() {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
         return crypto.randomUUID();
@@ -16,17 +44,17 @@ function clampNumber(value, minValue, maxValue) {
     return Math.min(max, Math.max(min, numeric));
 }
 
-function normalizeIndices(values) {
+function normaliseIndices(values) {
     if (!Array.isArray(values)) return [];
-    const normalized = values
+    const normalised = values
         .map(value => Number(value))
         .filter(value => Number.isFinite(value))
         .map(value => Math.trunc(value))
         .filter(value => value >= 0);
-    return Array.from(new Set(normalized));
+    return Array.from(new Set(normalised));
 }
 
-function normalizeText(value, options = {}) {
+function normaliseText(value, options = {}) {
     const base = typeof value === 'string' ? value : String(value ?? '');
     const trimmed = options.trim === false ? base : base.trim();
     const folded = options.caseFold === false ? trimmed : trimmed.toLowerCase();
@@ -51,7 +79,7 @@ function parseAcceptIndices(acceptEntries, options) {
             if (index >= 0) indices.push(index);
         }
     });
-    return normalizeIndices(indices);
+    return normaliseIndices(indices);
 }
 
 function parseNumericAcceptEntry(entry) {
@@ -101,7 +129,7 @@ export function normaliseResponseForGrading(questionType, response) {
             return { selectedIndex: Math.trunc(response.selectedIndex) };
         }
         if (response && typeof response === 'object' && Array.isArray(response.selectedIndices)) {
-            const indices = normalizeIndices(response.selectedIndices);
+            const indices = normaliseIndices(response.selectedIndices);
             if (indices.length) return { selectedIndex: indices[0] };
             return { selectedIndex: -1 };
         }
@@ -113,13 +141,13 @@ export function normaliseResponseForGrading(questionType, response) {
 
     if (kind === 'mcq_multi') {
         if (response && typeof response === 'object' && Array.isArray(response.selectedIndices)) {
-            return { selectedIndices: normalizeIndices(response.selectedIndices) };
+            return { selectedIndices: normaliseIndices(response.selectedIndices) };
         }
         if (Array.isArray(response)) {
-            return { selectedIndices: normalizeIndices(response) };
+            return { selectedIndices: normaliseIndices(response) };
         }
         if (response && typeof response === 'object' && Number.isFinite(response.selectedIndex)) {
-            return { selectedIndices: normalizeIndices([response.selectedIndex]) };
+            return { selectedIndices: normaliseIndices([response.selectedIndex]) };
         }
         return null;
     }
@@ -154,7 +182,7 @@ export function computeTotalMarksFromAwardedPoints(awardedPoints) {
 
 function gradeMcqSingle(grading, response, pointMarks) {
     if (!grading || !response || !Number.isFinite(response.selectedIndex)) return 0;
-    const correctIndices = normalizeIndices(grading.correctIndices);
+    const correctIndices = normaliseIndices(grading.correctIndices);
     if (!correctIndices.length) return 0;
     const allowAnyOf = grading.allowAnyOf === true;
     const selected = response.selectedIndex;
@@ -169,8 +197,8 @@ function gradeMcqSingle(grading, response, pointMarks) {
 
 function gradeMcqMulti(grading, response, pointMarks) {
     if (!grading || !response) return 0;
-    const selected = normalizeIndices(response.selectedIndices);
-    const correct = normalizeIndices(grading.correctIndices);
+    const selected = normaliseIndices(response.selectedIndices);
+    const correct = normaliseIndices(grading.correctIndices);
     if (!correct.length) return 0;
     const mode = grading.mode === 'partial' ? 'partial' : 'all_or_nothing';
     if (mode === 'partial') {
@@ -228,13 +256,13 @@ function gradeShortText(grading, response, pointMarks) {
         collapseWhitespace: grading.normalise?.collapseWhitespace !== false,
         stripPunctuation: grading.normalise?.stripPunctuation === true
     };
-    const normalizedResponse = normalizeText(response.text, normaliseOptions);
+    const normalisedResponse = normaliseText(response.text, normaliseOptions);
     const matchMode = grading.match || 'exact';
     if (matchMode === 'regex') {
         const regexes = Array.isArray(grading.regexes) ? grading.regexes : [];
         const regexMatch = regexes.some(pattern => {
             try {
-                return new RegExp(pattern).test(normalizedResponse);
+                return new RegExp(pattern).test(normalisedResponse);
             } catch {
                 return false;
             }
@@ -242,11 +270,11 @@ function gradeShortText(grading, response, pointMarks) {
         if (regexMatch) return pointMarks;
     }
     if (!accepted.length) return 0;
-    const normalizedAccepted = accepted.map(entry => normalizeText(entry, normaliseOptions));
+    const normalisedAccepted = accepted.map(entry => normaliseText(entry, normaliseOptions));
     if (matchMode === 'contains') {
-        return normalizedAccepted.some(entry => normalizedResponse.includes(entry)) ? pointMarks : 0;
+        return normalisedAccepted.some(entry => normalisedResponse.includes(entry)) ? pointMarks : 0;
     }
-    return normalizedAccepted.includes(normalizedResponse) ? pointMarks : 0;
+    return normalisedAccepted.includes(normalisedResponse) ? pointMarks : 0;
 }
 
 function gradeFallbackMcqSingle(point, response, question, pointMarks) {
@@ -258,7 +286,7 @@ function gradeFallbackMcqSingle(point, response, question, pointMarks) {
 function gradeFallbackMcqMulti(point, response, question, pointMarks) {
     const correctIndices = parseAcceptIndices(point?.accept, question?.options);
     if (!correctIndices.length || !response) return 0;
-    const selected = normalizeIndices(response.selectedIndices);
+    const selected = normaliseIndices(response.selectedIndices);
     if (selected.length !== correctIndices.length) return 0;
     const correctSet = new Set(correctIndices);
     const allMatch = selected.every(index => correctSet.has(index));
@@ -282,11 +310,11 @@ function gradeFallbackShortText(point, response, pointMarks) {
     if (!response || typeof response.text !== 'string') return 0;
     const acceptEntries = Array.isArray(point?.accept) ? point.accept : [];
     const rejectEntries = Array.isArray(point?.reject) ? point.reject : [];
-    const normalizedResponse = normalizeText(response.text);
-    const normalizedRejects = rejectEntries.map(entry => normalizeText(entry));
-    if (normalizedRejects.includes(normalizedResponse)) return 0;
-    const normalizedAccepts = acceptEntries.map(entry => normalizeText(entry));
-    return normalizedAccepts.includes(normalizedResponse) ? pointMarks : 0;
+    const normalisedResponse = normaliseText(response.text);
+    const normalisedRejects = rejectEntries.map(entry => normaliseText(entry));
+    if (normalisedRejects.includes(normalisedResponse)) return 0;
+    const normalisedAccepts = acceptEntries.map(entry => normaliseText(entry));
+    return normalisedAccepts.includes(normalisedResponse) ? pointMarks : 0;
 }
 
 function gradePointWithGrading(kind, grading, response, pointMarks) {
@@ -305,6 +333,23 @@ function gradePointWithFallback(kind, point, response, question, pointMarks) {
     return 0;
 }
 
+function gradeRubricScheme(markScheme, response) {
+    const levels = Array.isArray(markScheme?.levels) ? markScheme.levels : [];
+    if (!levels.length || !response) return 0;
+    
+    const selectedLevelId = response.selectedLevelId;
+    const level = levels.find(l => l.id === selectedLevelId);
+    if (!level) return 0;
+    
+    const maxMarks = Number(level.maxMarks || level.marks || 0);
+    const minMarks = Number(level.minMarks || 0);
+    const awarded = Number.isFinite(response.awardedMarks) 
+        ? response.awardedMarks 
+        : (response.levelMarks || maxMarks);
+        
+    return clampNumber(awarded, minMarks, maxMarks);
+}
+
 export function gradeQuestion({ question, markScheme, response, context } = {}) {
     const points = Array.isArray(markScheme?.points) ? markScheme.points : [];
     const schemeType = typeof markScheme?.schemeType === 'string'
@@ -312,6 +357,18 @@ export function gradeQuestion({ question, markScheme, response, context } = {}) 
         : 'points';
     const examSittingId = context?.examSittingId ?? context?.examSittingID ?? null;
     const questionId = context?.questionId || question?.id || markScheme?.questionId || null;
+
+    if (schemeType === 'rubric') {
+        const totalAwarded = gradeRubricScheme(markScheme, response);
+        return {
+            id: generateId(),
+            examSittingId,
+            questionId,
+            totalAwardedMarks: totalAwarded,
+            confidence: response?.isManual ? 'high' : 'medium',
+            awardedPoints: [{ type: 'rubric_level', awardedMarks: totalAwarded, levelId: response?.selectedLevelId }]
+        };
+    }
 
     if (schemeType !== 'points' || !points.length) {
         return {
@@ -334,14 +391,16 @@ export function gradeQuestion({ question, markScheme, response, context } = {}) 
             : (typeof point?.pointId === 'string' ? point.pointId : null);
         const pointMarks = Number.isFinite(point?.marks) ? Number(point.marks) : 0;
         const requirements = Array.isArray(point?.requires) ? point.requires : [];
+        const allowECF = point?.allowECF === true;
+        
         const requirementsMet = requirements.length === 0 || requirements.every(reqId => {
             if (typeof reqId !== 'string') return false;
             const awarded = awardedMap.get(reqId);
             return Number.isFinite(awarded) && awarded > 0;
         });
 
-        if (!requirementsMet) {
-            awardedPoints.push({ pointId, awardedMarks: 0 });
+        if (!requirementsMet && !allowECF) {
+            awardedPoints.push({ pointId, awardedMarks: 0, requirementsFailed: true });
             if (pointId) awardedMap.set(pointId, 0);
             return;
         }
@@ -357,19 +416,36 @@ export function gradeQuestion({ question, markScheme, response, context } = {}) 
         if (!SUPPORTED_KINDS.has(kind)) {
             unsupported = true;
         } else {
-            const normalizedResponse = normaliseResponseForGrading(kind, response);
-            if (!normalizedResponse) {
+            const normalisedResponse = normaliseResponseForGrading(kind, response);
+            
+            // Check if point is explicitly awarded in the response (manual/pre-graded)
+            const explicitlyAwarded = (
+                (Array.isArray(response?.pointsAwarded) && response.pointsAwarded.includes(pointId)) ||
+                (response?.awardedMarksById && Number.isFinite(response.awardedMarksById[pointId]))
+            );
+
+            if (explicitlyAwarded) {
+                awardedMarks = response?.awardedMarksById && Number.isFinite(response.awardedMarksById[pointId])
+                    ? response.awardedMarksById[pointId]
+                    : pointMarks;
+            } else if (!normalisedResponse) {
                 responseMalformed = true;
             } else if (grading && typeof grading.kind === 'string') {
-                awardedMarks = gradePointWithGrading(kind, grading, normalizedResponse, pointMarks);
+                awardedMarks = gradePointWithGrading(kind, grading, normalisedResponse, pointMarks);
             } else {
-                awardedMarks = gradePointWithFallback(kind, point, normalizedResponse, question, pointMarks);
+                awardedMarks = gradePointWithFallback(kind, point, normalisedResponse, question, pointMarks);
                 fallbackUsed = true;
             }
         }
 
         awardedMarks = clampNumber(awardedMarks, 0, pointMarks);
-        awardedPoints.push({ pointId, awardedMarks });
+        
+        const pointResult = { pointId, awardedMarks };
+        if (!requirementsMet && allowECF && awardedMarks > 0) {
+            pointResult.isECF = true;
+        }
+        
+        awardedPoints.push(pointResult);
         if (pointId) awardedMap.set(pointId, awardedMarks);
 
         if (unsupported) {

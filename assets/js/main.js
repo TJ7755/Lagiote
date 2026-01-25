@@ -1745,7 +1745,7 @@ function loadCDNScript(src, onload) {
                             return;
                         }
 
-                        // Original behavior: if on solution-input of last card, add new card
+                        // Original behaviour: if on solution-input of last card, add new card
                         if (activeElement.classList.contains('solution-input')) {
                             if (cardRow === this.lastElementChild) {
                                 event.preventDefault();
@@ -3213,12 +3213,12 @@ function loadCDNScript(src, onload) {
                 const resetBtn = document.createElement('button');
                 resetBtn.className = 'deck-card-action-btn';
                 resetBtn.title = 'Reset Card Progress';
-                resetBtn.textContent = '🔄';
+                resetBtn.textContent = 'Reset';
                 resetBtn.onclick = () => resetCardProgress(item.card.id, deckId);
                 const editBtnLocal = document.createElement('button');
                 editBtnLocal.className = 'deck-card-action-btn';
                 editBtnLocal.title = 'Edit Card';
-                editBtnLocal.textContent = '✏️';
+                editBtnLocal.textContent = 'Edit';
                 editBtnLocal.onclick = () => editCard(deckId, cardIndex, 'detail');
                 actionsDiv.appendChild(resetBtn);
                 actionsDiv.appendChild(editBtnLocal);
@@ -7982,7 +7982,7 @@ function loadCDNScript(src, onload) {
                     <div class="document-item" data-doc-id="${doc.id}">
                         <div class="document-item-header">
                             <span class="document-name">
-                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? '✓' : '📄')}</span>
+                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? 'Ready' : 'Pending')}</span>
                                 ${doc.name}
                             </span>
                             <button class="remove-doc-btn" onclick="removeDocument(${index})">&times;</button>

@@ -7,7 +7,7 @@ export function makeRng(seed) {
     if (seed === null || seed === undefined) {
         return Math.random;
     }
-    // Simple LCG for deterministic behavior
+    // Simple LCG for deterministic behaviour
     let state = seed;
     return function() {
         state = (state * 1664525 + 1013904223) % 4294967296;

@@ -1152,6 +1152,13 @@ export const EXAM_MODE_SHORTCUTS = {
     jumpToQuestion: { key: 'g', ctrl: true, description: 'Go to question number' },
     
     // Answering
+    markIncorrect: { key: '1', description: 'Mark incorrect' },
+    markPartial: { key: '2', description: 'Mark partially correct' },
+    markCorrect: { key: '3', description: 'Mark correct' },
+    showAnswer: { key: 'Enter', description: 'Show answer' },
+    nextQuestion: { key: 'ArrowRight', description: 'Next question' },
+    
+    // Legacy / Other
     selectOption1: { key: '1', description: 'Select option 1' },
     selectOption2: { key: '2', description: 'Select option 2' },
     selectOption3: { key: '3', description: 'Select option 3' },

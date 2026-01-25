@@ -20,7 +20,7 @@ function getAtomById(atomsById, atomId) {
     return atomsById[atomId] ?? null;
 }
 
-function normalizeAtomsById(atoms) {
+function normaliseAtomsById(atoms) {
     if (!atoms) return new Map();
     if (atoms instanceof Map) {
         return new Map(atoms);
@@ -126,7 +126,7 @@ export function effectiveMastery(atomId, atomsById, nowDate, targetDate, opts = 
 }
 
 export function computeEffectiveMasteryMap(atoms, nowDate, targetDate) {
-    const atomsById = normalizeAtomsById(atoms);
+    const atomsById = normaliseAtomsById(atoms);
     const memo = new Map();
     const results = new Map();
     for (const atomId of atomsById.keys()) {
