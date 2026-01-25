@@ -141,8 +141,8 @@ class KeyboardManager {
                     this.openExamHubWithDeckSelection();
                     return;
                 }
-                // Ctrl+Shift+?: Show keyboard shortcuts help
-                if (key === '?') {
+                // Ctrl+Shift+? or Ctrl+Shift+/: Show keyboard shortcuts help
+                if (key === '?' || key === '/') {
                     event.preventDefault();
                     window.showKeyboardShortcutsHelp?.();
                     return;

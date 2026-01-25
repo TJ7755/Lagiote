@@ -76,7 +76,7 @@ const template = [
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
             browserWindow.webContents.executeJavaScript(`
-              if (typeof window.showView === 'function') window.showView('analytics');
+              if (typeof window.showAnalyticsView === 'function') window.showAnalyticsView();
             `);
           }
         }
@@ -87,7 +87,7 @@ const template = [
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
             browserWindow.webContents.executeJavaScript(`
-              if (typeof window.showView === 'function') window.showView('insights');
+              if (typeof window.showInsightsView === 'function') window.showInsightsView();
             `);
           }
         }
@@ -114,7 +114,7 @@ const template = [
     submenu: [
       {
         label: 'Keyboard Shortcuts',
-        accelerator: 'CmdOrCtrl+Shift+?',
+        accelerator: 'CmdOrCtrl+Shift+/',
         click: async (menuItem, browserWindow) => {
           if (browserWindow) {
             browserWindow.webContents.executeJavaScript(`

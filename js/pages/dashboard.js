@@ -16078,8 +16078,8 @@ function showExamHubDeckSelector() {
     if (deckEntries.length === 0) {
         list.innerHTML = `
             <div class="exam-empty-state">
-                <h3>No decks available</h3>
-                <p>Create a deck first to use the Exam Hub.</p>
+                <h3>No decks with cards available</h3>
+                <p>Add cards to a deck to use the Exam Hub.</p>
             </div>
         `;
         modal.classList.add('show');
@@ -16201,6 +16201,7 @@ const inlineHandlers = {
     saveUsername,
     selectTestPreset,
     showAiGenerator,
+    showAnalyticsView,
     showAnswer,
     showEditor,
     showExamPlanModal,

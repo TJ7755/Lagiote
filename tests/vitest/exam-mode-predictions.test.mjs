@@ -66,7 +66,7 @@ describe('Exam Mode - Predicted Score Distribution', () => {
         expect(nearPrediction.expectedMarks).toBeGreaterThan(farPrediction.expectedMarks);
     });
     
-    it('grade probabilities sum to approximately 1 when grade bands are defined', () => {
+    it('grade probabilities are valid when grade bands are defined', () => {
         const now = new Date(Date.UTC(2025, 0, 1));
         const examDate = new Date(now.getTime() + 30 * MS_PER_DAY);
         
@@ -95,7 +95,6 @@ describe('Exam Mode - Predicted Score Distribution', () => {
         const prediction = predictExamScore(spec, questions, atoms, now, examDate);
         
         if (prediction.gradeProbabilities && Object.keys(prediction.gradeProbabilities).length > 0) {
-            const total = Object.values(prediction.gradeProbabilities).reduce((sum, p) => sum + p, 0);
             // Grade probabilities represent cumulative probabilities of achieving at least that grade,
             // so they should be between 0 and 1 for each grade
             Object.values(prediction.gradeProbabilities).forEach(prob => {
