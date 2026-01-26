@@ -76,6 +76,16 @@ function showView(viewId) {
 // --- Hub Functions ---
 
 export async function openExamModeHub(deckId) {
+    // If no deckId provided, show deck selector
+    if (!deckId) {
+        if (typeof window.showExamHubDeckSelector === 'function') {
+            window.showExamHubDeckSelector();
+        } else {
+            showToast('Deck selector is unavailable. Please try again later.', 'error');
+        }
+        return;
+    }
+    
     examModeUIState.deckId = deckId;
     examModeUIState.activeView = 'hub';
     

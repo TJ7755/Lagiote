@@ -2798,7 +2798,6 @@
 	
 	                            <button class="btn review-btn" onclick="configureStudy('review')">Review</button>
 	                            <button class="btn learn-btn hidden" id="deckDetailSequenceBtn" onclick="configureStudy('sequence')">Sequence</button>
-	                            <button class="btn btn-prominent" id="deckDetailExamHubBtn" onclick="if(typeof window.openExamModeHub==='function'){window.openExamModeHub(currentViewingDeckId)}else{showToast('Exam Hub is unavailable. Please try again later.','error')}" title="Open Exam Hub for exam preparation (Ctrl/Cmd+Shift+E)">Exam Hub</button>
 	                            <button class="btn" id="deckDetailSpacedBtn" onclick="configureStudy('spaced')">Spaced Learning</button>
 	                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
 	                            <button class="btn btn-secondary" id="deckDetailResetBtn"
@@ -2841,6 +2840,15 @@
                                 </svg></span>
                             <div class="create-title">Create with AI</div>
                             <div class="create-desc">Generate a deck from a topic or text</div>
+                        </div>
+                        <div class="create-card" onclick="if(typeof window.openExamModeHub==='function'){window.openExamModeHub()}else{showToast('Exam Hub is unavailable. Please try again later.','error')}">
+                            <span class="create-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                                </svg></span>
+                            <div class="create-title">Exam Hub</div>
+                            <div class="create-desc">Exam preparation and practice sessions</div>
                         </div>
                     </div>
                 </div>
@@ -4592,6 +4600,7 @@
     <script type="module" src="./js/pages/bridge.js"></script>
     <script type="module" src="./js/core/accent-utils.js"></script>
     <script type="module" src="./js/pages/dashboard.js"></script>
+    <script type="module" src="./js/pages/exam-mode-ui.js"></script>
 
     <!-- Card History Modal -->
     <div id="cardHistoryModal" class="modal">
