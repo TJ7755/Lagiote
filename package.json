@@ -20,7 +20,7 @@
     "preview:web": "vite preview",
     "dev:electron": "VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "smoke:web": "npm run build:web && node tests/smoke.build.mjs",
-    "test": "NODE_ENV=test node --no-warnings tests/cortex.test.mjs && NODE_ENV=test node --no-warnings tests/mcq-remediation.test.mjs && NODE_ENV=test node --no-warnings tests/utils.test.mjs && NODE_ENV=test node --no-warnings tests/eval-assignment-stratified.test.mjs && NODE_ENV=test node --no-warnings tests/sequence-utils.test.mjs",
+    "test": "NODE_ENV=test node --no-warnings tests/cortex.test.mjs && NODE_ENV=test node --no-warnings tests/mcq-remediation.test.mjs && NODE_ENV=test node --no-warnings tests/utils.test.mjs && NODE_ENV=test node --no-warnings tests/eval-assignment-stratified.test.mjs && NODE_ENV=test node --no-warnings tests/sequence-utils.test.mjs && NODE_ENV=test node --no-warnings tests/exam-weak-area-prioritization.test.mjs",
     "test:unit": "npm run test && vitest run",
     "test:e2e:web": "npx playwright install --with-deps && playwright test -c playwright.web.config.mjs",
     "test:e2e:electron": "npx playwright install --with-deps && playwright test -c playwright.electron.config.mjs",

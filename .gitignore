@@ -157,3 +157,7 @@ artifacts/
 AGENTS.md
 BUGS.md
 docs/BUGS_FIXED.md
+
+# Manual test artifacts
+screenshots/
+tests/manual/
