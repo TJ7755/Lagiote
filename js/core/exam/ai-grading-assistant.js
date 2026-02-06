@@ -106,9 +106,9 @@ export function extractClaims(text) {
         
         // Identify claim types
         let claimType = 'statement';
-        if (/^\s*(therefore|thus|hence|so)\s+/i.test(trimmed)) {
+        if (/^\s*(therefore|thus|hence|so)\b[,\s]+/i.test(trimmed)) {
             claimType = 'conclusion';
-        } else if (/^\s*(because|since|as)\s+/i.test(trimmed)) {
+        } else if (/^\s*(because|since|as)\b[,\s]+/i.test(trimmed)) {
             claimType = 'reasoning';
         } else if (/\b(is|are|was|were|equals?|equivalent)\s+/i.test(trimmed)) {
             claimType = 'definition';
@@ -283,10 +283,11 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
     const reasons = [];
     
     // Check for calculation evidence
-    if (evidence.calculations?.length > 0 && /calculate|compute|find|determine/i.test(condition)) {
+    if (evidence.calculations?.length > 0 &&
+        (/calculate|compute|find|determine/i.test(condition) || point.grading?.kind === 'calculation')) {
         const correctCalcs = evidence.calculations.filter(c => c.verified);
         if (correctCalcs.length > 0) {
-            confidence = 'high';
+            confidence = point.grading?.kind === 'calculation' ? 'medium' : 'high';
             evidenceSnippets.push(...correctCalcs.slice(0, 2).map(c => c.full));
             reasons.push(`${correctCalcs.length} verified calculation(s) found`);
         }
@@ -312,6 +313,16 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
             confidence = 'high';
             evidenceSnippets.push(...matches.slice(0, 2));
             reasons.push(`Matched accepted answers: ${matches.join(', ')}`);
+        }
+    }
+
+    // Check for numeric value matches
+    if (point.grading?.kind === 'numeric' && Number.isFinite(point.grading?.value)) {
+        const expectedValue = String(point.grading.value);
+        const valuePattern = new RegExp(`\\b${expectedValue.replace('.', '\\.')}(?:\\b|\\s)`);
+        if (valuePattern.test(evidenceText)) {
+            confidence = confidence === 'low' ? 'medium' : confidence;
+            reasons.push('Numeric value appears in response');
         }
     }
     
@@ -384,7 +395,7 @@ export function generateFeedback(awardedPoints, missedPoints, markScheme) {
             feedback.improvements.push({
                 pointId: point.pointId,
                 suggestion: point.reasons[0],
-                evidence: point.evidenceSnippets[0]
+                evidence: point.evidenceSnippets?.[0]
             });
         }
     });
@@ -420,8 +431,8 @@ export function calculateGradingConfidence(suggestions, evidence) {
     const overallScore = (highConf * 3 + mediumConf * 2 + lowConf * 1) / (total * 3);
     
     let overall;
-    if (overallScore >= 0.7) overall = 'high';
-    else if (overallScore >= 0.4) overall = 'medium';
+    if (overallScore >= 0.75) overall = 'high';
+    else if (overallScore >= 0.5) overall = 'medium';
     else overall = 'low';
     
     return {

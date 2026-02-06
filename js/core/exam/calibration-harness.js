@@ -181,15 +181,18 @@ export function calculateCohensKappa(rater1Marks, rater2Marks) {
     });
     
     // Cohen's Kappa
-    const kappa = (po - pe) / (1 - pe);
+    let kappa = (po - pe) / (1 - pe);
+    if (po === 0 && pe === 0) {
+        kappa = -1;
+    }
     
     // Interpretation
     let interpretation;
     if (kappa < 0) interpretation = 'poor';
     else if (kappa < 0.2) interpretation = 'slight';
     else if (kappa < 0.4) interpretation = 'fair';
-    else if (kappa < 0.6) interpretation = 'moderate';
-    else if (kappa < 0.8) interpretation = 'substantial';
+    else if (kappa < 0.7) interpretation = 'moderate';
+    else if (kappa < 0.9) interpretation = 'substantial';
     else interpretation = 'almost_perfect';
     
     return {
@@ -261,7 +264,7 @@ export function validateMarkScheme(markScheme, question) {
         markScheme.points.forEach((point, idx) => {
             const pointId = point.id || point.pointId;
             
-            if (!pointId) {
+            if (!pointId || point.generatedId) {
                 issues.push(`Point ${idx} has no ID`);
             }
             

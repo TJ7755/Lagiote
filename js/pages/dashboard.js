@@ -55,6 +55,8 @@ let currentMode = null;
 let confirmCallback = null;
 let cardToEdit = { deckId: null, cardIndex: null, from: null };
 let aiCardToEditIndex = null;
+const LEARN_RETRY_LAG_BASE = 3;
+const LEARN_RETRY_LAG_MAX = 12;
 let studyState = {
     buckets: [],
     currentRound: 1,
@@ -1471,6 +1473,19 @@ function ensureSessionState() {
 
 function updateSessionStateMetrics(cardId, wasCorrect, interactionLog = {}) {
     const state = ensureSessionState();
+    if (state.cardMetrics instanceof Map) {
+        state.cardMetrics.forEach((metrics, metricCardId) => {
+            if (metricCardId !== cardId && Number.isFinite(metrics?.cooldownRemaining) && metrics.cooldownRemaining > 0) {
+                metrics.cooldownRemaining -= 1;
+            }
+        });
+    } else if (state.cardMetrics && typeof state.cardMetrics === 'object') {
+        Object.entries(state.cardMetrics).forEach(([metricCardId, metrics]) => {
+            if (metricCardId !== cardId && Number.isFinite(metrics?.cooldownRemaining) && metrics.cooldownRemaining > 0) {
+                metrics.cooldownRemaining -= 1;
+            }
+        });
+    }
     state.sessionCardsSeen += 1;
     state.uniqueCardIds.add(cardId);
     state.sessionUniqueCardsSeen = state.uniqueCardIds.size;
@@ -1491,6 +1506,21 @@ function updateSessionStateMetrics(cardId, wasCorrect, interactionLog = {}) {
     metrics.lastCorrect = wasCorrect ? 1 : 0;
     metrics.lastLatency = latency;
     metrics.lastCorrections = corrections;
+    if (currentMode === 'learn') {
+        if (wasCorrect) {
+            metrics.incorrectStreak = 0;
+            metrics.cooldownRemaining = 0;
+        } else {
+            const prevStreak = Number.isFinite(metrics.incorrectStreak) ? metrics.incorrectStreak : 0;
+            const nextStreak = prevStreak + 1;
+            metrics.incorrectStreak = nextStreak;
+            const lag = Math.min(LEARN_RETRY_LAG_MAX, LEARN_RETRY_LAG_BASE * (2 ** (nextStreak - 1)));
+            metrics.cooldownRemaining = Math.max(
+                Number.isFinite(metrics.cooldownRemaining) ? metrics.cooldownRemaining : 0,
+                Math.round(lag)
+            );
+        }
+    }
     state.cardMetrics.set(cardId, metrics);
     
     // Auto-save session state
@@ -6449,8 +6479,11 @@ async function getPracticeTestRuntimeModules() {
 function getBaselineChoice(candidates, knowledgeMap) {
     if (!candidates || candidates.length === 0) return null;
 
+    const eligibleCandidates = filterCandidatesByCooldown(candidates, studyState.sessionState);
+    if (eligibleCandidates.length === 0) return null;
+
     // Baseline v1: FSRS/recency risk ordering
-    const sorted = [...candidates].sort((a, b) => {
+    const sorted = [...eligibleCandidates].sort((a, b) => {
         const stateA = a.knowledgeState;
         const stateB = b.knowledgeState;
         
@@ -6472,6 +6505,26 @@ function getBaselineChoice(candidates, knowledgeMap) {
     return sorted[0].card;
 }
 
+function filterCandidatesByCooldown(candidates, sessionState) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    if (!sessionState?.cardMetrics) return candidates;
+    const getCooldown = (cardId) => {
+        const metrics = sessionState.cardMetrics instanceof Map
+            ? sessionState.cardMetrics.get(cardId)
+            : sessionState.cardMetrics[cardId];
+        const value = metrics?.cooldownRemaining;
+        return Number.isFinite(value) ? value : 0;
+    };
+    const ready = candidates.filter(entry => getCooldown(entry.card.id) <= 0);
+    if (ready.length > 0) return ready;
+    let minCooldown = Infinity;
+    candidates.forEach(entry => {
+        const cooldown = getCooldown(entry.card.id);
+        if (cooldown < minCooldown) minCooldown = cooldown;
+    });
+    return candidates.filter(entry => getCooldown(entry.card.id) === minCooldown);
+}
+
 function parsePositiveInt(value, fallback) {
     const parsed = Number.parseInt(value, 10);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
@@ -6489,7 +6542,11 @@ function buildLearnPool(deck, knowledgeMap, targetDate, maxCards) {
         return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
     }).filter(entry => !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate));
 
-    candidates.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
+    candidates.sort((a, b) => {
+        const diff = (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0);
+        if (diff !== 0) return diff;
+        return Math.random() - 0.5;
+    });
     const poolLimit = Number.isFinite(maxCards) && maxCards > 0 ? maxCards : candidates.length;
     const activeLearningPool = candidates.slice(0, poolLimit).map(entry => entry.card);
     return { activeLearningPool, sessionCardIds: activeLearningPool.map(card => card.id) };

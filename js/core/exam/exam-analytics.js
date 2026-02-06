@@ -57,6 +57,7 @@ export function analyseMarkLoss(markingRecord, question, markScheme) {
     totalPoints.forEach(point => {
         const pointId = point.id || point.pointId;
         const awarded = awardedPoints.find(ap => ap.pointId === pointId);
+        if (!awarded) return;
         const marksAwarded = awarded?.awardedMarks || 0;
         const marksAvailable = point.marks || 1;
         
@@ -217,7 +218,7 @@ export function analyseCommandWords(questions, markingRecords) {
     })).sort((a, b) => a.averageScore - b.averageScore);
     
     // Identify weak command words
-    const weakCommands = results.filter(r => r.averageScore < 0.5 && r.attempts >= 2);
+    const weakCommands = results.filter(r => r.averageScore < 0.7 && r.attempts >= 1);
     
     return {
         commandBreakdown: results,
@@ -351,7 +352,7 @@ export function analyseFragility(atoms, questions, atomsById) {
         fragileAtomCount: fragileAtoms.length,
         fragileAtoms: fragileAtoms.slice(0, 10),
         relevantQuestions: relevantQuestions.length,
-        riskLevel: fragileAtoms.length > 5 ? 'high' : fragileAtoms.length > 2 ? 'medium' : 'low',
+        riskLevel: fragileAtoms.length >= 5 ? 'high' : fragileAtoms.length >= 2 ? 'medium' : 'low',
         recommendation: fragileAtoms.length > 0
             ? `Practice varied questions on: ${fragileAtoms.slice(0, 3).map(a => a.name).join(', ')}`
             : 'Knowledge fragility is low - good retention'
@@ -383,8 +384,9 @@ export function analyseTrends(sittings) {
     }
     
     // Calculate trend
-    const firstHalf = scores.slice(0, Math.floor(scores.length / 2));
-    const secondHalf = scores.slice(Math.floor(scores.length / 2));
+    const splitIndex = Math.ceil(scores.length / 2);
+    const firstHalf = scores.slice(0, splitIndex);
+    const secondHalf = scores.slice(splitIndex);
     
     const firstAvg = firstHalf.reduce((s, r) => s + r.percentage, 0) / firstHalf.length;
     const secondAvg = secondHalf.reduce((s, r) => s + r.percentage, 0) / secondHalf.length;

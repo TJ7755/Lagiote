@@ -12,6 +12,26 @@ import { createMarkScheme, createPointsSchemePoint } from './marking.js';
 import { createMarkSchemeTestHarness } from './mark-scheme-test-harness.js';
 import { validateMarkScheme } from './calibration-harness.js';
 
+function cloneExamData(value) {
+    if (value === null || typeof value === 'undefined') return value;
+    if (typeof structuredClone === 'function') {
+        return structuredClone(value);
+    }
+    return JSON.parse(JSON.stringify(value));
+}
+
+function ensureMcqOptions(question) {
+    if (!question) return question;
+    if (question.type === 'mcq_single' || question.type === 'mcq_multi') {
+        const options = Array.isArray(question.options) ? [...question.options] : [];
+        while (options.length < 4) options.push('');
+        question.options = options;
+    } else if (!Array.isArray(question.options)) {
+        question.options = [];
+    }
+    return question;
+}
+
 // --- Atom Editor ---
 
 /**
@@ -20,8 +40,9 @@ import { validateMarkScheme } from './calibration-harness.js';
  * @returns {Object} Atom editor interface
  */
 export function createAtomEditor(initialAtom = null) {
+    const initialSnapshot = initialAtom ? cloneExamData(initialAtom) : null;
     const state = {
-        atom: initialAtom || createAtom({}),
+        atom: initialSnapshot ? cloneExamData(initialSnapshot) : createAtom({}),
         isValid: false,
         errors: [],
         touched: new Set()
@@ -155,7 +176,7 @@ export function createAtomEditor(initialAtom = null) {
          * Resets to initial state.
          */
         reset() {
-            state.atom = initialAtom ? { ...initialAtom } : createAtom({});
+            state.atom = initialSnapshot ? cloneExamData(initialSnapshot) : createAtom({});
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -184,8 +205,9 @@ export function createAtomEditor(initialAtom = null) {
  * @returns {Object} Question editor interface
  */
 export function createQuestionEditor(initialQuestion = null) {
+    const initialSnapshot = initialQuestion ? cloneExamData(initialQuestion) : null;
     const state = {
-        question: initialQuestion || createQuestion({ type: 'mcq_single' }),
+        question: ensureMcqOptions(initialSnapshot ? cloneExamData(initialSnapshot) : createQuestion({ type: 'mcq_single' })),
         availableAtoms: [],
         isValid: false,
         errors: [],
@@ -231,9 +253,7 @@ export function createQuestionEditor(initialQuestion = null) {
             
             // Reset type-specific fields
             if (type === 'mcq_single' || type === 'mcq_multi') {
-                if (!state.question.options) {
-                    state.question.options = ['', '', '', ''];
-                }
+                ensureMcqOptions(state.question);
             } else {
                 state.question.options = [];
             }
@@ -328,6 +348,25 @@ export function createQuestionEditor(initialQuestion = null) {
             state.isValid = state.errors.length === 0 && state.touched.has('prompt');
             return state.isValid;
         },
+
+        /**
+         * Checks if field has error.
+         * @param {string} field Field name
+         * @returns {boolean} Has error
+         */
+        hasError(field) {
+            return state.errors.some(e => e.field === field);
+        },
+
+        /**
+         * Gets field error message.
+         * @param {string} field Field name
+         * @returns {string|null} Error message
+         */
+        getFieldError(field) {
+            const error = state.errors.find(e => e.field === field);
+            return error?.message || null;
+        },
         
         /**
          * Gets available atoms.
@@ -353,7 +392,7 @@ export function createQuestionEditor(initialQuestion = null) {
          * Resets editor.
          */
         reset() {
-            state.question = initialQuestion ? { ...initialQuestion } : createQuestion({});
+            state.question = ensureMcqOptions(initialSnapshot ? cloneExamData(initialSnapshot) : createQuestion({ type: 'mcq_single' }));
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -383,8 +422,9 @@ export function createQuestionEditor(initialQuestion = null) {
  * @returns {Object} Mark scheme editor interface
  */
 export function createMarkSchemeEditor(initialScheme = null) {
+    const initialSnapshot = initialScheme ? cloneExamData(initialScheme) : null;
     const state = {
-        scheme: initialScheme || createMarkScheme({ schemeType: 'points' }),
+        scheme: initialSnapshot ? cloneExamData(initialSnapshot) : createMarkScheme({ schemeType: 'points' }),
         testHarness: null,
         testResults: [],
         isValid: false,
@@ -428,6 +468,9 @@ export function createMarkSchemeEditor(initialScheme = null) {
          */
         addPoint(pointData = {}) {
             const point = createPointsSchemePoint(pointData);
+            if (!pointData.id) {
+                point.generatedId = true;
+            }
             state.scheme.points = [...(state.scheme.points || []), point];
             state.scheme.updatedAt = new Date().toISOString();
             this.validate();
@@ -631,7 +674,7 @@ export function createMarkSchemeEditor(initialScheme = null) {
          * Resets editor.
          */
         reset() {
-            state.scheme = initialScheme ? { ...initialScheme } : createMarkScheme({});
+            state.scheme = initialSnapshot ? cloneExamData(initialSnapshot) : createMarkScheme({});
             state.testHarness = null;
             state.testResults = [];
             state.errors = [];

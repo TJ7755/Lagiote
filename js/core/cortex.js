@@ -830,11 +830,15 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
     let bestCard = null;
     let bestScore = -Infinity;
 
-    for (const card of candidates) {
+    const eligibleCandidates = filterCandidatesByCooldown(candidates, sessionState);
+    for (const card of eligibleCandidates) {
         const state = knowledgeStates?.get ? knowledgeStates.get(card.id) : knowledgeStates?.[card.id];
         const score = await scoreCard(card, state, sessionState, deck);
         
         if (bestCard === null || score > bestScore) {
+            bestCard = card;
+            bestScore = score;
+        } else if (score === bestScore && Math.random() < 0.5) {
             bestCard = card;
             bestScore = score;
         }
@@ -846,6 +850,18 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
     }
     
     return bestCard;
+}
+
+function filterCandidatesByCooldown(candidates, sessionState) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    const eligible = candidates.filter(card => getCardMetric(sessionState, card.id, 'cooldownRemaining', 0) <= 0);
+    if (eligible.length > 0) return eligible;
+    let minCooldown = Infinity;
+    for (const card of candidates) {
+        const cooldown = getCardMetric(sessionState, card.id, 'cooldownRemaining', 0);
+        if (cooldown < minCooldown) minCooldown = cooldown;
+    }
+    return candidates.filter(card => getCardMetric(sessionState, card.id, 'cooldownRemaining', 0) === minCooldown);
 }
 
 // --- 6. Neural Predictor ---
