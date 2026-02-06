@@ -191,8 +191,15 @@ export function createAtomEditor(initialAtom = null) {
  * @returns {Object} Question editor interface
  */
 export function createQuestionEditor(initialQuestion = null) {
+    // Deep-copy initial question to prevent mutation
+    const initialSnapshot = initialQuestion ? JSON.parse(JSON.stringify(initialQuestion)) : null;
+
+    function cloneInitial() {
+        return initialSnapshot ? { ...createQuestion({ type: 'mcq_single' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createQuestion({ type: 'mcq_single' });
+    }
+
     const state = {
-        question: initialQuestion || createQuestion({ type: 'mcq_single' }),
+        question: cloneInitial(),
         availableAtoms: [],
         isValid: false,
         errors: [],
@@ -369,7 +376,7 @@ export function createQuestionEditor(initialQuestion = null) {
          * Resets editor.
          */
         reset() {
-            state.question = initialQuestion ? { ...initialQuestion } : createQuestion({});
+            state.question = cloneInitial();
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -399,8 +406,15 @@ export function createQuestionEditor(initialQuestion = null) {
  * @returns {Object} Mark scheme editor interface
  */
 export function createMarkSchemeEditor(initialScheme = null) {
+    // Deep-copy initial scheme to prevent mutation
+    const initialSnapshot = initialScheme ? JSON.parse(JSON.stringify(initialScheme)) : null;
+
+    function cloneInitial() {
+        return initialSnapshot ? { ...createMarkScheme({ schemeType: 'points' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createMarkScheme({ schemeType: 'points' });
+    }
+
     const state = {
-        scheme: initialScheme || createMarkScheme({ schemeType: 'points' }),
+        scheme: cloneInitial(),
         testHarness: null,
         testResults: [],
         isValid: false,
@@ -651,7 +665,7 @@ export function createMarkSchemeEditor(initialScheme = null) {
          * Resets editor.
          */
         reset() {
-            state.scheme = initialScheme ? { ...initialScheme } : createMarkScheme({});
+            state.scheme = cloneInitial();
             state.testHarness = null;
             state.testResults = [];
             state.errors = [];

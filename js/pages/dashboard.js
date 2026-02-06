@@ -2962,7 +2962,7 @@ function generateErrorAnalysisReport(logs, cardId) {
     }
 
     const incorrectAnswers = logs
-        .filter(log => log.cardID == cardId && !log.wasCorrect)
+        .filter(log => log.cardID === cardId && !log.wasCorrect)
         .map(log => log.userAnswer.trim().toLowerCase());
 
     if (incorrectAnswers.length === 0) {
