@@ -13,6 +13,17 @@
 
 import { generateUUID } from './exam-mode.js';
 
+// --- Utility Functions ---
+
+/**
+ * Escapes special characters in a string for use in a RegExp.
+ * @param {string} str String to escape
+ * @returns {string} Escaped string
+ */
+function escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // --- Evidence Extraction ---
 
 /**
@@ -319,7 +330,7 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
     // Check for numeric value matches
     if (point.grading?.kind === 'numeric' && Number.isFinite(point.grading?.value)) {
         const expectedValue = String(point.grading.value);
-        const valuePattern = new RegExp(`\\b${expectedValue.replace('.', '\\.')}(?:\\b|\\s)`);
+        const valuePattern = new RegExp(`\\b${escapeRegExp(expectedValue)}(?:\\b|\\s)`);
         if (valuePattern.test(evidenceText)) {
             confidence = confidence === 'low' ? 'medium' : confidence;
             reasons.push('Numeric value appears in response');
