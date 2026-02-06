@@ -21,7 +21,7 @@ import { generateUUID } from './exam-mode.js';
  * @returns {string} Escaped string
  */
 function escapeRegExp(str) {
-    return str.replace(/[.*+?^${}()|[\]\\\-]/g, '\\$&');
+    return str.replace(/[.*+?^${}()|\\[\]\-]/g, '\\$&');
 }
 
 // --- Evidence Extraction ---
