@@ -191,8 +191,11 @@ export function createAtomEditor(initialAtom = null) {
  * @returns {Object} Question editor interface
  */
 export function createQuestionEditor(initialQuestion = null) {
+    // Deep-copy initial question to prevent mutation
+    const initialSnapshot = initialQuestion ? JSON.parse(JSON.stringify(initialQuestion)) : null;
+
     const state = {
-        question: initialQuestion || createQuestion({ type: 'mcq_single' }),
+        question: initialSnapshot ? { ...createQuestion({ type: 'mcq_single' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createQuestion({ type: 'mcq_single' }),
         availableAtoms: [],
         isValid: false,
         errors: [],
@@ -369,7 +372,7 @@ export function createQuestionEditor(initialQuestion = null) {
          * Resets editor.
          */
         reset() {
-            state.question = initialQuestion ? { ...initialQuestion } : createQuestion({});
+            state.question = initialSnapshot ? JSON.parse(JSON.stringify(initialSnapshot)) : createQuestion({});
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -399,8 +402,11 @@ export function createQuestionEditor(initialQuestion = null) {
  * @returns {Object} Mark scheme editor interface
  */
 export function createMarkSchemeEditor(initialScheme = null) {
+    // Deep-copy initial scheme to prevent mutation
+    const initialSnapshot = initialScheme ? JSON.parse(JSON.stringify(initialScheme)) : null;
+
     const state = {
-        scheme: initialScheme || createMarkScheme({ schemeType: 'points' }),
+        scheme: initialSnapshot ? { ...createMarkScheme({ schemeType: 'points' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createMarkScheme({ schemeType: 'points' }),
         testHarness: null,
         testResults: [],
         isValid: false,
@@ -651,7 +657,7 @@ export function createMarkSchemeEditor(initialScheme = null) {
          * Resets editor.
          */
         reset() {
-            state.scheme = initialScheme ? { ...initialScheme } : createMarkScheme({});
+            state.scheme = initialSnapshot ? JSON.parse(JSON.stringify(initialSnapshot)) : createMarkScheme({});
             state.testHarness = null;
             state.testResults = [];
             state.errors = [];
