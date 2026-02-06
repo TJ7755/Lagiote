@@ -129,9 +129,9 @@ export function createMarkSchemeTestHarness(markScheme, question) {
                     return `Expected indices [${grading.correctIndices?.join(', ')}], got different`;
                 case 'numeric':
                     if (grading.requireUnit) {
-                        return `Value or unit incorrect (expected ${grading.value} ${grading.requireUnit})`;
+                        return `Value or unit incorrect (expected ${grading.value} ${grading.requireUnit}, tolerance ±${grading.toleranceAbs || 0})`;
                     }
-                    return `Value incorrect (expected ${grading.value}±${grading.toleranceAbs || 0})`;
+                    return `Value incorrect (expected ${grading.value}, tolerance ±${grading.toleranceAbs || 0})`;
                 case 'short_text':
                     const accepted = grading.accepted?.join(', ') || 'specific terms';
                     return `Response did not match accepted: ${accepted}`;
@@ -318,7 +318,7 @@ function normalizeTextResponse(text, questionType) {
             return { value: null, rawValue: text };
             
         case 'short_text':
-            return { text: text.trim() };
+            return { text: text };
             
         case 'mcq_single':
             // Try to parse letter or number

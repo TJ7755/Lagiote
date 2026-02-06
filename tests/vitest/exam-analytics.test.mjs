@@ -74,8 +74,9 @@ describe('Exam Analytics - Mark Loss Attribution', () => {
         };
         
         const analysis = analyseMarkLoss(markingRecord, mockQuestion, mockMarkScheme);
+        const reasoningLoss = analysis.losses.find(l => l.pointId === 'R1');
         
-        expect(analysis.losses[0].category).toBe(MARK_LOSS_CATEGORIES.TECHNIQUE_ERROR);
+        expect(reasoningLoss.category).toBe(MARK_LOSS_CATEGORIES.TECHNIQUE_ERROR);
     });
     
     it('returns null for invalid marking record', () => {
