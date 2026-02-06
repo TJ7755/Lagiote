@@ -20,8 +20,15 @@ import { validateMarkScheme } from './calibration-harness.js';
  * @returns {Object} Atom editor interface
  */
 export function createAtomEditor(initialAtom = null) {
+    // Deep-copy initial atom to prevent mutation
+    const initialSnapshot = initialAtom ? JSON.parse(JSON.stringify(initialAtom)) : null;
+    
+    function cloneInitial() {
+        return initialSnapshot ? { ...createAtom({}), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createAtom({});
+    }
+    
     const state = {
-        atom: initialAtom || createAtom({}),
+        atom: cloneInitial(),
         isValid: false,
         errors: [],
         touched: new Set()
@@ -155,7 +162,7 @@ export function createAtomEditor(initialAtom = null) {
          * Resets to initial state.
          */
         reset() {
-            state.atom = initialAtom ? { ...initialAtom } : createAtom({});
+            state.atom = cloneInitial();
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -231,7 +238,7 @@ export function createQuestionEditor(initialQuestion = null) {
             
             // Reset type-specific fields
             if (type === 'mcq_single' || type === 'mcq_multi') {
-                if (!state.question.options) {
+                if (!state.question.options || state.question.options.length === 0) {
                     state.question.options = ['', '', '', ''];
                 }
             } else {
@@ -338,6 +345,15 @@ export function createQuestionEditor(initialQuestion = null) {
         },
         
         /**
+         * Checks if field has error.
+         * @param {string} field Field name
+         * @returns {boolean} Has error
+         */
+        hasError(field) {
+            return state.errors.some(e => e.field === field);
+        },
+        
+        /**
          * Gets mapped atoms with details.
          * @returns {Array} Mapped atoms with full data
          */
@@ -428,6 +444,10 @@ export function createMarkSchemeEditor(initialScheme = null) {
          */
         addPoint(pointData = {}) {
             const point = createPointsSchemePoint(pointData);
+            // Preserve missing ID for validation if user didn't provide one
+            if (!pointData.id && !pointData.pointId) {
+                delete point.id;
+            }
             state.scheme.points = [...(state.scheme.points || []), point];
             state.scheme.updatedAt = new Date().toISOString();
             this.validate();
