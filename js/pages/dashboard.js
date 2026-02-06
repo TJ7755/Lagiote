@@ -1399,7 +1399,8 @@ function createDefaultSessionState() {
         recentCards: [],
         recentOutcomes: [],
         cardMetrics: new Map(),
-        uniqueCardIds: new Set()
+        uniqueCardIds: new Set(),
+        sessionTurn: 0  // Global turn counter for absolute cooldown tracking
     };
 }
 
@@ -1473,19 +1474,11 @@ function ensureSessionState() {
 
 function updateSessionStateMetrics(cardId, wasCorrect, interactionLog = {}) {
     const state = ensureSessionState();
-    if (state.cardMetrics instanceof Map) {
-        state.cardMetrics.forEach((metrics, metricCardId) => {
-            if (metricCardId !== cardId && Number.isFinite(metrics?.cooldownRemaining) && metrics.cooldownRemaining > 0) {
-                metrics.cooldownRemaining -= 1;
-            }
-        });
-    } else if (state.cardMetrics && typeof state.cardMetrics === 'object') {
-        Object.entries(state.cardMetrics).forEach(([metricCardId, metrics]) => {
-            if (metricCardId !== cardId && Number.isFinite(metrics?.cooldownRemaining) && metrics.cooldownRemaining > 0) {
-                metrics.cooldownRemaining -= 1;
-            }
-        });
-    }
+    
+    // Increment global turn counter
+    if (!Number.isFinite(state.sessionTurn)) state.sessionTurn = 0;
+    state.sessionTurn += 1;
+    
     state.sessionCardsSeen += 1;
     state.uniqueCardIds.add(cardId);
     state.sessionUniqueCardsSeen = state.uniqueCardIds.size;
@@ -1509,15 +1502,16 @@ function updateSessionStateMetrics(cardId, wasCorrect, interactionLog = {}) {
     if (currentMode === 'learn') {
         if (wasCorrect) {
             metrics.incorrectStreak = 0;
-            metrics.cooldownRemaining = 0;
+            metrics.cooldownUntil = 0;
         } else {
             const prevStreak = Number.isFinite(metrics.incorrectStreak) ? metrics.incorrectStreak : 0;
             const nextStreak = prevStreak + 1;
             metrics.incorrectStreak = nextStreak;
             const lag = Math.min(LEARN_RETRY_LAG_MAX, LEARN_RETRY_LAG_BASE * (2 ** (nextStreak - 1)));
-            metrics.cooldownRemaining = Math.max(
-                Number.isFinite(metrics.cooldownRemaining) ? metrics.cooldownRemaining : 0,
-                Math.round(lag)
+            // Store absolute turn when card becomes available again
+            metrics.cooldownUntil = Math.max(
+                Number.isFinite(metrics.cooldownUntil) ? metrics.cooldownUntil : 0,
+                state.sessionTurn + Math.round(lag)
             );
         }
     }
@@ -6508,13 +6502,17 @@ function getBaselineChoice(candidates, knowledgeMap) {
 function filterCandidatesByCooldown(candidates, sessionState) {
     if (!Array.isArray(candidates) || candidates.length === 0) return [];
     if (!sessionState?.cardMetrics) return candidates;
+    
+    const currentTurn = Number.isFinite(sessionState.sessionTurn) ? sessionState.sessionTurn : 0;
     const getCooldown = (cardId) => {
         const metrics = sessionState.cardMetrics instanceof Map
             ? sessionState.cardMetrics.get(cardId)
             : sessionState.cardMetrics[cardId];
-        const value = metrics?.cooldownRemaining;
-        return Number.isFinite(value) ? value : 0;
+        const cooldownUntil = metrics?.cooldownUntil;
+        if (!Number.isFinite(cooldownUntil)) return 0;
+        return Math.max(0, cooldownUntil - currentTurn);
     };
+    
     const ready = candidates.filter(entry => getCooldown(entry.card.id) <= 0);
     if (ready.length > 0) return ready;
     let minCooldown = Infinity;
@@ -6542,11 +6540,27 @@ function buildLearnPool(deck, knowledgeMap, targetDate, maxCards) {
         return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
     }).filter(entry => !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate));
 
-    candidates.sort((a, b) => {
-        const diff = (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0);
-        if (diff !== 0) return diff;
-        return Math.random() - 0.5;
-    });
+    // Sort by retention (ascending)
+    candidates.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
+    
+    // Fisher-Yates shuffle within groups of equal retention
+    let start = 0;
+    while (start < candidates.length) {
+        const retention = candidates[start].projectedRetention ?? 0;
+        let end = start + 1;
+        while (end < candidates.length && (candidates[end].projectedRetention ?? 0) === retention) {
+            end++;
+        }
+        // Shuffle [start, end) if group has more than 1 element
+        if (end - start > 1) {
+            for (let i = end - 1; i > start; i--) {
+                const j = start + Math.floor(Math.random() * (i - start + 1));
+                [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+            }
+        }
+        start = end;
+    }
+    
     const poolLimit = Number.isFinite(maxCards) && maxCards > 0 ? maxCards : candidates.length;
     const activeLearningPool = candidates.slice(0, poolLimit).map(entry => entry.card);
     return { activeLearningPool, sessionCardIds: activeLearningPool.map(card => card.id) };

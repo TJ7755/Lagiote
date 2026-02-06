@@ -181,9 +181,13 @@ export function calculateCohensKappa(rater1Marks, rater2Marks) {
     });
     
     // Cohen's Kappa
-    let kappa = (po - pe) / (1 - pe);
-    if (po === 0 && pe === 0) {
-        kappa = -1;
+    let kappa;
+    if (pe === 1) {
+        // Degenerate case: expected agreement is perfect, avoid division by zero.
+        // Define kappa as 1 when observed agreement is also perfect, otherwise 0.
+        kappa = po === 1 ? 1 : 0;
+    } else {
+        kappa = (po - pe) / (1 - pe);
     }
     
     // Interpretation
@@ -264,8 +268,10 @@ export function validateMarkScheme(markScheme, question) {
         markScheme.points.forEach((point, idx) => {
             const pointId = point.id || point.pointId;
             
-            if (!pointId || point.generatedId) {
+            if (!pointId) {
                 issues.push(`Point ${idx} has no ID`);
+            } else if (point.generatedId) {
+                issues.push(`Point ${idx} uses an auto-generated ID (${pointId}) and needs a stable/manual ID`);
             }
             
             if (!point.marks && point.marks !== 0) {

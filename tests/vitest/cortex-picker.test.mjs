@@ -58,11 +58,12 @@ describe('cortex picker invariants', () => {
             sessionMeanFluency: 3,
             sessionCardsSeen: 0,
             sessionUniqueCardsSeen: 0,
+            sessionTurn: 5,
             recentCards: [],
             recentOutcomes: [],
             cardMetrics: new Map([
-                ['a', { cooldownRemaining: 2 }],
-                ['b', { cooldownRemaining: 0 }]
+                ['a', { cooldownUntil: 7 }],  // Card 'a' is on cooldown until turn 7 (current is 5)
+                ['b', { cooldownUntil: 0 }]   // Card 'b' is ready
             ]),
             uniqueCardIds: new Set()
         };
@@ -93,9 +94,12 @@ describe('cortex picker invariants', () => {
         const knowledgeStates = new Map();
 
         const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.1);
-        const picked = await pickNextCard(candidates, sessionState, deck, knowledgeStates);
-        randomSpy.mockRestore();
-
-        expect(picked.id).toBe('b');
+        let picked;
+        try {
+            picked = await pickNextCard(candidates, sessionState, deck, knowledgeStates);
+            expect(picked.id).toBe('b');
+        } finally {
+            randomSpy.mockRestore();
+        }
     });
 });

@@ -86,12 +86,16 @@ describe('Calibration Harness - Cohen\'s Kappa', () => {
     });
     
     it('calculates no agreement', () => {
+        // Complete systematic disagreement: po=0, pe=0
+        // Kappa = (0-0)/(1-0) = 0 (agreement at chance level, which is 0)
         const rater1 = [1, 1, 1];
         const rater2 = [2, 2, 2];
         
         const kappa = calculateCohensKappa(rater1, rater2);
         
-        expect(kappa.kappa).toBeLessThan(0);
+        // When both po and pe are 0, kappa should be 0 (not negative)
+        // This is mathematically correct: agreement equals chance agreement (both are 0%)
+        expect(kappa.kappa).toBe(0);
         expect(kappa.isAcceptable).toBe(false);
     });
     

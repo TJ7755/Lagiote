@@ -829,6 +829,7 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
     // Fallback to scoring if queue empty or invalid
     let bestCard = null;
     let bestScore = -Infinity;
+    let tieCount = 0;
 
     const eligibleCandidates = filterCandidatesByCooldown(candidates, sessionState);
     for (const card of eligibleCandidates) {
@@ -838,9 +839,13 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
         if (bestCard === null || score > bestScore) {
             bestCard = card;
             bestScore = score;
-        } else if (score === bestScore && Math.random() < 0.5) {
-            bestCard = card;
-            bestScore = score;
+            tieCount = 1;
+        } else if (score === bestScore) {
+            tieCount++;
+            // Reservoir sampling: replace with probability 1/tieCount
+            if (Math.random() < 1 / tieCount) {
+                bestCard = card;
+            }
         }
     }
     
@@ -854,14 +859,21 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
 
 function filterCandidatesByCooldown(candidates, sessionState) {
     if (!Array.isArray(candidates) || candidates.length === 0) return [];
-    const eligible = candidates.filter(card => getCardMetric(sessionState, card.id, 'cooldownRemaining', 0) <= 0);
+    
+    const currentTurn = Number.isFinite(sessionState?.sessionTurn) ? sessionState.sessionTurn : 0;
+    const getCooldown = (card) => {
+        const cooldownUntil = getCardMetric(sessionState, card.id, 'cooldownUntil', 0);
+        return Math.max(0, cooldownUntil - currentTurn);
+    };
+    
+    const eligible = candidates.filter(card => getCooldown(card) <= 0);
     if (eligible.length > 0) return eligible;
     let minCooldown = Infinity;
     for (const card of candidates) {
-        const cooldown = getCardMetric(sessionState, card.id, 'cooldownRemaining', 0);
+        const cooldown = getCooldown(card);
         if (cooldown < minCooldown) minCooldown = cooldown;
     }
-    return candidates.filter(card => getCardMetric(sessionState, card.id, 'cooldownRemaining', 0) === minCooldown);
+    return candidates.filter(card => getCooldown(card) === minCooldown);
 }
 
 // --- 6. Neural Predictor ---
