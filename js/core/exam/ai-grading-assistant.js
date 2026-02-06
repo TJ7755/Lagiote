@@ -330,7 +330,8 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
             reasons.push(`Numeric value ${targetValue} found in response`);
         } else {
             // Check raw text for the numeric value
-            const numPattern = new RegExp(`\\b${targetValue}\\b`);
+            const escapedValue = String(targetValue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const numPattern = new RegExp(`\\b${escapedValue}\\b`);
             if (numPattern.test(evidenceText)) {
                 confidence = confidence === 'low' ? 'medium' : confidence;
                 reasons.push(`Value ${targetValue} appears in response text`);

@@ -23,8 +23,12 @@ export function createAtomEditor(initialAtom = null) {
     // Deep-copy initial atom to prevent mutation
     const initialSnapshot = initialAtom ? JSON.parse(JSON.stringify(initialAtom)) : null;
     
+    function cloneInitial() {
+        return initialSnapshot ? { ...createAtom({}), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createAtom({});
+    }
+    
     const state = {
-        atom: initialSnapshot ? { ...createAtom({}), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createAtom({}),
+        atom: cloneInitial(),
         isValid: false,
         errors: [],
         touched: new Set()
@@ -158,7 +162,7 @@ export function createAtomEditor(initialAtom = null) {
          * Resets to initial state.
          */
         reset() {
-            state.atom = initialSnapshot ? { ...createAtom({}), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createAtom({});
+            state.atom = cloneInitial();
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
