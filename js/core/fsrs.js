@@ -294,7 +294,7 @@ export class FSRSAlgorithm {
         const elapsedDays = Math.max(0, (now.getTime() - lastReviewDate.getTime()) / (1000 * 3600 * 24));
         const stability = fsrsState.stability || 0;
         if (stability <= 0) return 1.0;
-        const retention = Math.exp(-elapsedDays / stability);
+        const retention = Math.exp((Math.log(0.9) * elapsedDays) / stability);
         return Math.max(0, Math.min(1, retention));
     }
 

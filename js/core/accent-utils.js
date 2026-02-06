@@ -102,11 +102,11 @@ export function updateAccentButtonsVisibility() {
     const shouldShow = Boolean(writeInput && !writeInput.classList.contains('hidden'));
 
     moduleEl.classList.toggle('hidden', !shouldShow);
-    if (buttonsEl) {
-        buttonsEl.classList.toggle('hidden', !shouldShow);
+    if (buttonsEl && shouldShow) {
+        buttonsEl.classList.remove('hidden');
     }
-    if (toggleButton) {
-        toggleButton.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+    if (toggleButton && shouldShow) {
+        toggleButton.setAttribute('aria-expanded', 'true');
     }
 }
 

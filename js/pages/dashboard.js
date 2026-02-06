@@ -305,6 +305,7 @@ const DEFAULT_DECK_SETTINGS = {
     maxBuckets: 4,
     caseSensitive: false,
     punctuation: false,
+    strictMarking: false,
     retypeIncorrect: true,
     learnHorizonDays: 0,
     feedbackStyle: 'simple',
@@ -555,6 +556,7 @@ function assignTestIds() {
         adaptiveClozeToggle: 'settings-adaptive-cloze',
         caseSensitiveToggle: 'settings-case-sensitive',
         punctuationToggle: 'settings-punctuation',
+        strictMarkingToggle: 'deck-settings-strict-marking',
         retypeIncorrectToggle: 'deck-settings-retype-incorrect',
         deckSettingsExamModeToggle: 'deck-settings-exam-toggle',
         deckSettingsExamDate: 'deck-settings-exam-date',
@@ -4744,6 +4746,21 @@ function showDeckDetail(deckId, cardElement) {
             exportDeck(String(deckId), event);
         };
     }
+    const learnBtn = document.querySelector('#deckDetailActions button[onclick*="learn"]');
+    if (learnBtn) {
+        learnBtn.onclick = () => configureStudy('learn', deck.id);
+    }
+
+    const reviewBtn = document.querySelector('#deckDetailActions button[onclick*="review"]');
+    if (reviewBtn) {
+        reviewBtn.onclick = () => configureStudy('review', deck.id);
+    }
+
+    const spacedBtn = document.getElementById('deckDetailSpacedBtn');
+    if (spacedBtn) {
+        spacedBtn.onclick = () => configureStudy('spaced', deck.id);
+    }
+
     const sequenceActionBtn = document.getElementById('deckDetailSequenceBtn');
     if (sequenceActionBtn) {
         const isSequenceDeck = deck.typeHint === 'Sequence';
@@ -8655,7 +8672,7 @@ function AccentModule(config) {
         ? () => config.getInputEl()
         : () => (config.inputId ? document.getElementById(config.inputId) : null);
     this.priorityBase = null;
-    this.isExpanded = false;
+    this.isExpanded = true;
     this.lastDeckId = null;
     this.lastRenderedHtml = '';
     this.inputEl = null;
@@ -8787,9 +8804,10 @@ AccentModule.prototype.renderButtons = function (deck, accentData) {
     }
     this.buttonsContainer.innerHTML = html;
     this.lastRenderedHtml = html;
-    if (!this.isExpanded) {
-        this.buttonsContainer.classList.add('hidden');
-    }
+    // Default to showing buttons (expanded state)
+    this.buttonsContainer.classList.remove('hidden');
+    this.isExpanded = true;
+    this.toggleBtn.setAttribute('aria-expanded', 'true');
 };
 
 AccentModule.prototype.renderButtonsForCurrentDeck = function () {
@@ -8826,6 +8844,7 @@ AccentModule.prototype.updateVisibility = function (shouldShow) {
 
 AccentModule.prototype.refresh = function () {
     this.lastDeckId = null;
+    this.isExpanded = true;
     this.setInputEl(this.getInputEl());
 };
 
@@ -9611,6 +9630,7 @@ function openDeckSettingsModal(deckId) {
     document.getElementById('punctuationToggle').checked = settings.punctuation || false;
     document.getElementById('reviewOrder').value = settings.reviewOrder || 'random';
     document.getElementById('enablePomodoroToggle').checked = settings.enablePomodoro || false;
+    document.getElementById('strictMarkingToggle').checked = settings.strictMarking || false;
 
     document.getElementById('deckSettingsSpacedNewPerDay').value = Number.isFinite(settings.spacedNewPerDay)
         ? settings.spacedNewPerDay
@@ -9685,6 +9705,7 @@ async function completeSaveDeckSettings(deck) {
 
     deck.settings.caseSensitive = document.getElementById('caseSensitiveToggle').checked;
     deck.settings.punctuation = document.getElementById('punctuationToggle').checked;
+    deck.settings.strictMarking = document.getElementById('strictMarkingToggle').checked;
 
     deck.settings.reviewOrder = document.getElementById('reviewOrder').value;
 
@@ -11692,13 +11713,31 @@ function calculateRetentionAtDate(state, targetDate) {
     const lastReviewed = utils.parseFsrsDate(lastReviewedRaw);
     if (!stability || !lastReviewed) return 0;
     const target = targetDate ? new Date(targetDate) : new Date();
-    return calculateFSRSRetrievability(stability, lastReviewed, target);
+    const retention = calculateFSRSRetrievability(stability, lastReviewed, target);
+    if (globalSettings.devMode) {
+        console.log('[calculateRetentionAtDate]', {
+            cardID: state.cardID,
+            stability,
+            lastReviewed: lastReviewed?.toISOString(),
+            targetDate: target.toISOString(),
+            retention
+        });
+    }
+    return retention;
 }
 
 function calculateExamRetention(state, examDate) {
     if (!state) return 0;
     const target = examDate ? new Date(examDate) : new Date();
     return calculateRetentionAtDate(state, target);
+}
+
+function resolveInsightsTargetDate(deck, now = new Date()) {
+    const examDateRaw = deck?.settings?.examDate;
+    if (!examDateRaw) return now;
+    const examDate = new Date(examDateRaw);
+    if (Number.isNaN(examDate.getTime())) return now;
+    return examDate.getTime() > now.getTime() ? examDate : now;
 }
 
 
@@ -14336,20 +14375,20 @@ async function showInsightsView() {
             deckSelect.appendChild(opt);
         });
 
-        const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
-        const knowledgeMap = new Map(allKnowledgeStates.map(item => [String(item.cardID), item]));
-
-
         document.getElementById('insightsContent').classList.add('hidden');
         document.getElementById('insightsPlaceholder').classList.remove('hidden');
 
 
-        const handleDeckSelection = (deckId) => {
+        const handleDeckSelection = async (deckId) => {
             if (!deckId) {
                 document.getElementById('insightsContent').classList.add('hidden');
                 document.getElementById('insightsPlaceholder').classList.remove('hidden');
                 return;
             }
+            // Reload knowledge states fresh from DB each time deck is selected
+            const allKnowledgeStates = await getAllDataFromDB('userKnowledgeState');
+            const knowledgeMap = new Map(allKnowledgeStates.map(item => [String(item.cardID), item]));
+            
             renderMasteryBreakdownChart(deckId, knowledgeMap);
 
             updateCardDetailListForInsights(deckId, knowledgeMap);
@@ -14374,18 +14413,29 @@ async function showInsightsView() {
 function updateCardDetailListForInsights(deckId, knowledgeMap) {
     const list = document.getElementById('insightsCardList');
     const deck = decks[deckId];
-    const examDate = deck.settings?.examDate ? new Date(deck.settings.examDate) : null;
-    const targetDate = examDate || new Date();
+    const targetDate = resolveInsightsTargetDate(deck);
     list.innerHTML = '';
+    const utils = getKnowledgeStateUtils();
 
     deck.cards.forEach(card => {
         const state = knowledgeMap.get(String(card.id));
+        if (globalSettings.devMode) {
+            console.log('[updateCardDetailListForInsights] State for card:', {
+                cardID: card.id,
+                state: state,
+                fsrs: state?.fsrs,
+                stability: state?.stability,
+                lastReviewed: state?.lastReviewed
+            });
+        }
         const retention = calculateRetentionAtDate(state, targetDate);
         if (globalSettings.devMode) {
             console.log("[FSRS insights] retention used:", retention);
         }
-        const retentionPercent = state && Number.isFinite(retention) ? Math.round(retention * 100) : null;
-        const stabilityText = Number.isFinite(state?.stability) ? `${state.stability.toFixed(1)}d` : 'N/A';
+        const retentionPercent = state && Number.isFinite(retention) ? (retention * 100).toFixed(1) : null;
+        const fsrsState = utils.normalizeFsrsState(state?.fsrs || state);
+        const stabilityValue = utils.coerceFsrsNumber(fsrsState?.stability ?? state?.stability);
+        const stabilityText = stabilityValue > 0 ? `${stabilityValue.toFixed(1)}d` : 'N/A';
 
         const cardItem = document.createElement('div');
         cardItem.className = 'deck-card-item';
@@ -14413,12 +14463,15 @@ function updateCardDetailListForInsights(deckId, knowledgeMap) {
 }
 
 function calculateFSRSRetrievability(stability, lastReviewedISO, futureDate) {
-    if (!lastReviewedISO || !stability || stability <= 0) return 1.0;
-    const lastReviewed = new Date(lastReviewedISO);
+    const utils = getKnowledgeStateUtils();
+    const stabilityValue = utils.coerceFsrsNumber(stability);
+    if (!lastReviewedISO || stabilityValue <= 0) return 0;
+    const lastReviewed = utils.parseFsrsDate(lastReviewedISO);
+    if (!lastReviewed) return 0;
     const targetDate = futureDate ? new Date(futureDate) : new Date();
-    const elapsed_days = (targetDate.getTime() - lastReviewed.getTime()) / (1000 * 3600 * 24);
-    if (elapsed_days < 0) return 1.0;
-    const retention = Math.exp((Math.log(0.9) * elapsed_days) / stability);
+    if (Number.isNaN(targetDate.getTime())) return 0;
+    const elapsedDays = Math.max(0, (targetDate.getTime() - lastReviewed.getTime()) / 86400000);
+    const retention = Math.exp(-elapsedDays / stabilityValue);
     return Math.max(0, Math.min(1, retention));
 }
 
@@ -14432,8 +14485,20 @@ function renderForgettingCurveChart(cardState, deckId) {
         return;
     }
 
-    if (!cardState || !cardState.stability || !deckId) {
+    if (!cardState || !deckId) {
         cardDetailP.textContent = 'Select a card from the list to see its predicted curve.';
+        chartInstances[canvasId] = new Chart(ctx, { data: { labels: [], datasets: [] }, options: { plugins: { legend: { display: false } } } });
+        return;
+    }
+
+    const utils = getKnowledgeStateUtils();
+    const fsrsState = utils.normalizeFsrsState(cardState.fsrs || cardState);
+    const isReviewed = utils.isKnowledgeStateReviewed(cardState) || utils.isFsrsReviewedState(fsrsState);
+    const stabilityValue = utils.coerceFsrsNumber(fsrsState?.stability ?? cardState.stability);
+    const lastReviewedValue = fsrsState?.last_review || cardState.lastReviewed || null;
+
+    if (!isReviewed || stabilityValue <= 0 || !lastReviewedValue) {
+        cardDetailP.textContent = 'This card has not been reviewed yet, so no curve is available.';
         chartInstances[canvasId] = new Chart(ctx, { data: { labels: [], datasets: [] }, options: { plugins: { legend: { display: false } } } });
         return;
     }
@@ -14445,8 +14510,8 @@ function renderForgettingCurveChart(cardState, deckId) {
     }
     cardDetailP.textContent = `Predicted curve for: "${card.question}"`;
 
-    const stability = cardState.stability;
-    const lastReviewed = cardState.lastReviewed;
+    const stability = stabilityValue;
+    const lastReviewed = lastReviewedValue;
     const labels = [];
     const data = [];
     const today = new Date();
@@ -14488,8 +14553,7 @@ function renderMasteryBreakdownChart(deckId, knowledgeMap) {
     if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
 
     const deck = decks[deckId];
-    const examDate = deck.settings?.examDate ? new Date(deck.settings.examDate) : null;
-    const targetDate = examDate || new Date();
+    const targetDate = resolveInsightsTargetDate(deck);
     let counts = { weak: 0, medium: 0, strong: 0 };
     deck.cards.forEach(card => {
         const retention = calculateRetentionAtDate(knowledgeMap.get(String(card.id)), targetDate);
@@ -14544,6 +14608,10 @@ function checkAnswerForgivingly(userAnswer, correctAnswer, settings) {
 
     if (processedUserAnswer === processedCorrectAnswer) {
         return { result: 'CORRECT', distance: 0 };
+    }
+
+    if (settings.strictMarking) {
+        return { result: 'INCORRECT', distance: levenshteinDistance(processedUserAnswer, processedCorrectAnswer) };
     }
 
     if (settings.forgivingAutomarking) {
