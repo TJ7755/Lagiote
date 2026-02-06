@@ -6476,7 +6476,7 @@ function getBaselineChoice(candidates, knowledgeMap) {
     const eligibleCandidates = filterCandidatesByCooldown(candidates, studyState.sessionState);
     if (eligibleCandidates.length === 0) return null;
 
-    // Baseline v1: FSRS/recency risk ordering
+    // Baseline v1: FSRS/recency risk ordering - deterministic sort followed by tie-group shuffling
     const sorted = [...eligibleCandidates].sort((a, b) => {
         const stateA = a.knowledgeState;
         const stateB = b.knowledgeState;
@@ -6491,10 +6491,32 @@ function getBaselineChoice(candidates, knowledgeMap) {
         const lastA = stateA?.lastReviewed ? new Date(stateA.lastReviewed).getTime() : 0;
         const lastB = stateB?.lastReviewed ? new Date(stateB.lastReviewed).getTime() : 0;
         
-        if (lastA !== lastB) return lastA - lastB;
-        
-        return Math.random() - 0.5;
+        return lastA - lastB;
     });
+    
+    // Fisher-Yates shuffle within the first tie group (cards with same due/lastReviewed)
+    let tieGroupEnd = 1;
+    const firstState = sorted[0].knowledgeState;
+    const firstDue = firstState?.fsrs?.due ? new Date(firstState.fsrs.due).getTime() : null;
+    const firstLast = firstState?.lastReviewed ? new Date(firstState.lastReviewed).getTime() : 0;
+    
+    while (tieGroupEnd < sorted.length) {
+        const cand = sorted[tieGroupEnd];
+        const candState = cand.knowledgeState;
+        const candDue = candState?.fsrs?.due ? new Date(candState.fsrs.due).getTime() : null;
+        const candLast = candState?.lastReviewed ? new Date(candState.lastReviewed).getTime() : 0;
+        
+        if (candDue !== firstDue || candLast !== firstLast) break;
+        tieGroupEnd++;
+    }
+    
+    // Shuffle [0, tieGroupEnd) if more than one card in tie group
+    if (tieGroupEnd > 1) {
+        for (let i = tieGroupEnd - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+        }
+    }
     
     return sorted[0].card;
 }
