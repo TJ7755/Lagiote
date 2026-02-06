@@ -85,7 +85,7 @@ export function createMockSyncServer(options = {}) {
             ...payload,
             id: entityId,
             serverSeq: serverSequence,
-            lastModified: op.clientTimestamp,
+            lastModified: (payload && payload.updatedAt) ? payload.updatedAt : op.clientTimestamp,
             lastDeviceId: op.deviceId
         });
     }
