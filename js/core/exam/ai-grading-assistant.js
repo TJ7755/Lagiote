@@ -330,7 +330,8 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
     // Check for numeric value matches
     if (point.grading?.kind === 'numeric' && Number.isFinite(point.grading?.value)) {
         const expectedValue = String(point.grading.value);
-        const valuePattern = new RegExp(`\\b${escapeRegExp(expectedValue)}(?:\\b|\\s)`);
+        // Use a start/whitespace boundary that works with optional leading sign (e.g. "-2")
+        const valuePattern = new RegExp(`(?<!\\S)${escapeRegExp(expectedValue)}(?:\\b|\\s)`);
         if (valuePattern.test(evidenceText)) {
             confidence = confidence === 'low' ? 'medium' : confidence;
             reasons.push('Numeric value appears in response');
