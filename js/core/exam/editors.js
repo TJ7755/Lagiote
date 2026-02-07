@@ -12,26 +12,6 @@ import { createMarkScheme, createPointsSchemePoint } from './marking.js';
 import { createMarkSchemeTestHarness } from './mark-scheme-test-harness.js';
 import { validateMarkScheme } from './calibration-harness.js';
 
-function cloneExamData(value) {
-    if (value === null || typeof value === 'undefined') return value;
-    if (typeof structuredClone === 'function') {
-        return structuredClone(value);
-    }
-    return JSON.parse(JSON.stringify(value));
-}
-
-function ensureMcqOptions(question) {
-    if (!question) return question;
-    if (question.type === 'mcq_single' || question.type === 'mcq_multi') {
-        const options = Array.isArray(question.options) ? [...question.options] : [];
-        while (options.length < 4) options.push('');
-        question.options = options;
-    } else if (!Array.isArray(question.options)) {
-        question.options = [];
-    }
-    return question;
-}
-
 // --- Atom Editor ---
 
 /**
@@ -388,15 +368,6 @@ export function createQuestionEditor(initialQuestion = null) {
          */
         getAvailableAtoms() {
             return [...state.availableAtoms];
-        },
-        
-        /**
-         * Checks if field has error.
-         * @param {string} field Field name
-         * @returns {boolean} Has error
-         */
-        hasError(field) {
-            return state.errors.some(e => e.field === field);
         },
         
         /**

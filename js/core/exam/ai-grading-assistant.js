@@ -341,7 +341,7 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
             evidenceSnippets.push(numericMatches[0].full);
             reasons.push(`Numeric value ${targetValue} found in response`);
         } else {
-            // Check raw text for the numeric value using improved regex that handles negative numbers
+            // Check JSON-stringified evidence for the numeric value using improved regex that handles negative numbers
             const valuePattern = new RegExp(`(?<!\\S)${escapeRegExp(String(targetValue))}(?:\\b|\\s)`);
             if (valuePattern.test(evidenceText)) {
                 confidence = confidence === 'low' ? 'medium' : confidence;
