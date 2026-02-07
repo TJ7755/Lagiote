@@ -350,6 +350,30 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
         }
     }
     
+    // Check for numeric value match (accuracy marks)
+    if (point.grading?.kind === 'numeric' && point.grading?.value !== undefined) {
+        const targetValue = point.grading.value;
+        const tolerance = point.grading.toleranceAbs || 0;
+        // Check calculations first
+        const numericMatches = evidence.calculations?.filter(c => {
+            const val = c.type === 'value_with_unit' ? c.value : c.result;
+            return val !== undefined && Math.abs(val - targetValue) <= tolerance;
+        });
+        if (numericMatches?.length > 0) {
+            confidence = confidence === 'low' ? 'medium' : 'high';
+            evidenceSnippets.push(numericMatches[0].full);
+            reasons.push(`Numeric value ${targetValue} found in response`);
+        } else {
+            // Check raw text for the numeric value
+            const escapedValue = String(targetValue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const numPattern = new RegExp(`\\b${escapedValue}\\b`);
+            if (numPattern.test(evidenceText)) {
+                confidence = confidence === 'low' ? 'medium' : confidence;
+                reasons.push(`Value ${targetValue} appears in response text`);
+            }
+        }
+    }
+    
     // Check method mark indicators
     if (/^M\d+$/.test(pointId)) {
         // Verified calculations count as method evidence

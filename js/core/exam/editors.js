@@ -40,9 +40,15 @@ function ensureMcqOptions(question) {
  * @returns {Object} Atom editor interface
  */
 export function createAtomEditor(initialAtom = null) {
-    const initialSnapshot = initialAtom ? cloneExamData(initialAtom) : null;
+    // Deep-copy initial atom to prevent mutation
+    const initialSnapshot = initialAtom ? JSON.parse(JSON.stringify(initialAtom)) : null;
+    
+    function cloneInitial() {
+        return initialSnapshot ? { ...createAtom({}), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createAtom({});
+    }
+    
     const state = {
-        atom: initialSnapshot ? cloneExamData(initialSnapshot) : createAtom({}),
+        atom: cloneInitial(),
         isValid: false,
         errors: [],
         touched: new Set()
@@ -176,7 +182,7 @@ export function createAtomEditor(initialAtom = null) {
          * Resets to initial state.
          */
         reset() {
-            state.atom = initialSnapshot ? cloneExamData(initialSnapshot) : createAtom({});
+            state.atom = cloneInitial();
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -205,9 +211,15 @@ export function createAtomEditor(initialAtom = null) {
  * @returns {Object} Question editor interface
  */
 export function createQuestionEditor(initialQuestion = null) {
-    const initialSnapshot = initialQuestion ? cloneExamData(initialQuestion) : null;
+    // Deep-copy initial question to prevent mutation
+    const initialSnapshot = initialQuestion ? JSON.parse(JSON.stringify(initialQuestion)) : null;
+
+    function cloneInitial() {
+        return initialSnapshot ? { ...createQuestion({ type: 'mcq_single' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createQuestion({ type: 'mcq_single' });
+    }
+
     const state = {
-        question: ensureMcqOptions(initialSnapshot ? cloneExamData(initialSnapshot) : createQuestion({ type: 'mcq_single' })),
+        question: cloneInitial(),
         availableAtoms: [],
         isValid: false,
         errors: [],
@@ -253,7 +265,9 @@ export function createQuestionEditor(initialQuestion = null) {
             
             // Reset type-specific fields
             if (type === 'mcq_single' || type === 'mcq_multi') {
-                ensureMcqOptions(state.question);
+                if (!state.question.options || state.question.options.length === 0) {
+                    state.question.options = ['', '', '', ''];
+                }
             } else {
                 state.question.options = [];
             }
@@ -377,6 +391,15 @@ export function createQuestionEditor(initialQuestion = null) {
         },
         
         /**
+         * Checks if field has error.
+         * @param {string} field Field name
+         * @returns {boolean} Has error
+         */
+        hasError(field) {
+            return state.errors.some(e => e.field === field);
+        },
+        
+        /**
          * Gets mapped atoms with details.
          * @returns {Array} Mapped atoms with full data
          */
@@ -392,7 +415,7 @@ export function createQuestionEditor(initialQuestion = null) {
          * Resets editor.
          */
         reset() {
-            state.question = ensureMcqOptions(initialSnapshot ? cloneExamData(initialSnapshot) : createQuestion({ type: 'mcq_single' }));
+            state.question = cloneInitial();
             state.touched.clear();
             state.errors = [];
             state.isValid = false;
@@ -422,9 +445,15 @@ export function createQuestionEditor(initialQuestion = null) {
  * @returns {Object} Mark scheme editor interface
  */
 export function createMarkSchemeEditor(initialScheme = null) {
-    const initialSnapshot = initialScheme ? cloneExamData(initialScheme) : null;
+    // Deep-copy initial scheme to prevent mutation
+    const initialSnapshot = initialScheme ? JSON.parse(JSON.stringify(initialScheme)) : null;
+
+    function cloneInitial() {
+        return initialSnapshot ? { ...createMarkScheme({ schemeType: 'points' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createMarkScheme({ schemeType: 'points' });
+    }
+
     const state = {
-        scheme: initialSnapshot ? cloneExamData(initialSnapshot) : createMarkScheme({ schemeType: 'points' }),
+        scheme: cloneInitial(),
         testHarness: null,
         testResults: [],
         isValid: false,
@@ -468,8 +497,9 @@ export function createMarkSchemeEditor(initialScheme = null) {
          */
         addPoint(pointData = {}) {
             const point = createPointsSchemePoint(pointData);
-            if (!pointData.id) {
-                point.generatedId = true;
+            // Preserve missing ID for validation if user didn't provide one
+            if (!pointData.id && !pointData.pointId) {
+                delete point.id;
             }
             state.scheme.points = [...(state.scheme.points || []), point];
             state.scheme.updatedAt = new Date().toISOString();
@@ -674,7 +704,7 @@ export function createMarkSchemeEditor(initialScheme = null) {
          * Resets editor.
          */
         reset() {
-            state.scheme = initialSnapshot ? cloneExamData(initialSnapshot) : createMarkScheme({});
+            state.scheme = cloneInitial();
             state.testHarness = null;
             state.testResults = [];
             state.errors = [];

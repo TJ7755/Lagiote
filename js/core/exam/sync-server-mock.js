@@ -66,8 +66,8 @@ export function createMockSyncServer(options = {}) {
     function applyOperationToState(op) {
         const { type, entityId, payload } = op;
         
-        // Handle deletions (case-insensitive)
-        if (/_delete$/i.test(type)) {
+        // Handle deletions
+        if (type.includes('_delete') || type.includes('_DELETE')) {
             storage.tombstones.set(entityId, createTombstone(
                 type.replace(/_delete$/i, ''),
                 entityId,
@@ -84,7 +84,7 @@ export function createMockSyncServer(options = {}) {
             ...payload,
             id: entityId,
             serverSeq: serverSequence,
-            lastModified: (payload && payload.updatedAt) ? payload.updatedAt : op.clientTimestamp,
+            lastModified: op.clientTimestamp,
             lastDeviceId: op.deviceId
         });
     }
@@ -105,11 +105,13 @@ export function createMockSyncServer(options = {}) {
             OP_TYPES.MARK_SCHEME_UPDATE
         ];
         
-        if (contentTypes.includes(op.type) && op.payload?.updatedAt) {
-            // Different device, same entity, both updates = potential conflict
+        if (contentTypes.includes(op.type)) {
+            // Different device, same entity, concurrent updates = potential conflict
+            // Only flag as conflict if the client hasn't seen the latest server version
             if (existing.lastModified && 
-                existing.lastModified !== op.payload.updatedAt &&
-                op.deviceId !== existing.lastDeviceId) {
+                op.deviceId !== existing.lastDeviceId &&
+                op.payload?.baseVersion !== undefined &&
+                op.payload?.baseVersion !== existing.serverSeq) {
                 return {
                     type: 'edit_conflict',
                     entityId: op.entityId,
