@@ -65,12 +65,11 @@ export function createMockSyncServer(options = {}) {
      */
     function applyOperationToState(op) {
         const { type, entityId, payload } = op;
-        const normalizedType = String(type || '').toLowerCase();
         
-        // Handle deletions
-        if (normalizedType.includes('_delete')) {
+        // Handle deletions (case-insensitive)
+        if (/_delete$/i.test(type)) {
             storage.tombstones.set(entityId, createTombstone(
-                normalizedType.replace('_delete', ''),
+                type.replace(/_delete$/i, ''),
                 entityId,
                 { userId: op.userId }
             ));

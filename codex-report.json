@@ -1,0 +1,78 @@
+{
+  "issues": [
+    {
+      "id": "LOOSE_EQ_DASHBOARD",
+      "description": "Loose equality (==) used instead of strict (===) for cardID comparison",
+      "file": "js/pages/dashboard.js",
+      "line": 2965,
+      "stackTrace": null
+    },
+    {
+      "id": "MISSING_BUTTON_TYPE_STUDY",
+      "description": "Seven <button> elements missing type=\"button\" attribute, defaulting to submit",
+      "file": "study.html",
+      "line": "26,44,83-86,97",
+      "stackTrace": null
+    },
+    {
+      "id": "NEGATIVE_PHASE_INDEX",
+      "description": "currentPhaseIndex set to -1 when phases array is empty (phases.length - 1)",
+      "file": "js/core/exam/exam-session-player.js",
+      "line": 268,
+      "stackTrace": null
+    },
+    {
+      "id": "QUESTION_EDITOR_SHALLOW_RESET",
+      "description": "Question editor reset() uses shallow copy; edits mutate initialQuestion, making reset ineffective",
+      "file": "js/core/exam/editors.js",
+      "line": "193-200,372",
+      "stackTrace": null
+    },
+    {
+      "id": "MARK_SCHEME_EDITOR_SHALLOW_RESET",
+      "description": "Mark scheme editor reset() uses shallow copy; edits mutate initialScheme, making reset ineffective",
+      "file": "js/core/exam/editors.js",
+      "line": "404-412,660",
+      "stackTrace": null
+    }
+  ],
+  "changes": [
+    {
+      "file": "js/pages/dashboard.js",
+      "diffSummary": "Replace == with === on line 2965"
+    },
+    {
+      "file": "study.html",
+      "diffSummary": "Add type=\"button\" to 7 button elements"
+    },
+    {
+      "file": "js/core/exam/exam-session-player.js",
+      "diffSummary": "Guard empty phases with Math.max(0, phases.length - 1)"
+    },
+    {
+      "file": "js/core/exam/editors.js",
+      "diffSummary": "Deep-clone initial state at creation time; use snapshot for reset in question and mark scheme editors"
+    },
+    {
+      "file": "tests/vitest/bugfix-guards.test.mjs",
+      "diffSummary": "New test file with 5 tests covering all bug fixes"
+    }
+  ],
+  "testsAdded": [
+    {
+      "path": "tests/vitest/bugfix-guards.test.mjs",
+      "type": "unit"
+    }
+  ],
+  "coverage": {
+    "lines": "N/A - run npx vitest run --coverage for full report",
+    "functions": "N/A",
+    "branches": "N/A",
+    "statements": "N/A"
+  },
+  "commandsToRun": [
+    "npm ci",
+    "npm run build",
+    "npm run test:unit"
+  ]
+}

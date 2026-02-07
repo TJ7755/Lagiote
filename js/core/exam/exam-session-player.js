@@ -265,7 +265,7 @@ function updateCurrentPhase() {
         cumulative += phaseQuestionCount;
     }
     
-    playerState.currentPhaseIndex = phases.length - 1;
+    playerState.currentPhaseIndex = Math.max(0, phases.length - 1);
 }
 
 /**

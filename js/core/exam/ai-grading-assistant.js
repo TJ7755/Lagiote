@@ -117,9 +117,9 @@ export function extractClaims(text) {
         
         // Identify claim types
         let claimType = 'statement';
-        if (/^\s*(therefore|thus|hence|so)\b[,\s]+/i.test(trimmed)) {
+        if (/^\s*(therefore|thus|hence|so)[,;]?\s+/i.test(trimmed)) {
             claimType = 'conclusion';
-        } else if (/^\s*(because|since|as)\b[,\s]+/i.test(trimmed)) {
+        } else if (/^\s*(because|since|as)\s+/i.test(trimmed)) {
             claimType = 'reasoning';
         } else if (/\b(is|are|was|were|equals?|equivalent)\s+/i.test(trimmed)) {
             claimType = 'definition';
@@ -327,19 +327,36 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
         }
     }
 
-    // Check for numeric value matches
-    if (point.grading?.kind === 'numeric' && Number.isFinite(point.grading?.value)) {
-        const expectedValue = String(point.grading.value);
-        // Use a start/whitespace boundary that works with optional leading sign (e.g. "-2")
-        const valuePattern = new RegExp(`(?<!\\S)${escapeRegExp(expectedValue)}(?:\\b|\\s)`);
-        if (valuePattern.test(evidenceText)) {
-            confidence = confidence === 'low' ? 'medium' : confidence;
-            reasons.push('Numeric value appears in response');
+    // Check for numeric value match (accuracy marks)
+    if (point.grading?.kind === 'numeric' && point.grading?.value !== undefined) {
+        const targetValue = point.grading.value;
+        const tolerance = point.grading.toleranceAbs || 0;
+        // Check calculations first
+        const numericMatches = evidence.calculations?.filter(c => {
+            const val = c.type === 'value_with_unit' ? c.value : c.result;
+            return val !== undefined && Math.abs(val - targetValue) <= tolerance;
+        });
+        if (numericMatches?.length > 0) {
+            confidence = confidence === 'low' ? 'medium' : 'high';
+            evidenceSnippets.push(numericMatches[0].full);
+            reasons.push(`Numeric value ${targetValue} found in response`);
+        } else {
+            // Check raw text for the numeric value using improved regex that handles negative numbers
+            const valuePattern = new RegExp(`(?<!\\S)${escapeRegExp(String(targetValue))}(?:\\b|\\s)`);
+            if (valuePattern.test(evidenceText)) {
+                confidence = confidence === 'low' ? 'medium' : confidence;
+                reasons.push(`Value ${targetValue} appears in response text`);
+            }
         }
     }
     
     // Check method mark indicators
     if (/^M\d+$/.test(pointId)) {
+        // Verified calculations count as method evidence
+        if (evidence.calculations?.some(c => c.verified)) {
+            confidence = confidence === 'low' ? 'medium' : confidence;
+            reasons.push('Verified calculation shows method');
+        }
         const methodIndicators = ['method', 'approach', 'substitute', 'formula', 'equation'];
         if (methodIndicators.some(m => evidenceText.includes(m))) {
             confidence = confidence === 'low' ? 'medium' : confidence;
@@ -407,7 +424,7 @@ export function generateFeedback(awardedPoints, missedPoints, markScheme) {
             feedback.improvements.push({
                 pointId: point.pointId,
                 suggestion: point.reasons[0],
-                evidence: point.evidenceSnippets?.[0]
+                evidence: point.evidenceSnippets?.[0] || null
             });
         }
     });
@@ -443,7 +460,7 @@ export function calculateGradingConfidence(suggestions, evidence) {
     const overallScore = (highConf * 3 + mediumConf * 2 + lowConf * 1) / (total * 3);
     
     let overall;
-    if (overallScore >= 0.75) overall = 'high';
+    if (overallScore >= 0.7) overall = 'high';
     else if (overallScore >= 0.5) overall = 'medium';
     else overall = 'low';
     
