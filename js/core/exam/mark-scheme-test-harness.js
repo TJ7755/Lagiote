@@ -318,7 +318,7 @@ function normalizeTextResponse(text, questionType) {
             return { value: null, rawValue: text };
             
         case 'short_text':
-            return { text };
+            return { text: text.trim() };
             
         case 'mcq_single':
             // Try to parse letter or number

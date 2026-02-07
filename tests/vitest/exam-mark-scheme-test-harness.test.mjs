@@ -177,7 +177,7 @@ describe('Mark Scheme Test Harness - Response Normalization', () => {
         
         const result = harness.testResponse('  My Answer  ');
         
-        expect(result.response).toEqual({ text: '  My Answer  ' });
+        expect(result.response).toEqual({ text: 'My Answer' });
     });
     
     it('normalizes MCQ letter responses', () => {
