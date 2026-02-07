@@ -365,7 +365,7 @@ export function analyseFragility(atoms, questions, atomsById) {
         fragileAtomCount: fragileAtoms.length,
         fragileAtoms: fragileAtoms.slice(0, 10),
         relevantQuestions: relevantQuestions.length,
-        riskLevel: fragileAtoms.length >= 5 ? 'high' : fragileAtoms.length >= 2 ? 'medium' : 'low',
+        riskLevel: fragileAtoms.length > 5 ? 'high' : fragileAtoms.length >= 2 ? 'medium' : 'low',
         recommendation: fragileAtoms.length > 0
             ? `Practice varied questions on: ${fragileAtoms.slice(0, 3).map(a => a.name).join(', ')}`
             : 'Knowledge fragility is low - good retention'
@@ -397,9 +397,8 @@ export function analyseTrends(sittings) {
     }
     
     // Calculate trend
-    const splitIndex = Math.ceil(scores.length / 2);
-    const firstHalf = scores.slice(0, splitIndex);
-    const secondHalf = scores.slice(splitIndex);
+    const firstHalf = scores.slice(0, Math.ceil(scores.length / 2));
+    const secondHalf = scores.slice(Math.ceil(scores.length / 2));
     
     const firstAvg = firstHalf.reduce((s, r) => s + r.percentage, 0) / firstHalf.length;
     const secondAvg = secondHalf.reduce((s, r) => s + r.percentage, 0) / secondHalf.length;
