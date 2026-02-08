@@ -587,11 +587,11 @@ function loadCDNScript(src, onload) {
             }
 
             await initDB();
-            console.log('Database initialized.');
+            console.log('Database initialised.');
 
             // Initialize analytics manager
             analyticsManager = new AnalyticsManager();
-            console.log('Analytics manager initialized.');
+            console.log('Analytics manager initialised.');
 
             // Handle Auth0 callback on web (if code/state in URL)
             if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
@@ -2301,7 +2301,7 @@ function loadCDNScript(src, onload) {
             const knowledgeStateForDeck = allKnowledgeStates.filter(state => cardIdsInDeck.has(state.cardID));
 
             const exportPayload = {
-                deck: JSON.parse(JSON.stringify(deck)),
+                deck: structuredClone(deck),
                 knowledgeStateData: knowledgeStateForDeck
             };
 

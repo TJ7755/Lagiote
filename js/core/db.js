@@ -396,7 +396,7 @@ export function initDB() {
 }
 
 function getStore(storeName, mode = 'readonly') {
-    if (!db) throw new Error('Database not initialized');
+    if (!db) throw new Error('Database not initialised');
     return db.transaction([storeName], mode).objectStore(storeName);
 }
 

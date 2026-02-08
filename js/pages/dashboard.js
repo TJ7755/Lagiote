@@ -1847,11 +1847,11 @@ window.onload = async function () {
 
     await initDB();
     await applyTestModeSetup();
-    console.log('Database initialized.');
+    console.log('Database initialised.');
 
     // Initialize analytics manager
     analyticsManager = new AnalyticsManager();
-    console.log('Analytics manager initialized.');
+    console.log('Analytics manager initialised.');
 
     // Handle Auth0 callback on web (if code/state in URL)
     if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
