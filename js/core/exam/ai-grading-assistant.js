@@ -341,8 +341,13 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
             evidenceSnippets.push(numericMatches[0].full);
             reasons.push(`Numeric value ${targetValue} found in response`);
         } else {
-            // Check JSON-stringified evidence for the numeric value using improved regex that handles negative numbers
-            const valuePattern = new RegExp(`(?<!\\S)${escapeRegExp(String(targetValue))}(?:\\b|\\s)`);
+            // Check JSON-stringified evidence for the numeric value using an improved regex
+            // that correctly matches numbers (including negatives) within JSON punctuation.
+            const targetValueStr = String(targetValue);
+            const escapedTargetValue = escapeRegExp(targetValueStr);
+            // Match the number when it is at the start of the string or preceded by a non-digit/non-minus
+            // character, and ensure it is not directly followed by another digit or decimal point.
+            const valuePattern = new RegExp(`(?:^|[^0-9\\-])${escapedTargetValue}(?=$|[^0-9\\.])`);
             if (valuePattern.test(evidenceText)) {
                 confidence = confidence === 'low' ? 'medium' : confidence;
                 reasons.push(`Value ${targetValue} appears in response text`);
