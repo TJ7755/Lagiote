@@ -2977,7 +2977,6 @@ function setupErrorAnalysisAndDeckStats(allLogs, allKnowledgeStates) {
             });
             cardSelect.appendChild(cardFragment);
         }
-        }
         generateErrorAnalysisReport(allLogs, null);
 
         generateDeckStatistics(deckId, allLogs, allKnowledgeStates);
