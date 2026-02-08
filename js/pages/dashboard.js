@@ -6494,19 +6494,26 @@ function getBaselineChoice(candidates, knowledgeMap) {
         return lastA - lastB;
     });
     
-    // Fisher-Yates shuffle within the first tie group (cards with same due/lastReviewed)
+    // Fisher-Yates shuffle within the first tie group (cards with same sorting key)
     let tieGroupEnd = 1;
     const firstState = sorted[0].knowledgeState;
     const firstDue = firstState?.fsrs?.due ? new Date(firstState.fsrs.due).getTime() : null;
     const firstLast = firstState?.lastReviewed ? new Date(firstState.lastReviewed).getTime() : 0;
     
+    // Tie-group detection matches comparator logic:
+    // If first card has due, group by due only; otherwise group by lastReviewed
     while (tieGroupEnd < sorted.length) {
         const cand = sorted[tieGroupEnd];
         const candState = cand.knowledgeState;
         const candDue = candState?.fsrs?.due ? new Date(candState.fsrs.due).getTime() : null;
         const candLast = candState?.lastReviewed ? new Date(candState.lastReviewed).getTime() : 0;
         
-        if (candDue !== firstDue || candLast !== firstLast) break;
+        // If first card has due, check due only; if no due, check lastReviewed only
+        if (firstDue !== null) {
+            if (candDue !== firstDue) break;
+        } else {
+            if (candLast !== firstLast) break;
+        }
         tieGroupEnd++;
     }
     
