@@ -2755,9 +2755,13 @@ function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
 }
 
 function renderHistograms(logs) {
-    const latencies = logs.map(log => log.latency).filter(l => l !== null);
-    const fluencies = logs.map(log => log.fluency).filter(f => f > 0);
-    const corrections = logs.map(log => log.corrections);
+    // Use reduce for single-pass extraction
+    const { latencies, fluencies, corrections } = logs.reduce((acc, log) => {
+        if (log.latency !== null) acc.latencies.push(log.latency);
+        if (log.fluency > 0) acc.fluencies.push(log.fluency);
+        acc.corrections.push(log.corrections);
+        return acc;
+    }, { latencies: [], fluencies: [], corrections: [] });
 
     createBarChart('latencyHistogram', 'Recall Latency', latencies, 'rgba(102, 126, 234, 0.6)');
     createBarChart('fluencyHistogram', 'Answer Fluency', fluencies, 'rgba(56, 178, 172, 0.6)');
