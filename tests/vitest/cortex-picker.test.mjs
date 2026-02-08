@@ -73,7 +73,7 @@ describe('cortex picker invariants', () => {
         expect(picked.id).toBe('b');
     });
 
-    it('randomizes ties when scores match', async () => {
+    it('randomises ties when scores match', async () => {
         const candidates = [
             { id: 'a', question: 'A', deckId: 'deck' },
             { id: 'b', question: 'B', deckId: 'deck' }

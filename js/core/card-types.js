@@ -280,7 +280,7 @@ export function getClozeAnswer(text, activeIndex = 1) {
 
 /**
  * Counts the number of cloze deletions in text
- * @param {string} text - Text to analyze
+ * @param {string} text - Text to analyse
  * @returns {number} - Number of clozes
  */
 export function countClozes(text) {

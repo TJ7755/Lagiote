@@ -297,8 +297,8 @@ export function pickWeakEdge(graph, steps, recentEdges, now = Date.now(), opts =
         const recBoost = recencyBoost(candidate.lastSeen, now, recencyHalfLifeMs);
         const prevWeakness = candidate.fromIndex > 0 ? (1 - edgeEma(graph, safeSteps, candidate.fromIndex - 1)) : 0;
         const nextWeakness = candidate.toIndex < safeSteps.length - 1 ? (1 - edgeEma(graph, safeSteps, candidate.fromIndex + 1)) : 0;
-        const neighborWeakness = (prevWeakness + nextWeakness) / 2;
-        const cascadeFactor = Math.max(0, weightCascade) * neighborWeakness;
+        const neighbourWeakness = (prevWeakness + nextWeakness) / 2;
+        const cascadeFactor = Math.max(0, weightCascade) * neighbourWeakness;
         const score = weakness * (1 + recBoost) * (1 + cascadeFactor);
         if (!best || score > best.score) {
             best = {

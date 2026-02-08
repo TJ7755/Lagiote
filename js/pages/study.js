@@ -357,10 +357,10 @@ function checkTypedAnswer() {
 
     if (typeAnswerResult) {
         if (gradeResult.isCorrect) {
-            typeAnswerResult.textContent = '✓ Correct!';
+            typeAnswerResult.textContent = 'Correct!';
             typeAnswerResult.style.color = 'var(--correct-text, #22c55e)';
         } else {
-            typeAnswerResult.textContent = `✗ Incorrect (${Math.round(gradeResult.similarity * 100)}% match)`;
+            typeAnswerResult.textContent = `Incorrect (${Math.round(gradeResult.similarity * 100)}% match)`;
             typeAnswerResult.style.color = 'var(--incorrect-text, #ef4444)';
         }
     }

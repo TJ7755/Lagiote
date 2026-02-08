@@ -561,7 +561,7 @@ function loadCDNScript(src, onload) {
             }
         }
 
-        // Initialize analytics manager globally
+        // Initialise analytics manager globally
         let analyticsManager = null;
 
                 // The SM2Algorithm class has been removed to be replaced by FSRS.
@@ -587,11 +587,11 @@ function loadCDNScript(src, onload) {
             }
 
             await initDB();
-            console.log('Database initialized.');
+            console.log('Database initialised.');
 
-            // Initialize analytics manager
+            // Initialise analytics manager
             analyticsManager = new AnalyticsManager();
-            console.log('Analytics manager initialized.');
+            console.log('Analytics manager initialised.');
 
             // Handle Auth0 callback on web (if code/state in URL)
             if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
@@ -728,7 +728,7 @@ function loadCDNScript(src, onload) {
         };
 
         function handleGuestToUserTransition() {
-            console.log('🔧 handleGuestToUserTransition called – no migration logic defined yet.');
+            console.log('handleGuestToUserTransition called - no migration logic defined yet.');
         }
 
         );
@@ -1035,7 +1035,7 @@ function loadCDNScript(src, onload) {
             problemCardsContainer.innerHTML = '';
 
             if (cards.length === 0) {
-                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards to analyze for global problems.</p>';
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards to analyse for global problems.</p>';
                 return;
             }
 
@@ -1849,7 +1849,7 @@ function loadCDNScript(src, onload) {
             });
 
             /* 
-            // Old direct listener removed in favor of delegation
+            // Old direct listener removed in favour of delegation
             const profileBtn = document.getElementById('userProfileBtn');
             const profileDropdown = document.getElementById('userProfileDropdown');
             if (profileBtn) { ... } 
@@ -3149,7 +3149,7 @@ function loadCDNScript(src, onload) {
             problemCardsContainer.innerHTML = ''; // Clear previous content
 
             if (!deck || deck.cards.length === 0) {
-                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck to analyze.</p>';
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck to analyse.</p>';
                 return;
             }
 
@@ -3996,10 +3996,10 @@ function loadCDNScript(src, onload) {
             if (pomodoroState.isRunning) {
                 clearInterval(pomodoroState.intervalId);
                 pomodoroState.isRunning = false;
-                if (playPauseBtn) playPauseBtn.textContent = '▶ Start';
+                if (playPauseBtn) playPauseBtn.textContent = 'Start';
             } else {
                 pomodoroState.isRunning = true;
-                if (playPauseBtn) playPauseBtn.textContent = '⏸ Pause';
+                if (playPauseBtn) playPauseBtn.textContent = 'Pause';
                 pomodoroState.intervalId = setInterval(() => {
                     pomodoroState.timeLeft--;
                     updatePomodoroDisplay();
@@ -4017,7 +4017,7 @@ function loadCDNScript(src, onload) {
             pomodoroState.timeLeft = 25 * 60;
             updatePomodoroDisplay();
             const playPauseBtn = document.getElementById('pomodoroPlayPause');
-            if (playPauseBtn) playPauseBtn.textContent = '▶ Start';
+            if (playPauseBtn) playPauseBtn.textContent = 'Start';
             document.getElementById('pomodoroTimer').style.background = 'rgba(0,0,0,0.05)';
         }
 
@@ -4025,7 +4025,7 @@ function loadCDNScript(src, onload) {
             clearInterval(pomodoroState.intervalId);
             pomodoroState.isRunning = false;
             const playPauseBtn = document.getElementById('pomodoroPlayPause');
-            if (playPauseBtn) playPauseBtn.textContent = '▶ Start';
+            if (playPauseBtn) playPauseBtn.textContent = 'Start';
 
             if (pomodoroState.mode === 'work') {
                 pomodoroState.mode = 'break';
@@ -6616,7 +6616,7 @@ function loadCDNScript(src, onload) {
                 return;
             }
 
-            // 3. Initialize State
+            // 3. Initialise State
             practiceTestState.blueprint = blueprint;
             practiceTestState.form = form;
             practiceTestState.flatItems = form.sections.flatMap(s => s.items); // Flatten for linear nav

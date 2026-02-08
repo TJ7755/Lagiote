@@ -16,7 +16,7 @@ export function initDB(isRetry = false) {
                 console.warn("Attempting to recover from DB error by deleting the database.");
                 const deleteRequest = indexedDB.deleteDatabase('LagioteDB');
                 deleteRequest.onsuccess = () => {
-                    console.log("Database deleted successfully. Retrying initialization.");
+                    console.log("Database deleted successfully. Retrying initialisation.");
                     // Retry initDB, marking it as a retry to prevent infinite loops
                     initDB(true).then(resolve).catch(reject);
                 };
@@ -64,7 +64,7 @@ export function initDB(isRetry = false) {
 
 export async function saveDataToDB(storeName, data) {
     if (!db) {
-        console.warn('Database not initialized, skipping save to', storeName);
+        console.warn('Database not initialised, skipping save to', storeName);
         return Promise.resolve();
     }
     return new Promise((resolve, reject) => {
@@ -84,7 +84,7 @@ export async function saveDataToDB(storeName, data) {
 
 export async function getDataFromDB(storeName, key) {
     if (!db) {
-        console.warn('Database not initialized, cannot get from', storeName);
+        console.warn('Database not initialised, cannot get from', storeName);
         return Promise.resolve(undefined);
     }
     return new Promise((resolve, reject) => {
@@ -104,7 +104,7 @@ export async function getDataFromDB(storeName, key) {
 
 export async function getAllDataFromDB(storeName) {
     if (!db) {
-        console.warn('Database not initialized, cannot get all from', storeName);
+        console.warn('Database not initialised, cannot get all from', storeName);
         return Promise.resolve([]);
     }
     return new Promise((resolve, reject) => {
@@ -124,7 +124,7 @@ export async function getAllDataFromDB(storeName) {
 
 export async function deleteDataFromDB(storeName, key) {
     if (!db) {
-        console.warn('Database not initialized, skipping delete from', storeName);
+        console.warn('Database not initialised, skipping delete from', storeName);
         return Promise.resolve();
     }
     return new Promise((resolve, reject) => {

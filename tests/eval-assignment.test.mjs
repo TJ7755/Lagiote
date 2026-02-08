@@ -47,7 +47,7 @@ async function testAssignmentStability() {
     assert.strictEqual(a3['c2'], a1['c2']);
     assert.ok(a3['c5']); // New one assigned
     
-    console.log('testAssignmentStability ✅');
+    console.log('testAssignmentStability passed');
 }
 
 async function testDistribution() {
@@ -62,7 +62,7 @@ async function testDistribution() {
     assert.ok(countA > 450 && countA < 550);
     assert.ok(countB > 450 && countB < 550);
     
-    console.log('testDistribution ✅');
+    console.log('testDistribution passed');
 }
 
 testAssignmentStability();

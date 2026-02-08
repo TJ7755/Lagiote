@@ -239,7 +239,7 @@ describe('Sync Server Mock - Integration', () => {
         clientB = createMockSyncClient(server, { deviceId: 'device-b', userId: 'user-1' });
     });
     
-    it('synchronizes between clients', async () => {
+    it('synchronises between clients', async () => {
         // Client A creates an atom
         clientA.queueOperation(OP_TYPES.ATOM_CREATE, 'atom-1', { name: 'Shared Atom' });
         await clientA.push();
@@ -309,7 +309,7 @@ describe('Sync Server Mock - Error Handling', () => {
         const client = createMockSyncClient(server);
         
         // Note: The mock doesn't actually support error mode in the current implementation
-        // This test documents expected behavior
+        // This test documents expected behaviour
         
         client.queueOperation(OP_TYPES.ATOM_CREATE, 'a1', {});
         const result = await client.push();

@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     markInitialized: () => {
         isInitialized = true;
-        log('info', 'Auth window initialized');
+        log('info', 'Auth window initialised');
         ipcRenderer.send('auth-window-ready');
     }
 });

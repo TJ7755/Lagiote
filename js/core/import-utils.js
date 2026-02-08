@@ -12,7 +12,7 @@ import { CARD_TYPES, normalizeCardType, detectCardType, expandCard } from './car
 
 /**
  * Detects the delimiter used in a DSV (Delimiter Separated Values) string
- * @param {string} text - The text to analyze
+ * @param {string} text - The text to analyse
  * @returns {string} - The detected delimiter
  */
 export function detectDelimiter(text) {

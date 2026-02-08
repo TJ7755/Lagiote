@@ -328,7 +328,7 @@ async function createLoginWindow() {
             </head>
             <body>
               <div class="container">
-                <div class="checkmark">✓</div>
+                <div class="checkmark">&#10003;</div>
                 <h1>Authentication Successful!</h1>
                 <p>You can close this window now.</p>
               </div>
@@ -402,7 +402,7 @@ async function createLoginWindow() {
             </head>
             <body>
               <div class="container">
-                <div class="error-icon">✕</div>
+                <div class="error-icon">&#10005;</div>
                 <h1>Authentication Failed</h1>
                 <p>${error.message || 'Please try again'}</p>
               </div>

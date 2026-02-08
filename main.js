@@ -340,7 +340,7 @@ async function createLoginWindow() {
             </head>
             <body>
               <div class="container">
-                <div class="checkmark">✓</div>
+                <div class="checkmark">&#10003;</div>
                 <h1>Authentication Successful!</h1>
                 <p>You can close this window now.</p>
               </div>
@@ -419,7 +419,7 @@ async function createLoginWindow() {
             </head>
             <body>
               <div class="container">
-                <div class="error-icon">✕</div>
+                <div class="error-icon">&#10005;</div>
                 <h1>Authentication Failed</h1>
                 <p>${error.message || 'Please try again'}</p>
               </div>
@@ -787,7 +787,7 @@ ipcMain.handle('sync-data', async (event, arg) => {
 
 // FSRS calculations handled in the main process to avoid sandbox issues
 const { fsrs, State, Rating } = require('ts-fsrs');
-const f = fsrs(); // Initialize with default parameters
+const f = fsrs(); // Initialise with default parameters
 
 ipcMain.handle('get-fsrs-enums', () => {
   return { State, Rating };
