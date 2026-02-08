@@ -57,11 +57,25 @@ export function analyseMarkLoss(markingRecord, question, markScheme) {
     totalPoints.forEach(point => {
         const pointId = point.id || point.pointId;
         const awarded = awardedPoints.find(ap => ap.pointId === pointId);
-        const marksAwarded = awarded?.awardedMarks || 0;
+        
+        let marksAwarded;
+        let isNotEvaluated = false;
+        
+        if (!awarded) {
+            // Point is completely missing from awardedPoints - track as not evaluated
+            marksAwarded = 0;
+            isNotEvaluated = true;
+        } else {
+            marksAwarded = awarded.awardedMarks || 0;
+        }
+        
         const marksAvailable = point.marks || 1;
         
         if (marksAwarded < marksAvailable) {
-            const loss = classifyPointLoss(point, marksAwarded, question, markingRecord);
+            const loss = isNotEvaluated 
+                ? { category: MARK_LOSS_CATEGORIES.KNOWLEDGE_GAP, reason: 'Point not evaluated or missing from grading' }
+                : classifyPointLoss(point, marksAwarded, question, markingRecord);
+            
             losses.push({
                 pointId,
                 marksLost: marksAvailable - marksAwarded,

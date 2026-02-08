@@ -342,15 +342,7 @@ export function createQuestionEditor(initialQuestion = null) {
             state.isValid = state.errors.length === 0 && state.touched.has('prompt');
             return state.isValid;
         },
-        
-        /**
-         * Gets available atoms.
-         * @returns {Array} Available atoms
-         */
-        getAvailableAtoms() {
-            return [...state.availableAtoms];
-        },
-        
+
         /**
          * Checks if field has error.
          * @param {string} field Field name
@@ -358,6 +350,24 @@ export function createQuestionEditor(initialQuestion = null) {
          */
         hasError(field) {
             return state.errors.some(e => e.field === field);
+        },
+
+        /**
+         * Gets field error message.
+         * @param {string} field Field name
+         * @returns {string|null} Error message
+         */
+        getFieldError(field) {
+            const error = state.errors.find(e => e.field === field);
+            return error?.message || null;
+        },
+        
+        /**
+         * Gets available atoms.
+         * @returns {Array} Available atoms
+         */
+        getAvailableAtoms() {
+            return [...state.availableAtoms];
         },
         
         /**
@@ -458,10 +468,7 @@ export function createMarkSchemeEditor(initialScheme = null) {
          */
         addPoint(pointData = {}) {
             const point = createPointsSchemePoint(pointData);
-            // Preserve missing ID for validation if user didn't provide one
-            if (!pointData.id && !pointData.pointId) {
-                delete point.id;
-            }
+            // Keep any auto-generated or existing IDs; let validation flag any issues
             state.scheme.points = [...(state.scheme.points || []), point];
             state.scheme.updatedAt = new Date().toISOString();
             this.validate();

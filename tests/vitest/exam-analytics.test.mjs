@@ -68,9 +68,11 @@ describe('Exam Analytics - Mark Loss Attribution', () => {
     it('classifies reasoning mark losses correctly', () => {
         const markingRecord = {
             awardedPoints: [
+                { pointId: 'M1', awardedMarks: 1 },
+                { pointId: 'A1', awardedMarks: 1 },
                 { pointId: 'R1', awardedMarks: 0 }
             ],
-            totalAwardedMarks: 0
+            totalAwardedMarks: 2
         };
         
         const analysis = analyseMarkLoss(markingRecord, mockQuestion, mockMarkScheme);
@@ -82,6 +84,34 @@ describe('Exam Analytics - Mark Loss Attribution', () => {
     it('returns null for invalid marking record', () => {
         const analysis = analyseMarkLoss(null, mockQuestion, mockMarkScheme);
         expect(analysis).toBeNull();
+    });
+    
+    it('tracks missing points as full mark losses', () => {
+        const markingRecord = {
+            questionId: 'q1',
+            awardedPoints: [
+                { pointId: 'M1', awardedMarks: 1 }
+                // A1 and R1 are missing from awardedPoints
+            ],
+            totalAwardedMarks: 1
+        };
+        
+        const analysis = analyseMarkLoss(markingRecord, mockQuestion, mockMarkScheme);
+        
+        expect(analysis.losses).toHaveLength(2); // A1 and R1 not evaluated
+        
+        const missingA1 = analysis.losses.find(l => l.pointId === 'A1');
+        const missingR1 = analysis.losses.find(l => l.pointId === 'R1');
+        
+        expect(missingA1).toBeDefined();
+        expect(missingA1.marksLost).toBe(1);
+        expect(missingA1.category).toBe(MARK_LOSS_CATEGORIES.KNOWLEDGE_GAP);
+        expect(missingA1.reason).toContain('not evaluated');
+        
+        expect(missingR1).toBeDefined();
+        expect(missingR1.marksLost).toBe(1);
+        expect(missingR1.category).toBe(MARK_LOSS_CATEGORIES.KNOWLEDGE_GAP);
+        expect(missingR1.reason).toContain('not evaluated');
     });
 });
 

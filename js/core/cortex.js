@@ -829,14 +829,23 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
     // Fallback to scoring if queue empty or invalid
     let bestCard = null;
     let bestScore = -Infinity;
+    let tieCount = 0;
 
-    for (const card of candidates) {
+    const eligibleCandidates = filterCandidatesByCooldown(candidates, sessionState);
+    for (const card of eligibleCandidates) {
         const state = knowledgeStates?.get ? knowledgeStates.get(card.id) : knowledgeStates?.[card.id];
         const score = await scoreCard(card, state, sessionState, deck);
         
         if (bestCard === null || score > bestScore) {
             bestCard = card;
             bestScore = score;
+            tieCount = 1;
+        } else if (score === bestScore) {
+            tieCount++;
+            // Reservoir sampling: replace with probability 1/tieCount
+            if (Math.random() < 1 / tieCount) {
+                bestCard = card;
+            }
         }
     }
     
@@ -846,6 +855,16 @@ export async function pickNextCard(candidates, sessionState, deck, knowledgeStat
     }
     
     return bestCard;
+}
+
+/**
+ * Backwards-compatible wrapper for card objects that have an `id` property.
+ * @param {Array} candidates - Array of card objects
+ * @param {Object} sessionState - Session state
+ * @returns {Array} Filtered candidates
+ */
+function filterCandidatesByCooldown(candidates, sessionState) {
+    return filterByCooldownWithId(candidates, sessionState, card => card.id);
 }
 
 // --- 6. Neural Predictor ---
@@ -1110,6 +1129,36 @@ function getCardMetric(sessionState, cardId, key, fallback) {
         return normalizeFeature(metrics[cardId][key], fallback);
     }
     return fallback;
+}
+
+/**
+ * Generic helper to filter a list of items by their cooldown, based on a card ID extractor.
+ * This encapsulates the shared logic so other modules can reuse it without duplication.
+ * @param {Array} candidates - Array of items to filter
+ * @param {Object} sessionState - Session state containing cardMetrics and sessionTurn
+ * @param {Function} getCardId - Function to extract card ID from an item (defaults to item => item.id)
+ * @returns {Array} Filtered candidates
+ */
+export function filterByCooldownWithId(candidates, sessionState, getCardId) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
+    const currentTurn = Number.isFinite(sessionState?.sessionTurn) ? sessionState.sessionTurn : 0;
+    const getCooldown = (item) => {
+        const cardId = typeof getCardId === 'function' ? getCardId(item) : item?.id;
+        const cooldownUntil = getCardMetric(sessionState, cardId, 'cooldownUntil', 0);
+        return Math.max(0, cooldownUntil - currentTurn);
+    };
+
+    const eligible = candidates.filter(item => getCooldown(item) <= 0);
+    if (eligible.length > 0) return eligible;
+
+    let minCooldown = Infinity;
+    for (const item of candidates) {
+        const cooldown = getCooldown(item);
+        if (cooldown < minCooldown) minCooldown = cooldown;
+    }
+
+    return candidates.filter(item => getCooldown(item) === minCooldown);
 }
 
 export async function initCortex(options = {}) {

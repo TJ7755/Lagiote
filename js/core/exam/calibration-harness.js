@@ -181,15 +181,23 @@ export function calculateCohensKappa(rater1Marks, rater2Marks) {
     });
     
     // Cohen's Kappa
-    const kappa = (po - pe) / (1 - pe);
+    let kappa;
+    const epsilon = 1e-12;
+    if (pe >= 1 - epsilon) {
+        // Degenerate case: expected agreement is perfect (or extremely close), avoid division by zero.
+        // Define kappa as 1 when observed agreement is also perfect, otherwise 0.
+        kappa = po >= 1 - epsilon ? 1 : 0;
+    } else {
+        kappa = (po - pe) / (1 - pe);
+    }
     
     // Interpretation
     let interpretation;
     if (kappa < 0) interpretation = 'poor';
     else if (kappa < 0.2) interpretation = 'slight';
     else if (kappa < 0.4) interpretation = 'fair';
-    else if (kappa < 0.6) interpretation = 'moderate';
-    else if (kappa < 0.8) interpretation = 'substantial';
+    else if (kappa < 0.7) interpretation = 'moderate';
+    else if (kappa < 0.9) interpretation = 'substantial';
     else interpretation = 'almost_perfect';
     
     return {
@@ -263,6 +271,8 @@ export function validateMarkScheme(markScheme, question) {
             
             if (!pointId) {
                 issues.push(`Point ${idx} has no ID`);
+            } else if (point.generatedId) {
+                issues.push(`Point ${idx} uses an auto-generated ID (${pointId}) and needs a stable/manual ID`);
             }
             
             if (!point.marks && point.marks !== 0) {

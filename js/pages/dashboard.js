@@ -16,6 +16,7 @@ import {
     getInputMode
 } from '../core/card-types.js';
 import { parseImportText } from '../core/import-utils.js';
+import { filterByCooldownWithId } from '../core/cortex.js';
 
 console.log('Test 1: Script is starting!');
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
@@ -55,6 +56,8 @@ let currentMode = null;
 let confirmCallback = null;
 let cardToEdit = { deckId: null, cardIndex: null, from: null };
 let aiCardToEditIndex = null;
+const LEARN_RETRY_LAG_BASE = 3;
+const LEARN_RETRY_LAG_MAX = 12;
 let studyState = {
     buckets: [],
     currentRound: 1,
@@ -1397,7 +1400,8 @@ function createDefaultSessionState() {
         recentCards: [],
         recentOutcomes: [],
         cardMetrics: new Map(),
-        uniqueCardIds: new Set()
+        uniqueCardIds: new Set(),
+        sessionTurn: 0  // Global turn counter for absolute cooldown tracking
     };
 }
 
@@ -1471,6 +1475,11 @@ function ensureSessionState() {
 
 function updateSessionStateMetrics(cardId, wasCorrect, interactionLog = {}) {
     const state = ensureSessionState();
+    
+    // Increment global turn counter
+    if (!Number.isFinite(state.sessionTurn)) state.sessionTurn = 0;
+    state.sessionTurn += 1;
+    
     state.sessionCardsSeen += 1;
     state.uniqueCardIds.add(cardId);
     state.sessionUniqueCardsSeen = state.uniqueCardIds.size;
@@ -1491,6 +1500,22 @@ function updateSessionStateMetrics(cardId, wasCorrect, interactionLog = {}) {
     metrics.lastCorrect = wasCorrect ? 1 : 0;
     metrics.lastLatency = latency;
     metrics.lastCorrections = corrections;
+    if (currentMode === 'learn') {
+        if (wasCorrect) {
+            metrics.incorrectStreak = 0;
+            metrics.cooldownUntil = 0;
+        } else {
+            const prevStreak = Number.isFinite(metrics.incorrectStreak) ? metrics.incorrectStreak : 0;
+            const nextStreak = prevStreak + 1;
+            metrics.incorrectStreak = nextStreak;
+            const lag = Math.min(LEARN_RETRY_LAG_MAX, LEARN_RETRY_LAG_BASE * (2 ** (nextStreak - 1)));
+            // Store absolute turn when card becomes available again
+            metrics.cooldownUntil = Math.max(
+                Number.isFinite(metrics.cooldownUntil) ? metrics.cooldownUntil : 0,
+                state.sessionTurn + Math.round(lag)
+            );
+        }
+    }
     state.cardMetrics.set(cardId, metrics);
     
     // Auto-save session state
@@ -6449,27 +6474,73 @@ async function getPracticeTestRuntimeModules() {
 function getBaselineChoice(candidates, knowledgeMap) {
     if (!candidates || candidates.length === 0) return null;
 
-    // Baseline v1: FSRS/recency risk ordering
-    const sorted = [...candidates].sort((a, b) => {
+    const eligibleCandidates = filterCandidatesByCooldown(candidates, studyState.sessionState);
+    if (eligibleCandidates.length === 0) return null;
+
+    // Baseline v1: FSRS/recency risk ordering - deterministic sort followed by tie-group shuffling
+    const sorted = [...eligibleCandidates].sort((a, b) => {
         const stateA = a.knowledgeState;
         const stateB = b.knowledgeState;
         
         const dueA = stateA?.fsrs?.due ? new Date(stateA.fsrs.due).getTime() : null;
         const dueB = stateB?.fsrs?.due ? new Date(stateB.fsrs.due).getTime() : null;
         
-        if (dueA && dueB) return dueA - dueB;
-        if (dueA) return -1;
-        if (dueB) return 1;
+        if (dueA !== null && dueB !== null) return dueA - dueB;
+        if (dueA !== null) return -1;
+        if (dueB !== null) return 1;
         
         const lastA = stateA?.lastReviewed ? new Date(stateA.lastReviewed).getTime() : 0;
         const lastB = stateB?.lastReviewed ? new Date(stateB.lastReviewed).getTime() : 0;
         
-        if (lastA !== lastB) return lastA - lastB;
-        
-        return Math.random() - 0.5;
+        return lastA - lastB;
     });
     
+    // Fisher-Yates shuffle within the first tie group (cards with same sorting key)
+    let tieGroupEnd = 1;
+    const firstState = sorted[0].knowledgeState;
+    const firstDue = firstState?.fsrs?.due ? new Date(firstState.fsrs.due).getTime() : null;
+    const firstLast = firstState?.lastReviewed ? new Date(firstState.lastReviewed).getTime() : 0;
+    const firstHasDue = firstDue !== null;
+    
+    // Tie-group detection matches comparator logic:
+    // Cards are in the same tie group only if:
+    // - They either both have a due or both do not (due presence),
+    // - Their due timestamps are equal (including both null),
+    // - Their lastReviewed timestamps are equal.
+    while (tieGroupEnd < sorted.length) {
+        const cand = sorted[tieGroupEnd];
+        const candState = cand.knowledgeState;
+        const candDue = candState?.fsrs?.due ? new Date(candState.fsrs.due).getTime() : null;
+        const candLast = candState?.lastReviewed ? new Date(candState.lastReviewed).getTime() : 0;
+        const candHasDue = candDue !== null;
+        
+        // Break when comparator would distinguish these cards
+        if (candHasDue !== firstHasDue || candDue !== firstDue || candLast !== firstLast) {
+            break;
+        }
+        tieGroupEnd++;
+    }
+    
+    // Shuffle [0, tieGroupEnd) if more than one card in tie group
+    if (tieGroupEnd > 1) {
+        for (let i = tieGroupEnd - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+        }
+    }
+    
     return sorted[0].card;
+}
+
+/**
+ * Filter candidates by cooldown, using the shared helper from cortex.js.
+ * Wrapper entries have the card ID at entry.card.id.
+ * @param {Array} candidates - Array of wrapper entries
+ * @param {Object} sessionState - Session state
+ * @returns {Array} Filtered candidates
+ */
+function filterCandidatesByCooldown(candidates, sessionState) {
+    return filterByCooldownWithId(candidates, sessionState, entry => entry.card.id);
 }
 
 function parsePositiveInt(value, fallback) {
@@ -6489,7 +6560,27 @@ function buildLearnPool(deck, knowledgeMap, targetDate, maxCards) {
         return { card, knowledgeState: state, projectedRetention: typeof retention === 'number' ? retention : 0 };
     }).filter(entry => !isCardMasteredForLearn(entry.knowledgeState, deck, targetDate));
 
+    // Sort by retention (ascending)
     candidates.sort((a, b) => (a.projectedRetention ?? 0) - (b.projectedRetention ?? 0));
+    
+    // Fisher-Yates shuffle within groups of equal retention
+    let start = 0;
+    while (start < candidates.length) {
+        const retention = candidates[start].projectedRetention ?? 0;
+        let end = start + 1;
+        while (end < candidates.length && (candidates[end].projectedRetention ?? 0) === retention) {
+            end++;
+        }
+        // Shuffle [start, end) if group has more than 1 element
+        if (end - start > 1) {
+            for (let i = end - 1; i > start; i--) {
+                const j = start + Math.floor(Math.random() * (i - start + 1));
+                [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+            }
+        }
+        start = end;
+    }
+    
     const poolLimit = Number.isFinite(maxCards) && maxCards > 0 ? maxCards : candidates.length;
     const activeLearningPool = candidates.slice(0, poolLimit).map(entry => entry.card);
     return { activeLearningPool, sessionCardIds: activeLearningPool.map(card => card.id) };
