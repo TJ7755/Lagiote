@@ -16,6 +16,7 @@ import {
     getInputMode
 } from '../core/card-types.js';
 import { parseImportText } from '../core/import-utils.js';
+import { filterByCooldownWithId } from '../core/cortex.js';
 
 console.log('Test 1: Script is starting!');
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
@@ -6531,28 +6532,15 @@ function getBaselineChoice(candidates, knowledgeMap) {
     return sorted[0].card;
 }
 
+/**
+ * Filter candidates by cooldown, using the shared helper from cortex.js.
+ * Wrapper entries have the card ID at entry.card.id.
+ * @param {Array} candidates - Array of wrapper entries
+ * @param {Object} sessionState - Session state
+ * @returns {Array} Filtered candidates
+ */
 function filterCandidatesByCooldown(candidates, sessionState) {
-    if (!Array.isArray(candidates) || candidates.length === 0) return [];
-    if (!sessionState?.cardMetrics) return candidates;
-    
-    const currentTurn = Number.isFinite(sessionState.sessionTurn) ? sessionState.sessionTurn : 0;
-    const getCooldown = (cardId) => {
-        const metrics = sessionState.cardMetrics instanceof Map
-            ? sessionState.cardMetrics.get(cardId)
-            : sessionState.cardMetrics[cardId];
-        const cooldownUntil = metrics?.cooldownUntil;
-        if (!Number.isFinite(cooldownUntil)) return 0;
-        return Math.max(0, cooldownUntil - currentTurn);
-    };
-    
-    const ready = candidates.filter(entry => getCooldown(entry.card.id) <= 0);
-    if (ready.length > 0) return ready;
-    let minCooldown = Infinity;
-    candidates.forEach(entry => {
-        const cooldown = getCooldown(entry.card.id);
-        if (cooldown < minCooldown) minCooldown = cooldown;
-    });
-    return candidates.filter(entry => getCooldown(entry.card.id) === minCooldown);
+    return filterByCooldownWithId(candidates, sessionState, entry => entry.card.id);
 }
 
 function parsePositiveInt(value, fallback) {

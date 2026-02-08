@@ -21,7 +21,8 @@ import { generateUUID } from './exam-mode.js';
  * @returns {string} Escaped string
  */
 function escapeRegExp(str) {
-    return str.replace(/[.*+?^${}()|\\[\]\-]/g, '\\$&');
+    // Use a standard, well-defined character class that includes backslash and hyphen.
+    return str.replace(/[-.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // --- Evidence Extraction ---
