@@ -22,7 +22,7 @@ import { generateUUID } from './exam-mode.js';
  */
 function escapeRegExp(str) {
     // Use a standard, well-defined character class that includes backslash and hyphen.
-    return str.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+    return str.replace(/[-.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // --- Evidence Extraction ---

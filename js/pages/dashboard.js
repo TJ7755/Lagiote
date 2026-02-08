@@ -18,7 +18,6 @@ import {
 import { parseImportText } from '../core/import-utils.js';
 import { filterByCooldownWithId } from '../core/cortex.js';
 
-
 console.log('Test 1: Script is starting!');
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
 if (pdfjsLib?.GlobalWorkerOptions) {
