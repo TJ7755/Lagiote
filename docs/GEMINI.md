@@ -62,14 +62,17 @@ The project is managed with npm. The key commands are defined in `package.json`.
 
 ## Development Conventions
 
--   **Modular JavaScript:** The frontend code is organised into modules located in `assets/js/`.
-    -   `main.js`: The main entry point for the renderer process, containing the bulk of the application logic and event listeners.
-    -   `state.js`: Defines and manages the application's in-memory state.
-    -   `db.js`: A wrapper for all IndexedDB interactions.
-    -   `ui.js`: Contains utility functions for manipulating the DOM (showing/hiding views, toasts, etc.).
--   **State Management:** A simple, centralized state object is exported from `state.js`. Functions in `main.js` mutate this state directly.
+-   **Modular JavaScript:** The frontend code is organised into modules across several directories:
+    -   `assets/js/` — Core application modules and bundled vendor libraries (e.g. `mammoth.browser.min.js`, `chart.js`, `pdf.min.js`).
+        -   `main.js`: The main entry point for the renderer process, containing the bulk of the application logic and event listeners.
+        -   `state.js`: Defines and manages the application's in-memory state.
+        -   `db.js`: A wrapper for all IndexedDB interactions.
+        -   `ui.js`: Contains utility functions for manipulating the DOM (showing/hiding views, toasts, etc.).
+    -   `js/core/` — Shared utilities and engine logic (e.g. `cortex.js`, `fsrs.js`, `keyboard.js`).
+    -   `js/pages/` — Page-specific modules loaded by `index.html` (e.g. `dashboard.js`, `bridge.js`, `exam-mode-ui.js`).
+-   **State Management:** A simple, centralised state object is exported from `state.js`. Functions in `main.js` mutate this state directly.
 -   **Asynchronous Operations:** The application makes extensive use of `async/await` for database operations and API calls.
 -   **Single Page Application (SPA):** The entire UI is managed within `index.html`. Different "views" are toggled by changing CSS classes.
 -   **Styling:** CSS is written directly in `index.html` and uses CSS variables for theming (including a light and dark mode).
--   **Backend Interaction:** All interactions with external services (like the Gemini API or a database for synchronization) are routed through a proxy server defined by the `PROXY_URL` in the environment configuration. The Electron main process (`main.js`) handles these API calls on behalf of the renderer process via IPC.
+-   **Backend Interaction:** All interactions with external services (like the Gemini API or a database for synchronisation) are routed through a proxy server defined by the `PROXY_URL` in the environment configuration. The Electron main process (`main.js`) handles these API calls on behalf of the renderer process via IPC.
 -   **Electron Sandbox Security:** The renderer process runs in a sandboxed environment for enhanced security. Node.js functionalities, such as FSRS calculations and module access, are securely exposed to the renderer via IPC (Inter-Process Communication) handlers defined in the main process and exposed through the `preload.js` script.
