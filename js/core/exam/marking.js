@@ -20,14 +20,22 @@ export function createMarkScheme(options = {}) {
 }
 
 export function createPointsSchemePoint(options = {}) {
-    return {
-        id: options.id || `point-${Math.random().toString(36).slice(2, 9)}`,
+    const hasProvidedId = !!(options.id || options.pointId);
+    const point = {
+        id: options.id || options.pointId || `point-${Math.random().toString(36).slice(2, 9)}`,
         marks: Number.isFinite(options.marks) ? options.marks : 1,
         condition: options.condition || '',
         requires: Array.isArray(options.requires) ? options.requires : [],
         allowECF: options.allowECF === true,
         grading: options.grading || null
     };
+    
+    // Mark as generated if no ID was provided
+    if (!hasProvidedId) {
+        point.generatedId = true;
+    }
+    
+    return point;
 }
 
 function generateId() {
