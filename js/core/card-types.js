@@ -280,7 +280,7 @@ export function getClozeAnswer(text, activeIndex = 1) {
 
 /**
  * Counts the number of cloze deletions in text
- * @param {string} text - Text to analyze
+ * @param {string} text - Text to analyse
  * @returns {number} - Number of clozes
  */
 export function countClozes(text) {
@@ -686,7 +686,7 @@ export function gradeTypedAnswer(card, userAnswer, options = {}) {
         normalizedUser = normalizedUser.replace(/[^\w\s]/g, '');
     }
 
-    // Trim and normalize whitespace
+    // Trim and normalise whitespace
     normalizedExpected = normalizedExpected.trim().replace(/\s+/g, ' ');
     normalizedUser = normalizedUser.trim().replace(/\s+/g, ' ');
 

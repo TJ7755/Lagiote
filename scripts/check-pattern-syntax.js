@@ -59,7 +59,7 @@ files.forEach(file => {
 });
 
 if (!foundIssues) {
-  console.log('✓ No invalid syntax patterns found in any of the checked files.');
+  console.log('PASS No invalid syntax patterns found in any of the checked files.');
   console.log('  - No { .foo } patterns (without spread operator)');
   console.log('  - No [.foo] patterns');
   console.log('  - No suspicious trailing commas');

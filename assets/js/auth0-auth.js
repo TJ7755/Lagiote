@@ -44,7 +44,7 @@ function getAuth0Config() {
   return { domain, clientId, audience };
 }
 
-// Initialize Auth0 client
+// Initialise Auth0 client
 async function initAuth0() {
   try {
     showLoading();
@@ -90,7 +90,7 @@ async function initAuth0() {
     // Update UI based on authentication state
     await updateUI();
   } catch (err) {
-    console.error('Auth0 initialization error:', err);
+    console.error('Auth0 initialisation error:', err);
     showError(err.message);
   }
 }
@@ -281,11 +281,11 @@ retryBtn.addEventListener('click', () => {
   initAuth0();
 });
 
-// Wait for config to be injected from main process before initializing
+// Wait for config to be injected from main process before initialising
 async function waitForConfigAndInit() {
   // Check if config is already available
   if (window.auth0Config && window.auth0Config.domain && window.auth0Config.clientId) {
-    console.log('[Auth Window] Config already available, initializing...');
+    console.log('[Auth Window] Config already available, initialising...');
     initAuth0();
     return;
   }
@@ -309,6 +309,6 @@ async function waitForConfigAndInit() {
   }, 100);
 }
 
-// Initialize the app - wait for config first
+// Initialise the app - wait for config first
 waitForConfigAndInit();
 

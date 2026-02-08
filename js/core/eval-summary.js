@@ -32,7 +32,7 @@ export function summariseProbes(completedProbes, delaysHours) {
         policyB: {}
     };
 
-    // Initialize buckets
+    // Initialise buckets
     ['policyA', 'policyB'].forEach(arm => {
         buckets.forEach(b => {
             stats[arm][b] = {

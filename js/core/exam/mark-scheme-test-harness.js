@@ -32,7 +32,7 @@ export function createMarkSchemeTestHarness(markScheme, question) {
         testResponse(response, options = {}) {
             const startTime = performance.now();
             
-            // Normalize text response if needed
+            // Normalise text response if needed
             const normalizedResponse = typeof response === 'string' 
                 ? normalizeTextResponse(response, question?.type)
                 : response;
@@ -212,7 +212,7 @@ export function createMarkSchemeTestHarness(markScheme, question) {
                     <section class="validation-section">
                         <h3>Structure Validation</h3>
                         <p class="status ${validation.valid ? 'valid' : 'invalid'}">
-                            ${validation.valid ? '✓ Valid' : '✗ Invalid'}
+                            ${validation.valid ? 'Valid' : 'Invalid'}
                         </p>
                         ${validation.issues.length > 0 ? `
                             <div class="issues">

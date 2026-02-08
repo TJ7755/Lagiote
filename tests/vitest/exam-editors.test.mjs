@@ -157,7 +157,7 @@ describe('Exam Editors - Question Editor', () => {
         expect(editor.getQuestion().type).toBe('numeric');
     });
     
-    it('initializes options for MCQ', () => {
+    it('initialises options for MCQ', () => {
         const editor = createQuestionEditor();
         
         editor.setType('mcq_single');

@@ -1331,7 +1331,7 @@ class AnalyticsManager {
     }
 }
 
-// Initialize analytics manager globally
+// Initialise analytics manager globally
 let analyticsManager = null;
 
 // FSRS engine helpers
@@ -1847,11 +1847,11 @@ window.onload = async function () {
 
     await initDB();
     await applyTestModeSetup();
-    console.log('Database initialized.');
+    console.log('Database initialised.');
 
-    // Initialize analytics manager
+    // Initialise analytics manager
     analyticsManager = new AnalyticsManager();
-    console.log('Analytics manager initialized.');
+    console.log('Analytics manager initialised.');
 
     // Handle Auth0 callback on web (if code/state in URL)
     if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
@@ -3558,7 +3558,7 @@ function setupEventListeners() {
     });
 
     /* 
-    // Old direct listener removed in favor of delegation
+    // Old direct listener removed in favour of delegation
     const profileBtn = document.getElementById('userProfileBtn');
     const profileDropdown = document.getElementById('userProfileDropdown');
     if (profileBtn) { ... } 
@@ -6619,7 +6619,7 @@ async function startLearnMode(deckId) {
     studyState.currentCardIndex = 0;
     studyState.incorrectInThisRound = [];
 
-    // Initialize Evaluation Session
+    // Initialise Evaluation Session
     try {
         const { router, store } = await getEvalModules();
         studyState.evalSessionId = router.makeSessionId();
@@ -10143,7 +10143,7 @@ if (typeof compressImage === 'undefined') {
     // Keep a fallback to avoid runtime errors when utils.js is not yet loaded
     async function compressImage(dataUrl, qualityOrMaxSize = undefined, maxSizeKB = undefined) {
         if (typeof window !== 'undefined' && typeof window.compressImage === 'function') {
-            // Normalize call: if second arg is > 10 we assume it's maxSizeMB so convert to KB
+            // Normalise call: if second arg is > 10 we assume it's maxSizeMB so convert to KB
             if (typeof qualityOrMaxSize === 'number' && qualityOrMaxSize > 10) {
                 const kb = Math.floor(qualityOrMaxSize * 1024);
                 return window.compressImage(dataUrl, undefined, kb);
@@ -11329,7 +11329,7 @@ async function renderEvalPanel(container) {
                 
                 const overallSkew = totalCards > 0 ? Math.abs(totalA - totalB) / totalCards : 0;
                 if (overallSkew > 0.05) {
-                    balanceHtml += `<p style="color: var(--error-color); font-size: 0.8rem; margin-top: 5px;">⚠️ Overall assignment skew is high (${(overallSkew*100).toFixed(1)}%)</p>`;
+                    balanceHtml += `<p style="color: var(--error-color); font-size: 0.8rem; margin-top: 5px;">Overall assignment skew is high (${(overallSkew*100).toFixed(1)}%)</p>`;
                 }
                 
                 balanceHtml += `
@@ -13194,7 +13194,7 @@ function renderDocumentList() {
                     <div class="document-item" data-doc-id="${doc.id}">
                         <div class="document-item-header">
                             <span class="document-name">
-                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? '✓' : 'FILE')}</span>
+                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? 'Done' : 'FILE')}</span>
                                 ${doc.name}
                             </span>
                             <button class="remove-doc-btn" onclick="removeDocument(${index})">&times;</button>
@@ -14931,7 +14931,7 @@ function renderPlanAnalytics(plan, knowledgeMap) {
         const analyticsContent = document.getElementById('planAnalyticsContent');
         analyticsContent.innerHTML = `
                     <div class="no-decks" style="padding: 40px;">
-                        <p>This plan has no cards to analyze.</p>
+                        <p>This plan has no cards to analyse.</p>
                         <p style="font-size: 0.9rem; margin-top: 10px;">Edit the plan to add some decks.</p>
                     </div>
                 `;

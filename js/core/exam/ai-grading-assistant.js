@@ -154,13 +154,13 @@ export function extractEvidence(responseText, questionType = 'structured') {
         calculations: extractCalculations(responseText),
         claims: extractClaims(responseText),
         keyTerms: extractKeyTerms(responseText),
-        structure: analyzeStructure(responseText)
+        structure: analyseStructure(responseText)
     };
     
     // Question-type specific extraction
     if (questionType === 'essay') {
         evidence.paragraphs = extractParagraphs(responseText);
-        evidence.argumentFlow = analyzeArgumentFlow(evidence.claims);
+        evidence.argumentFlow = analyseArgumentFlow(evidence.claims);
     }
     
     return evidence;
@@ -213,11 +213,11 @@ function categorizeTerm(term) {
 }
 
 /**
- * Analyzes the structure of a response.
+ * Analyses the structure of a response.
  * @param {string} text Response text
  * @returns {Object} Structure analysis
  */
-function analyzeStructure(text) {
+function analyseStructure(text) {
     const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
     const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
     const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
@@ -242,7 +242,7 @@ function extractParagraphs(text) {
         }));
 }
 
-function analyzeArgumentFlow(claims) {
+function analyseArgumentFlow(claims) {
     const flow = [];
     let lastWasReasoning = false;
     
@@ -275,7 +275,7 @@ export function suggestPointsFromEvidence(evidence, markScheme, question) {
     const evidenceText = JSON.stringify(evidence).toLowerCase();
     
     markScheme.points.forEach(point => {
-        const suggestion = analyzePointMatch(point, evidence, evidenceText, question);
+        const suggestion = analysePointMatch(point, evidence, evidenceText, question);
         if (suggestion.confidence !== 'low') {
             suggestions.push(suggestion);
         }
@@ -288,7 +288,7 @@ function confidenceRank(confidence) {
     return confidence === 'high' ? 3 : confidence === 'medium' ? 2 : 1;
 }
 
-function analyzePointMatch(point, evidence, evidenceText, question) {
+function analysePointMatch(point, evidence, evidenceText, question) {
     const pointId = point.id || point.pointId;
     const condition = (point.condition || '').toLowerCase();
     const marks = point.marks || 1;
@@ -495,7 +495,7 @@ export function calculateGradingConfidence(suggestions, evidence) {
 
 /**
  * Main AI grading assistant function.
- * Analyzes a response and provides grading assistance.
+ * Analyses a response and provides grading assistance.
  * 
  * @param {Object} params Assistant parameters
  * @param {string} params.responseText Student response text

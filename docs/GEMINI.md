@@ -20,9 +20,9 @@ User authentication is handled via **Auth0**, with separate implementations for 
 ## Core Features & Recent Enhancements
 
 ### **Spaced Repetition and Learning**
--   **FSRS Algorithm:** The core learning algorithm has been upgraded from SM-2 to FSRS for more adaptive and personalized scheduling of reviews.
+-   **FSRS Algorithm:** The core learning algorithm has been upgraded from SM-2 to FSRS for more adaptive and personalised scheduling of reviews.
 -   **Implicit Grading:** FSRS performance is now automatically graded (1-4) based on user interaction data such as recall latency, number of backspaces, and attempt count, eliminating the need for manual rating inputs.
--   **Intelligent Study Modes:** Tailored algorithms to maximize learning efficiency, now powered by FSRS for card prioritization based on retrievability.
+-   **Intelligent Study Modes:** Tailored algorithms to maximise learning efficiency, now powered by FSRS for card prioritisation based on retrievability.
 
 ### **Memory Insights & Analytics**
 -   **Card-Level FSRS Stats:** When viewing cards in a deck, users can see detailed FSRS statistics for each card, including:
@@ -62,7 +62,7 @@ The project is managed with npm. The key commands are defined in `package.json`.
 
 ## Development Conventions
 
--   **Modular JavaScript:** The frontend code is organized into modules located in `assets/js/`.
+-   **Modular JavaScript:** The frontend code is organised into modules located in `assets/js/`.
     -   `main.js`: The main entry point for the renderer process, containing the bulk of the application logic and event listeners.
     -   `state.js`: Defines and manages the application's in-memory state.
     -   `db.js`: A wrapper for all IndexedDB interactions.

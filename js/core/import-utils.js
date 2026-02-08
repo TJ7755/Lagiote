@@ -12,7 +12,7 @@ import { CARD_TYPES, normalizeCardType, detectCardType, expandCard } from './car
 
 /**
  * Detects the delimiter used in a DSV (Delimiter Separated Values) string
- * @param {string} text - The text to analyze
+ * @param {string} text - The text to analyse
  * @returns {string} - The detected delimiter
  */
 export function detectDelimiter(text) {
@@ -128,7 +128,7 @@ export function parseImportText(text, options = {}) {
             const data = JSON.parse(text);
             let importedCards = Array.isArray(data) ? data : (data.cards || []);
             
-            // Normalize JSON cards
+            // Normalise JSON cards
             const normalizedCards = importedCards.map(c => {
                 const front = c.front || c.question || c.term || '';
                 const back = c.back || c.answer || c.definition || '';

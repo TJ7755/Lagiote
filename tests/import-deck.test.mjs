@@ -17,11 +17,11 @@ function test(name, fn) {
     try {
         fn();
         testResults.passed++;
-        console.log(`✓ ${name}`);
+        console.log(`PASS ${name}`);
     } catch (err) {
         testResults.failed++;
         testResults.errors.push({ name, error: err.message });
-        console.error(`✗ ${name}: ${err.message}`);
+        console.error(`FAIL ${name}: ${err.message}`);
         console.error(err.stack);
     }
 }

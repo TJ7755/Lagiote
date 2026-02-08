@@ -21,7 +21,7 @@ console.log('Running Exam Blueprint Tests...');
     assert.ok(result.errors.some(e => e.includes('feedback')), 'Should report feedback error');
 }
 
-// Test 3: Normalization
+// Test 3: Normalisation
 {
     const partial = {
         name: 'My Test',

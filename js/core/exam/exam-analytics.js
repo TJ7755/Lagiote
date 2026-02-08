@@ -39,7 +39,7 @@ export const COMMAND_WORDS = {
 };
 
 /**
- * Analyzes a single marking record for mark-loss patterns.
+ * Analyses a single marking record for mark-loss patterns.
  * @param {Object} markingRecord The marking record
  * @param {Object} question Associated question
  * @param {Object} markScheme Associated mark scheme

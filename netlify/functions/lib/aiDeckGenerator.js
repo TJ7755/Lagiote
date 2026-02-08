@@ -366,7 +366,7 @@ function normalizeDeckStructure(parsed, context) {
     }
     const reportedType = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : '';
     
-    // Normalize type through aliases
+    // Normalise type through aliases
     const normalizedType = TYPE_ALIASES[reportedType] || reportedType;
     
     if (!VALID_CARD_TYPES.includes(normalizedType)) {

@@ -99,7 +99,7 @@ describe('AI Grading Assistant - Full Evidence Extraction', () => {
         expect(evidence.structure).toBeDefined();
     });
     
-    it('analyzes essay structure', () => {
+    it('analyses essay structure', () => {
         const text = `
             Introduction paragraph with main argument.
             
@@ -107,7 +107,7 @@ describe('AI Grading Assistant - Full Evidence Extraction', () => {
             
             Second supporting point with analysis.
             
-            Conclusion summarizing findings.
+            Conclusion summarising findings.
         `;
         
         const evidence = extractEvidence(text, 'essay');

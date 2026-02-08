@@ -52,7 +52,7 @@ function getRedirectUri() {
 
 /**
  * Get the Auth0 authentication URL
- * @returns {string} The Auth0 authorize URL with PKCE
+ * @returns {string} The Auth0 authorise URL with PKCE
  */
 function getAuthenticationURL() {
     if (!auth0Domain || !clientId) {
