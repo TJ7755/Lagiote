@@ -686,7 +686,7 @@ export function gradeTypedAnswer(card, userAnswer, options = {}) {
         normalizedUser = normalizedUser.replace(/[^\w\s]/g, '');
     }
 
-    // Trim and normalize whitespace
+    // Trim and normalise whitespace
     normalizedExpected = normalizedExpected.trim().replace(/\s+/g, ' ');
     normalizedUser = normalizedUser.trim().replace(/\s+/g, ' ');
 

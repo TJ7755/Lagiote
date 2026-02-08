@@ -32,7 +32,7 @@ export function createMarkSchemeTestHarness(markScheme, question) {
         testResponse(response, options = {}) {
             const startTime = performance.now();
             
-            // Normalize text response if needed
+            // Normalise text response if needed
             const normalizedResponse = typeof response === 'string' 
                 ? normalizeTextResponse(response, question?.type)
                 : response;

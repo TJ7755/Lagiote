@@ -200,7 +200,7 @@ export async function generateTestForm(blueprint, allDecks, knowledgeState = {},
         }
 
         // Apply Topic Weights (Weighted Sampling)
-        // If topicWeights are present, we prioritize cards with those topics.
+        // If topicWeights are present, we prioritise cards with those topics.
         // For simplicity in this version: Shuffle, but sort by weight bucket?
         // Or just simple shuffle for now.
         

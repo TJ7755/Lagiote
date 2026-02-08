@@ -330,7 +330,7 @@ export function mapPCorrectToOutcomeDistribution(pCorrect, confidence) {
         pEasy = (pEasy * (1 - uncertainty)) + (uSuccess * uncertainty);
     }
 
-    // Normalize
+    // Normalise
     const total = pAgain + pHard + pGood + pEasy;
     const norm = 1 / total;
     

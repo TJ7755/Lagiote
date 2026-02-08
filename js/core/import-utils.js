@@ -128,7 +128,7 @@ export function parseImportText(text, options = {}) {
             const data = JSON.parse(text);
             let importedCards = Array.isArray(data) ? data : (data.cards || []);
             
-            // Normalize JSON cards
+            // Normalise JSON cards
             const normalizedCards = importedCards.map(c => {
                 const front = c.front || c.question || c.term || '';
                 const back = c.back || c.answer || c.definition || '';

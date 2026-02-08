@@ -10143,7 +10143,7 @@ if (typeof compressImage === 'undefined') {
     // Keep a fallback to avoid runtime errors when utils.js is not yet loaded
     async function compressImage(dataUrl, qualityOrMaxSize = undefined, maxSizeKB = undefined) {
         if (typeof window !== 'undefined' && typeof window.compressImage === 'function') {
-            // Normalize call: if second arg is > 10 we assume it's maxSizeMB so convert to KB
+            // Normalise call: if second arg is > 10 we assume it's maxSizeMB so convert to KB
             if (typeof qualityOrMaxSize === 'number' && qualityOrMaxSize > 10) {
                 const kb = Math.floor(qualityOrMaxSize * 1024);
                 return window.compressImage(dataUrl, undefined, kb);
