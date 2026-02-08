@@ -107,7 +107,7 @@ describe('AI Grading Assistant - Full Evidence Extraction', () => {
             
             Second supporting point with analysis.
             
-            Conclusion summarizing findings.
+            Conclusion summarising findings.
         `;
         
         const evidence = extractEvidence(text, 'essay');

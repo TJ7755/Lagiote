@@ -8142,7 +8142,7 @@ function loadCDNScript(src, onload) {
 
                         if (!result) throw new Error('Empty response from server function.');
 
-                        // Normalize response to include deckName if missing
+                        // Normalise response to include deckName if missing
                         const deckName = result.deckName || "AI Generated Deck";
 
                         if (result.type === 'flashcard' && Array.isArray(result.cards)) {

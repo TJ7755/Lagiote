@@ -24,7 +24,7 @@ The Cloze template now includes:
 ### 2. JavaScript Functions
 
 #### `getClozeNumberForCard(cardId)`
-- Analyzes textarea content to find the highest cloze number
+- Analyses textarea content to find the highest cloze number
 - Returns next number to use for new deletions
 - Ensures sequential numbering without gaps
 
@@ -43,8 +43,8 @@ The Cloze template now includes:
 
 ### 3. Professional Styling
 
-#### Color & Theme
-- Uses app's accent color (`--accent-color: #667eea`)
+#### Colour & Theme
+- Uses app's accent colour (`--accent-color: #667eea`)
 - Gradient backgrounds for visual hierarchy
 - Consistent with existing design system
 
@@ -150,7 +150,7 @@ The Cloze template now includes:
 8. **Error Prevention** - Guided input prevents syntax mistakes
 
 ## Future Enhancements (Optional)
-- Color-code different cloze numbers in textarea
+- Colour-code different cloze numbers in textarea
 - Undo/redo functionality
 - Keyboard shortcuts for power users
 - Drag-to-select cloze creation

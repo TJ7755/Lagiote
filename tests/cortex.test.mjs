@@ -153,7 +153,7 @@ async function testScoreCardSensitivity() {
     
     console.log(`DEBUG: Fast Score: ${scoreFast}, Slow Score: ${scoreSlow}`);
 
-    assert.ok(scoreFast > scoreSlow, 'Fast cards should be prioritized given equal gain (Gain/Time)');
+    assert.ok(scoreFast > scoreSlow, 'Fast cards should be prioritised given equal gain (Gain/Time)');
     
     console.log(`Fast Score: ${scoreFast.toFixed(4)}, Slow Score: ${scoreSlow.toFixed(4)}`);
     console.log('ScoreCard Sensitivity passed');

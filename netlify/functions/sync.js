@@ -6,7 +6,7 @@ exports.handler = async (event, context) => {
         return {
             statusCode: 401,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ error: 'Unauthorized' })
+            body: JSON.stringify({ error: 'Unauthorised' })
         };
     }
 

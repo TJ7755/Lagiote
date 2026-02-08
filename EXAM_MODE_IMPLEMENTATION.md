@@ -1,7 +1,7 @@
 # Exam Mode Implementation Summary
 
 ## Overview
-This document summarizes the Exam Mode UI implementation completed in this PR.
+This document summarises the Exam Mode UI implementation completed in this PR.
 
 ## What Was Done
 
@@ -12,10 +12,10 @@ This document summarizes the Exam Mode UI implementation completed in this PR.
   - The module properly exports functions to the window object
 
 ### 2. Test Suite Enhancement (New)
-- **Created comprehensive weak area prioritization tests**
+- **Created comprehensive weak area prioritisation tests**
   - File: `tests/exam-weak-area-prioritization.test.mjs`
   - 20 new unit tests covering all aspects of the question ranking algorithm
-  - Tests verify correct prioritization of:
+  - Tests verify correct prioritisation of:
     - Low mastery atoms (knowledge gaps)
     - Urgent atoms (will decay before exam)
     - Time-efficient practice (value per minute)
@@ -80,7 +80,7 @@ The following were already fully implemented and working:
 The implementation follows the three-layer separation:
 1. **State Model** (atom-dynamics.js) - Handles decay and predictions
 2. **Assessment Model** (exam-mode.js) - Question bank and mark schemes
-3. **Policy Model** (Cortex integration) - Selection and optimization
+3. **Policy Model** (Cortex integration) - Selection and optimisation
 
 ### Key Files
 - `js/core/exam/exam-mode.js` - Core exam engine (stable)
@@ -106,7 +106,7 @@ Dashboard → Exam Hub Button → openExamModeHub()
 
 The test suite identified two potential improvements:
 1. **Difficulty-based filtering** - Currently, all difficulty levels are included in ranking. Future enhancement could filter out questions that are too easy or too hard relative to current mastery.
-2. **Depth-based prioritization** - Currently, depth dimension is not used in value calculation. Future enhancement could weight deep understanding questions more heavily.
+2. **Depth-based prioritisation** - Currently, depth dimension is not used in value calculation. Future enhancement could weight deep understanding questions more heavily.
 
 These are documented but not required for the current implementation.
 
