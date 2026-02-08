@@ -4317,7 +4317,7 @@ async function exportDeck(deckId, event) {
     }
 
     const exportPayload = {
-        deck: JSON.parse(JSON.stringify(deck)),
+        deck: structuredClone(deck),
         knowledgeStateData: knowledgeStateForDeck
     };
 

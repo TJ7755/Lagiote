@@ -2,6 +2,9 @@ import { initDB, getDataFromDB, saveDataToDB } from '../db.js';
 
 const SUPPORTED_KINDS = new Set(['mcq_single', 'mcq_multi', 'numeric', 'short_text']);
 
+// Cache for compiled regex patterns to avoid recompilation
+const regexCache = new Map();
+
 export function createMarkScheme(options = {}) {
     return {
         id: options.id || generateId(),
@@ -270,7 +273,13 @@ function gradeShortText(grading, response, pointMarks) {
         const regexes = Array.isArray(grading.regexes) ? grading.regexes : [];
         const regexMatch = regexes.some(pattern => {
             try {
-                return new RegExp(pattern).test(normalisedResponse);
+                // Use cached regex if available
+                let regex = regexCache.get(pattern);
+                if (!regex) {
+                    regex = new RegExp(pattern);
+                    regexCache.set(pattern, regex);
+                }
+                return regex.test(normalisedResponse);
             } catch {
                 return false;
             }

@@ -21,10 +21,10 @@ import { validateMarkScheme } from './calibration-harness.js';
  */
 export function createAtomEditor(initialAtom = null) {
     // Deep-copy initial atom to prevent mutation
-    const initialSnapshot = initialAtom ? JSON.parse(JSON.stringify(initialAtom)) : null;
+    const initialSnapshot = initialAtom ? structuredClone(initialAtom) : null;
     
     function cloneInitial() {
-        return initialSnapshot ? { ...createAtom({}), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createAtom({});
+        return initialSnapshot ? { ...createAtom({}), ...structuredClone(initialSnapshot) } : createAtom({});
     }
     
     const state = {
@@ -192,10 +192,10 @@ export function createAtomEditor(initialAtom = null) {
  */
 export function createQuestionEditor(initialQuestion = null) {
     // Deep-copy initial question to prevent mutation
-    const initialSnapshot = initialQuestion ? JSON.parse(JSON.stringify(initialQuestion)) : null;
+    const initialSnapshot = initialQuestion ? structuredClone(initialQuestion) : null;
 
     function cloneInitial() {
-        return initialSnapshot ? { ...createQuestion({ type: 'mcq_single' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createQuestion({ type: 'mcq_single' });
+        return initialSnapshot ? { ...createQuestion({ type: 'mcq_single' }), ...structuredClone(initialSnapshot) } : createQuestion({ type: 'mcq_single' });
     }
 
     const state = {
@@ -417,10 +417,10 @@ export function createQuestionEditor(initialQuestion = null) {
  */
 export function createMarkSchemeEditor(initialScheme = null) {
     // Deep-copy initial scheme to prevent mutation
-    const initialSnapshot = initialScheme ? JSON.parse(JSON.stringify(initialScheme)) : null;
+    const initialSnapshot = initialScheme ? structuredClone(initialScheme) : null;
 
     function cloneInitial() {
-        return initialSnapshot ? { ...createMarkScheme({ schemeType: 'points' }), ...JSON.parse(JSON.stringify(initialSnapshot)) } : createMarkScheme({ schemeType: 'points' });
+        return initialSnapshot ? { ...createMarkScheme({ schemeType: 'points' }), ...structuredClone(initialSnapshot) } : createMarkScheme({ schemeType: 'points' });
     }
 
     const state = {

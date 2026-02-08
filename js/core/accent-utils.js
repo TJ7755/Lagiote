@@ -38,11 +38,10 @@ function buildDeckAccentMetadata(deck) {
     const uniqueChars = new Set();
 
     for (const card of cards) {
-        const snippets = [card?.answer, card?.question];
-        for (const snippet of snippets) {
-            for (const char of extractAccentedCharacters(snippet)) {
-                uniqueChars.add(char);
-            }
+        // Combine answer and question into a single string to reduce iterations
+        const combinedText = `${card?.answer ?? ''}\n${card?.question ?? ''}`;
+        for (const char of extractAccentedCharacters(combinedText)) {
+            uniqueChars.add(char);
         }
     }
 
