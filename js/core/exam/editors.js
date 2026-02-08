@@ -468,8 +468,7 @@ export function createMarkSchemeEditor(initialScheme = null) {
          */
         addPoint(pointData = {}) {
             const point = createPointsSchemePoint(pointData);
-            // Don't delete auto-generated IDs - let validation flag them
-            // Only delete if user explicitly wants no ID (which is unusual)
+            // Keep any auto-generated or existing IDs; let validation flag any issues
             state.scheme.points = [...(state.scheme.points || []), point];
             state.scheme.updatedAt = new Date().toISOString();
             this.validate();

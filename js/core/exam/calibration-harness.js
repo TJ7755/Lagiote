@@ -182,10 +182,11 @@ export function calculateCohensKappa(rater1Marks, rater2Marks) {
     
     // Cohen's Kappa
     let kappa;
-    if (pe === 1) {
-        // Degenerate case: expected agreement is perfect, avoid division by zero.
+    const epsilon = 1e-12;
+    if (pe >= 1 - epsilon) {
+        // Degenerate case: expected agreement is perfect (or extremely close), avoid division by zero.
         // Define kappa as 1 when observed agreement is also perfect, otherwise 0.
-        kappa = po === 1 ? 1 : 0;
+        kappa = po >= 1 - epsilon ? 1 : 0;
     } else {
         kappa = (po - pe) / (1 - pe);
     }
