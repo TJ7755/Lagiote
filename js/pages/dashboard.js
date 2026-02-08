@@ -6484,9 +6484,9 @@ function getBaselineChoice(candidates, knowledgeMap) {
         const dueA = stateA?.fsrs?.due ? new Date(stateA.fsrs.due).getTime() : null;
         const dueB = stateB?.fsrs?.due ? new Date(stateB.fsrs.due).getTime() : null;
         
-        if (dueA && dueB) return dueA - dueB;
-        if (dueA) return -1;
-        if (dueB) return 1;
+        if (dueA !== null && dueB !== null) return dueA - dueB;
+        if (dueA !== null) return -1;
+        if (dueB !== null) return 1;
         
         const lastA = stateA?.lastReviewed ? new Date(stateA.lastReviewed).getTime() : 0;
         const lastB = stateB?.lastReviewed ? new Date(stateB.lastReviewed).getTime() : 0;
@@ -6499,20 +6499,23 @@ function getBaselineChoice(candidates, knowledgeMap) {
     const firstState = sorted[0].knowledgeState;
     const firstDue = firstState?.fsrs?.due ? new Date(firstState.fsrs.due).getTime() : null;
     const firstLast = firstState?.lastReviewed ? new Date(firstState.lastReviewed).getTime() : 0;
+    const firstHasDue = firstDue !== null;
     
     // Tie-group detection matches comparator logic:
-    // If first card has due, group by due only; otherwise group by lastReviewed
+    // Cards are in the same tie group only if:
+    // - They either both have a due or both do not (due presence),
+    // - Their due timestamps are equal (including both null),
+    // - Their lastReviewed timestamps are equal.
     while (tieGroupEnd < sorted.length) {
         const cand = sorted[tieGroupEnd];
         const candState = cand.knowledgeState;
         const candDue = candState?.fsrs?.due ? new Date(candState.fsrs.due).getTime() : null;
         const candLast = candState?.lastReviewed ? new Date(candState.lastReviewed).getTime() : 0;
+        const candHasDue = candDue !== null;
         
-        // If first card has due, check due only; if no due, check lastReviewed only
-        if (firstDue !== null) {
-            if (candDue !== firstDue) break;
-        } else {
-            if (candLast !== firstLast) break;
+        // Break when comparator would distinguish these cards
+        if (candHasDue !== firstHasDue || candDue !== firstDue || candLast !== firstLast) {
+            break;
         }
         tieGroupEnd++;
     }
