@@ -2712,7 +2712,27 @@ function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
         ? [...cardStats].sort((a, b) => a.order - b.order)
         : cardStats;
 
-    let tableHTML = `
+    const tableRows = cardsForStats.map(stat => {
+        const stabilityText = typeof stat.stability === 'number' ? stat.stability.toFixed(2) : 'N/A';
+        const retentionText = typeof stat.retention === 'number'
+            ? `${(stat.retention * 100).toFixed(1)}%`
+            : 'N/A';
+
+        return `
+                    <tr>
+                        ${isSequence ? `<td>${escapeHtml(String(stat.order))}</td>` : ''}
+                        <td title="${escapeHtml(String(stat.question))}">${escapeHtml(String(stat.question))}</td>
+                        <td>${escapeHtml(String(stat.correctPercentage.toFixed(1)))}%</td>
+                        <td>${escapeHtml(String((stat.avgIQS).toFixed(2)))}</td>
+                        <td>${escapeHtml(String(stabilityText))}</td>
+                        <td>${escapeHtml(String(retentionText))}</td>
+                        <td>${escapeHtml(String(stat.lastReviewed))}</td>
+                        <td>${escapeHtml(String(stat.totalInteractions))}</td>
+                    </tr>
+                `;
+    });
+
+    const tableHTML = `
                 <table class="stats-table">
                     <thead>
                         <tr>
@@ -2727,36 +2747,21 @@ function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
                         </tr>
                     </thead>
                     <tbody>
+                        ${tableRows.join('')}
+                    </tbody>
+                </table>
             `;
-
-    cardsForStats.forEach(stat => {
-        const stabilityText = typeof stat.stability === 'number' ? stat.stability.toFixed(2) : 'N/A';
-        const retentionText = typeof stat.retention === 'number'
-            ? `${(stat.retention * 100).toFixed(1)}%`
-            : 'N/A';
-
-        tableHTML += `
-                    <tr>
-                        ${isSequence ? `<td>${escapeHtml(String(stat.order))}</td>` : ''}
-                        <td title="${escapeHtml(String(stat.question))}">${escapeHtml(String(stat.question))}</td>
-                        <td>${escapeHtml(String(stat.correctPercentage.toFixed(1)))}%</td>
-                        <td>${escapeHtml(String((stat.avgIQS).toFixed(2)))}</td>
-                        <td>${escapeHtml(String(stabilityText))}</td>
-                        <td>${escapeHtml(String(retentionText))}</td>
-                        <td>${escapeHtml(String(stat.lastReviewed))}</td>
-                        <td>${escapeHtml(String(stat.totalInteractions))}</td>
-                    </tr>
-                `;
-    });
-
-    tableHTML += '</tbody></table>';
     resultContainer.innerHTML = tableHTML;
 }
 
 function renderHistograms(logs) {
-    const latencies = logs.map(log => log.latency).filter(l => l !== null);
-    const fluencies = logs.map(log => log.fluency).filter(f => f > 0);
-    const corrections = logs.map(log => log.corrections);
+    // Use reduce for single-pass extraction
+    const { latencies, fluencies, corrections } = logs.reduce((acc, log) => {
+        if (log.latency !== null) acc.latencies.push(log.latency);
+        if (log.fluency > 0) acc.fluencies.push(log.fluency);
+        acc.corrections.push(log.corrections);
+        return acc;
+    }, { latencies: [], fluencies: [], corrections: [] });
 
     createBarChart('latencyHistogram', 'Recall Latency', latencies, 'rgba(102, 126, 234, 0.6)');
     createBarChart('fluencyHistogram', 'Answer Fluency', fluencies, 'rgba(56, 178, 172, 0.6)');
@@ -2941,13 +2946,16 @@ function setupErrorAnalysisAndDeckStats(allLogs, allKnowledgeStates) {
     const deckSelect = document.getElementById('errorDeckSelect');
     const cardSelect = document.getElementById('errorCardSelect');
 
+    // Use DocumentFragment for better DOM performance
     deckSelect.innerHTML = '<option value="">-- Select a Deck --</option>';
+    const deckFragment = document.createDocumentFragment();
     Object.values(decks).forEach(deck => {
         const option = document.createElement('option');
         option.value = deck.id;
         option.textContent = deck.name;
-        deckSelect.appendChild(option);
+        deckFragment.appendChild(option);
     });
+    deckSelect.appendChild(deckFragment);
 
     deckSelect.onchange = () => {
         const deckId = deckSelect.value;
@@ -2959,13 +2967,15 @@ function setupErrorAnalysisAndDeckStats(allLogs, allKnowledgeStates) {
                 ? [...selectedDeck.cards].sort((a, b) => a.order - b.order)
                 : selectedDeck.cards;
 
+            const cardFragment = document.createDocumentFragment();
             cardsToDisplay.forEach(card => {
                 const option = document.createElement('option');
                 option.value = card.id;
                 const orderPrefix = selectedDeck.typeHint === 'Sequence' ? `[#${card.order}] ` : '';
                 option.textContent = orderPrefix + card.question.substring(0, 50) + '...';
-                cardSelect.appendChild(option);
+                cardFragment.appendChild(option);
             });
+            cardSelect.appendChild(cardFragment);
         }
         generateErrorAnalysisReport(allLogs, null);
 
@@ -4317,7 +4327,7 @@ async function exportDeck(deckId, event) {
     }
 
     const exportPayload = {
-        deck: JSON.parse(JSON.stringify(deck)),
+        deck: structuredClone(deck),
         knowledgeStateData: knowledgeStateForDeck
     };
 

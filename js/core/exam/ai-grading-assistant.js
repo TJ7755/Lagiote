@@ -13,6 +13,9 @@
 
 import { generateUUID } from './exam-mode.js';
 
+// Cache for compiled numeric value regex patterns
+const numericRegexCache = new Map();
+
 // --- Utility Functions ---
 
 /**
@@ -345,10 +348,15 @@ function analyzePointMatch(point, evidence, evidenceText, question) {
             // Check JSON-stringified evidence for the numeric value using an improved regex
             // that correctly matches numbers (including negatives) within JSON punctuation.
             const targetValueStr = String(targetValue);
-            const escapedTargetValue = escapeRegExp(targetValueStr);
-            // Match the number when it is at the start of the string or preceded by a non-digit/non-minus
-            // character, and ensure it is not directly followed by another digit or decimal point.
-            const valuePattern = new RegExp(`(?:^|[^0-9\\-])${escapedTargetValue}(?=$|[^0-9\\.])`);
+            // Use cached regex pattern if available
+            let valuePattern = numericRegexCache.get(targetValueStr);
+            if (!valuePattern) {
+                const escapedTargetValue = escapeRegExp(targetValueStr);
+                // Match the number when it is at the start of the string or preceded by a non-digit/non-minus
+                // character, and ensure it is not directly followed by another digit or decimal point.
+                valuePattern = new RegExp(`(?:^|[^0-9\\-])${escapedTargetValue}(?=$|[^0-9\\.])`);
+                numericRegexCache.set(targetValueStr, valuePattern);
+            }
             if (valuePattern.test(evidenceText)) {
                 confidence = confidence === 'low' ? 'medium' : confidence;
                 reasons.push(`Value ${targetValue} appears in response text`);
