@@ -134,7 +134,7 @@ async function testStratifiedBalance() {
             assert.ok(Math.abs(s.a - s.b) <= 1, `Stratum ${s.q} in ${deckId} should be balanced`);
         }
     }
-    console.log('testStratifiedBalance ✅');
+    console.log('testStratifiedBalance PASSED');
 }
 
 async function testPreserveExisting() {
@@ -159,7 +159,7 @@ async function testPreserveExisting() {
     assert.strictEqual(d.total, 50);
     assert.ok(Math.abs(d.assignedA - d.assignedB) <= 1);
     
-    console.log('testPreserveExisting ✅');
+    console.log('testPreserveExisting PASSED');
 }
 
 async function testRandomMethodStillWorks() {
@@ -170,7 +170,7 @@ async function testRandomMethodStillWorks() {
     assert.strictEqual(stats.method, 'random_v1');
     assert.strictEqual(Object.keys(assignment).length, 100);
     
-    console.log('testRandomMethodStillWorks ✅');
+    console.log('testRandomMethodStillWorks PASSED');
 }
 
 (async () => {

@@ -53,15 +53,15 @@ The following were already fully implemented and working:
 
 ## Verification Checklist
 
-✅ All code builds successfully
-✅ All 82 tests pass (62 existing + 20 new)
-✅ Code review passed with no issues
-✅ Security check (CodeQL) passed with no vulnerabilities
-✅ British English used throughout ("practise" not "practice")
-✅ No emojis in UI (clean professional icons only)
-✅ Keyboard shortcuts implemented for all primary actions
-✅ Functions properly exported to window object
-✅ Buttons properly wired to functions
+- [x] All code builds successfully
+- [x] All 82 tests pass (62 existing + 20 new)
+- [x] Code review passed with no issues
+- [x] Security check (CodeQL) passed with no vulnerabilities
+- [x] British English used throughout ("practise" not "practice")
+- [x] No emojis in UI (clean professional icons only)
+- [x] Keyboard shortcuts implemented for all primary actions
+- [x] Functions properly exported to window object
+- [x] Buttons properly wired to functions
 
 ## How to Access Exam Mode
 

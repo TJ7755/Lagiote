@@ -245,7 +245,7 @@ test('rankQuestionsForPractice does not filter by difficulty appropriately yet',
     // Currently, the algorithm ranks by masteryGap * marks * transferability * fragility
     // It doesn't filter by difficulty match to current mastery
     // All three questions have same atom, so ranking depends on other factors
-    // This test documents current behavior - improvement needed in future
+    // This test documents current behaviour - improvement needed in future
     assert.ok(ranked.length === 3, 'All questions should be included in ranking');
     // Note: Optimal difficulty matching is a future enhancement
 });
@@ -376,7 +376,7 @@ test('rankQuestionsForPractice values high-transfer atoms', () => {
         'Question testing high-transfer atom should rank higher');
 });
 
-test('rankQuestionsForPractice prioritizes surface-level atoms (current behavior)', () => {
+test('rankQuestionsForPractice prioritises surface-level atoms (current behaviour)', () => {
     const atoms = new Map([
         ['surface-atom', createAtom({ 
             id: 'surface-atom', 
@@ -412,7 +412,7 @@ test('rankQuestionsForPractice prioritizes surface-level atoms (current behavior
     
     // Currently, depth is not used in the value calculation
     // Both questions have same mastery, so they rank similarly
-    // This test documents current behavior - depth weighting is a future enhancement
+    // This test documents current behaviour - depth weighting is a future enhancement
     assert.ok(ranked.length === 2, 'Both questions should be in ranking');
     // Note: Depth-based prioritization is a future enhancement
 });

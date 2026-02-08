@@ -46,7 +46,7 @@ async function testOutcomeMapping() {
     const pAgain = probsMastery.find(p => p.rating === 'Again').prob;
     
     assert.ok(Math.abs(probsMastery.reduce((a,b)=>a+b.prob,0) - 1.0) < 0.001, 'Must sum to 1');
-    assert.ok(pEasy > 0.5, 'Mastery should favor Easy');
+    assert.ok(pEasy > 0.5, 'Mastery should favour Easy');
     assert.ok(pAgain < 0.05, 'Mastery should have low Again prob');
     
     // 2. Low Confidence, Mid pCorrect (Uncertainty)
@@ -68,7 +68,7 @@ async function testOutcomeMapping() {
     
     assert.ok(failLow > failHigh, 'Lower pCorrect must imply higher failure prob');
     
-    console.log('Outcome Mapping ✅');
+    console.log('Outcome Mapping PASSED');
 }
 
 async function testImplicitInference() {
@@ -117,7 +117,7 @@ async function testImplicitInference() {
     const explicitWrong = inferRetrievalOutcome({ recallLatency: 1000 }, {}, false);
     assert.ok(explicitWrong.pCorrect <= 0.05, 'Explicit wrong should clamp pCorrect');
     
-    console.log('Implicit Inference ✅');
+    console.log('Implicit Inference PASSED');
 }
 
 async function testScoreCardSensitivity() {
@@ -156,7 +156,7 @@ async function testScoreCardSensitivity() {
     assert.ok(scoreFast > scoreSlow, 'Fast cards should be prioritized given equal gain (Gain/Time)');
     
     console.log(`Fast Score: ${scoreFast.toFixed(4)}, Slow Score: ${scoreSlow.toFixed(4)}`);
-    console.log('ScoreCard Sensitivity ✅');
+    console.log('ScoreCard Sensitivity PASSED');
 }
 
 async function testUncertaintyPenalty() {
@@ -182,7 +182,7 @@ async function testUncertaintyPenalty() {
     const inf = inferRetrievalOutcome({ recallLatency: 2500, attemptCount: 1 }, { latency: 2500 });
     assert.ok(inf.volatility >= 0.1, 'Volatility should be defined');
     
-    console.log('Uncertainty Penalty logic exists (verified via inference check) ✅');
+    console.log('Uncertainty Penalty logic exists (verified via inference check) PASSED');
 }
 
 async function testConfidenceMonotonicity() {
@@ -205,7 +205,7 @@ async function testConfidenceMonotonicity() {
     assert.ok(narrowWidth < wideWidth, 'Narrower interval should reduce uncertainty');
     assert.ok(narrow.confidence > wide.confidence, 'Confidence should decrease as interval widens');
 
-    console.log('Confidence Monotonicity ✅');
+    console.log('Confidence Monotonicity PASSED');
 }
 
 async function testCalibrationScaling() {
@@ -270,7 +270,7 @@ async function testCalibrationScaling() {
     
     assert.ok(remRelDelta < recallRelDelta, `Remediation reliability delta (${remRelDelta}) should be smaller than recall (${recallRelDelta})`);
     
-    console.log('Calibration Scaling ✅');
+    console.log('Calibration Scaling PASSED');
 }
 
 async function run() {

@@ -31,5 +31,5 @@ files.forEach(file => {
 });
 
 if (!foundErrors) {
-  console.log('✓ No syntax errors found in any of the checked files.');
+  console.log('No syntax errors found in any of the checked files.');
 }

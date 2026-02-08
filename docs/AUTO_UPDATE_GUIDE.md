@@ -109,7 +109,7 @@ Notify user "Update ready"
     ↓
 User restarts app
     ↓
-Update installed ✓
+Update installed
 ```
 
 ## Important Notes

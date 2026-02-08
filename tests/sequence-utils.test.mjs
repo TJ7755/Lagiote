@@ -20,7 +20,7 @@ function testLegacySequenceStepText() {
         assert.ok(card.question && card.question.trim().length > 0);
         assert.strictEqual(card.question, expected);
     });
-    console.log('legacy sequence step text ✅');
+    console.log('legacy sequence step text PASSED');
 }
 
 function run() {

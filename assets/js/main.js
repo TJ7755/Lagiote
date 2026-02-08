@@ -728,7 +728,7 @@ function loadCDNScript(src, onload) {
         };
 
         function handleGuestToUserTransition() {
-            console.log('🔧 handleGuestToUserTransition called – no migration logic defined yet.');
+            console.log('handleGuestToUserTransition called - no migration logic defined yet.');
         }
 
         );
@@ -1035,7 +1035,7 @@ function loadCDNScript(src, onload) {
             problemCardsContainer.innerHTML = '';
 
             if (cards.length === 0) {
-                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards to analyze for global problems.</p>';
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards to analyse for global problems.</p>';
                 return;
             }
 
@@ -1847,13 +1847,6 @@ function loadCDNScript(src, onload) {
                     }
                 }
             });
-
-            /* 
-            // Old direct listener removed in favor of delegation
-            const profileBtn = document.getElementById('userProfileBtn');
-            const profileDropdown = document.getElementById('userProfileDropdown');
-            if (profileBtn) { ... } 
-            */
 
             document.getElementById('deckTypeHint').addEventListener('change', (e) => {
                 toggleEditorView(e.target.value);
@@ -3149,7 +3142,7 @@ function loadCDNScript(src, onload) {
             problemCardsContainer.innerHTML = ''; // Clear previous content
 
             if (!deck || deck.cards.length === 0) {
-                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck to analyze.</p>';
+                problemCardsContainer.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">No cards in this deck to analyse.</p>';
                 return;
             }
 

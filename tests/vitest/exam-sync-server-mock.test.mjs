@@ -309,7 +309,7 @@ describe('Sync Server Mock - Error Handling', () => {
         const client = createMockSyncClient(server);
         
         // Note: The mock doesn't actually support error mode in the current implementation
-        // This test documents expected behavior
+        // This test documents expected behaviour
         
         client.queueOperation(OP_TYPES.ATOM_CREATE, 'a1', {});
         const result = await client.push();

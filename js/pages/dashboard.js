@@ -3557,13 +3557,6 @@ function setupEventListeners() {
         }
     });
 
-    /* 
-    // Old direct listener removed in favor of delegation
-    const profileBtn = document.getElementById('userProfileBtn');
-    const profileDropdown = document.getElementById('userProfileDropdown');
-    if (profileBtn) { ... } 
-    */
-
     bind('logoutBtn', 'click', async (e) => {
         e.preventDefault();
         console.log('Logout button clicked');
@@ -11329,7 +11322,7 @@ async function renderEvalPanel(container) {
                 
                 const overallSkew = totalCards > 0 ? Math.abs(totalA - totalB) / totalCards : 0;
                 if (overallSkew > 0.05) {
-                    balanceHtml += `<p style="color: var(--error-color); font-size: 0.8rem; margin-top: 5px;">⚠️ Overall assignment skew is high (${(overallSkew*100).toFixed(1)}%)</p>`;
+                    balanceHtml += `<p style="color: var(--error-color); font-size: 0.8rem; margin-top: 5px;">Warning: Overall assignment skew is high (${(overallSkew*100).toFixed(1)}%)</p>`;
                 }
                 
                 balanceHtml += `
@@ -13194,7 +13187,7 @@ function renderDocumentList() {
                     <div class="document-item" data-doc-id="${doc.id}">
                         <div class="document-item-header">
                             <span class="document-name">
-                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? '✓' : 'FILE')}</span>
+                                <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? 'DONE' : 'FILE')}</span>
                                 ${doc.name}
                             </span>
                             <button class="remove-doc-btn" onclick="removeDocument(${index})">&times;</button>
@@ -14931,7 +14924,7 @@ function renderPlanAnalytics(plan, knowledgeMap) {
         const analyticsContent = document.getElementById('planAnalyticsContent');
         analyticsContent.innerHTML = `
                     <div class="no-decks" style="padding: 40px;">
-                        <p>This plan has no cards to analyze.</p>
+                        <p>This plan has no cards to analyse.</p>
                         <p style="font-size: 0.9rem; margin-top: 10px;">Edit the plan to add some decks.</p>
                     </div>
                 `;

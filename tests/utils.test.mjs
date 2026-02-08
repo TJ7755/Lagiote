@@ -5,7 +5,7 @@ function testLevenshtein() {
     assert.strictEqual(levenshteinDistance('kitten', 'sitting'), 3);
     assert.strictEqual(levenshteinDistance('flaw', 'lawn'), 2);
     assert.strictEqual(levenshteinDistance('', ''), 0);
-    console.log('levenshteinDistance ✅');
+    console.log('levenshteinDistance PASSED');
 }
 
 function testShuffle() {
@@ -13,19 +13,19 @@ function testShuffle() {
     const shuffled = shuffleArray(arr);
     assert.strictEqual(arr.length, shuffled.length);
     assert.deepStrictEqual(arr.sort(), [...shuffled].sort());
-    console.log('shuffleArray ✅');
+    console.log('shuffleArray PASSED');
 }
 
 function testGetQueryParam() {
     const val = getQueryParam('deckId', '?deckId=abc123&mode=review');
     assert.strictEqual(val, 'abc123');
-    console.log('getQueryParam ✅');
+    console.log('getQueryParam PASSED');
 }
 
 function testIQS() {
     const score = calculateIQS({ recallLatency: 1000, answerFluency: 12, totalCorrections: 0, attemptCount: 1 });
     assert.ok(score >= 0 && score <= 1);
-    console.log('calculateIQS ✅');
+    console.log('calculateIQS PASSED');
 }
 
 function run() {

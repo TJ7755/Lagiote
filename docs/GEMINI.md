@@ -62,7 +62,7 @@ The project is managed with npm. The key commands are defined in `package.json`.
 
 ## Development Conventions
 
--   **Modular JavaScript:** The frontend code is organized into modules located in `assets/js/`.
+-   **Modular JavaScript:** The frontend code is organised into modules located in `assets/js/`.
     -   `main.js`: The main entry point for the renderer process, containing the bulk of the application logic and event listeners.
     -   `state.js`: Defines and manages the application's in-memory state.
     -   `db.js`: A wrapper for all IndexedDB interactions.

@@ -27,7 +27,7 @@ import {
     }
     assert.strictEqual(queue.length, 20);
     assert.strictEqual(queue[0].cardId, 'c6'); // Oldest dropped (c1-c5 dropped)
-    console.log('Test 1 ✅');
+    console.log('Test 1 PASSED');
 }
 
 // Test 2: cooldown gating
@@ -41,7 +41,7 @@ import {
     
     const cooldown = scheduleCooldown(now, 60000);
     assert.strictEqual(cooldown, 61000);
-    console.log('Test 2 ✅');
+    console.log('Test 2 PASSED');
 }
 
 // Test 3: popNextRemediation ordering
@@ -64,7 +64,7 @@ import {
     
     result = popNextRemediation(queue);
     assert.strictEqual(result.task.cardId, 'c1');
-    console.log('Test 3 ✅');
+    console.log('Test 3 PASSED');
 }
 
 // Test 4: lure weighting increases selection frequency
@@ -93,7 +93,7 @@ import {
     // Expected P(A) = 6/9 = 0.66
     const ratio = aCount / samples;
     assert.ok(ratio > 0.5, `A should appear frequently, got ${ratio}`);
-    console.log('Test 4 ✅');
+    console.log('Test 4 PASSED');
 }
 
 // Test 5: remediation stats update
@@ -117,5 +117,5 @@ import {
     assert.strictEqual(stats.remediationAttempts, 2);
     assert.strictEqual(stats.remediationCorrect, 1);
     assert.ok(stats.recognitionDependenceEma < beforeCorrect);
-    console.log('Test 5 ✅');
+    console.log('Test 5 PASSED');
 }

@@ -212,7 +212,7 @@ export function createMarkSchemeTestHarness(markScheme, question) {
                     <section class="validation-section">
                         <h3>Structure Validation</h3>
                         <p class="status ${validation.valid ? 'valid' : 'invalid'}">
-                            ${validation.valid ? '✓ Valid' : '✗ Invalid'}
+                            ${validation.valid ? 'Valid' : 'Invalid'}
                         </p>
                         ${validation.issues.length > 0 ? `
                             <div class="issues">

@@ -485,8 +485,8 @@ describe('exam engine edge cases and robustness tests', () => {
                     kind: 'mcq_single',
                     validResponses: [
                         { selectedIndex: 0 },
-                        { selectedIndices: [1] }, // Should normalize to first index
-                        2, // Should normalize to object
+                        { selectedIndices: [1] }, // Should normalise to first index
+                        2, // Should normalise to object
                     ],
                     invalidResponses: [
                         { selectedIndex: 'invalid' },
@@ -502,8 +502,8 @@ describe('exam engine edge cases and robustness tests', () => {
                     kind: 'mcq_multi',
                     validResponses: [
                         { selectedIndices: [0, 2] },
-                        [1, 3], // Should normalize to object
-                        { selectedIndex: 0 }, // Should normalize to array
+                        [1, 3], // Should normalise to object
+                        { selectedIndex: 0 }, // Should normalise to array
                     ],
                     invalidResponses: [
                         { selectedIndices: 'invalid' },
@@ -519,7 +519,7 @@ describe('exam engine edge cases and robustness tests', () => {
                     validResponses: [
                         { value: 42 },
                         { value: 42, unit: 'm/s' },
-                        42, // Should normalize to object
+                        42, // Should normalise to object
                         { value: 42, rawValue: '42' }
                     ],
                     invalidResponses: [
@@ -536,7 +536,7 @@ describe('exam engine edge cases and robustness tests', () => {
                     kind: 'short_text',
                     validResponses: [
                         { text: 'answer' },
-                        'answer', // Should normalize to object
+                        'answer', // Should normalise to object
                     ],
                     invalidResponses: [
                         { text: null },
