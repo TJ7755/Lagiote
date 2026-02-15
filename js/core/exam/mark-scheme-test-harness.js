@@ -328,7 +328,7 @@ function normalizeTextResponse(text, questionType) {
             }
             const numMatch = text.match(/^(\d)$/);
             if (numMatch) {
-                return { selectedIndex: parseInt(numMatch[1]) };
+                return { selectedIndex: parseInt(numMatch[1], 10) };
             }
             return { text: text.trim() };
             

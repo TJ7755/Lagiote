@@ -5229,7 +5229,7 @@ function getClozeNumberForCard(cardId) {
     if (!textarea) return 1;
     const text = textarea.value;
     const matches = text.match(/\{\{c(\d+)::/g);
-    return matches ? Math.max(...matches.map(m => parseInt(m.match(/\d+/)[0]))) + 1 : 1;
+    return matches ? Math.max(...matches.map(m => parseInt(m.match(/\d+/)[0], 10))) + 1 : 1;
 }
 
 function wrapSelectedInCloze(button, action) {

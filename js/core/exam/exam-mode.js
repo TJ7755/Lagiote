@@ -1216,7 +1216,7 @@ export function createExamKeyboardHandler(callbacks = {}) {
         else if (['1', '2', '3', '4'].includes(key) && !ctrl) {
             if (callbacks.selectOption) {
                 event.preventDefault();
-                callbacks.selectOption(parseInt(key) - 1);
+                callbacks.selectOption(parseInt(key, 10) - 1);
             }
         }
         

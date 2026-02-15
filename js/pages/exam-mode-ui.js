@@ -1569,7 +1569,7 @@ document.getElementById('markSchemeEditorForm')?.addEventListener('submit', asyn
     pointElements.forEach(el => {
         const code = el.querySelector('.point-code').value.trim();
         const description = el.querySelector('.point-description').value.trim();
-        const marks = parseInt(el.querySelector('.point-marks').value) || 1;
+        const marks = parseInt(el.querySelector('.point-marks').value, 10) || 1;
         const accept = el.querySelector('.point-accept').value.split(',').map(s => s.trim()).filter(s => s);
         const atomId = el.querySelector('.point-atom').value.trim();
         
@@ -1630,16 +1630,16 @@ window.closeExamModeSettingsModal = function() {
 // Settings form submission
 document.getElementById('examModeSettingsForm')?.addEventListener('submit', async function(e) {
     e.preventDefault();
-    
+
     const examDate = document.getElementById('examModeExamDate').value;
-    const targetScore = parseInt(document.getElementById('examModeTargetScore').value);
-    const totalMarks = parseInt(document.getElementById('examModeTotalMarks').value);
-    const durationMinutes = parseInt(document.getElementById('examModeDuration').value);
-    
+    const targetScore = parseInt(document.getElementById('examModeTargetScore').value, 10);
+    const totalMarks = parseInt(document.getElementById('examModeTotalMarks').value, 10);
+    const durationMinutes = parseInt(document.getElementById('examModeDuration').value, 10);
+
     const gradeBoundaries = {
-        A: parseInt(document.getElementById('examModeGradeA').value),
-        B: parseInt(document.getElementById('examModeGradeB').value),
-        C: parseInt(document.getElementById('examModeGradeC').value)
+        A: parseInt(document.getElementById('examModeGradeA').value, 10),
+        B: parseInt(document.getElementById('examModeGradeB').value, 10),
+        C: parseInt(document.getElementById('examModeGradeC').value, 10)
     };
     
     examModeUIState.examSpec = {
