@@ -3878,8 +3878,6 @@ function loadCDNScript(src, onload) {
             showToast('Settings saved!');
         }
 
-        function closeNameModal() { }
-
         async function toggleDarkMode() {
             const html = document.documentElement;
             const body = document.body;
