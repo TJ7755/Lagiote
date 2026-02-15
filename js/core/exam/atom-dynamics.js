@@ -30,7 +30,7 @@ function normaliseAtomsById(atoms) {
         atoms.forEach(atom => {
             if (!atom) return;
             const id = atom.id ?? atom.atomId;
-            if (id != null) {
+            if (id !== null && id !== undefined) {
                 map.set(id, atom);
             }
         });

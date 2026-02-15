@@ -18,7 +18,6 @@ import {
 import { parseImportText } from '../core/import-utils.js';
 import { filterByCooldownWithId } from '../core/cortex.js';
 
-console.log('Test 1: Script is starting!');
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
 if (pdfjsLib?.GlobalWorkerOptions) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
@@ -1843,15 +1842,11 @@ let practiceTestState = {
 };
 
 window.onload = async function () {
-    console.log('Script is starting! Online:', navigator.onLine);
-
     await initDB();
     await applyTestModeSetup();
-    console.log('Database initialised.');
 
     // Initialise analytics manager
     analyticsManager = new AnalyticsManager();
-    console.log('Analytics manager initialised.');
 
     // Handle Auth0 callback on web (if code/state in URL)
     if (!window.electronAPI && window.location.search.includes('code=') && window.location.search.includes('state=')) {
@@ -2649,7 +2644,6 @@ function getCanvasContextById(canvasId) {
 }
 
 function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
-    console.log('[Test 1] Raw data from DB:', allKnowledgeStates);
     const resultContainer = document.getElementById('deckStatisticsResult');
     const selectedDeck = decks[deckId];
 
@@ -2671,7 +2665,6 @@ function generateDeckStatistics(deckId, allLogs, allKnowledgeStates) {
         if (globalSettings.devMode) {
             console.log("[FSRS insights] retention used:", retention);
         }
-        console.log(`[Test 2] Lookup for card ID ${card.id}:`, knowledgeState);
         const logsForCard = allLogs.filter(log => String(log.cardID) === String(card.id));
         const correctLogs = logsForCard.filter(log => log.wasCorrect);
         const totalInteractions = logsForCard.length;
@@ -3634,7 +3627,6 @@ function setupEventListeners() {
             } else {
                 document.getElementById('searchInput')?.focus();
             }
-            console.log('[Shortcut] Search activated');
         }
 
         // Ctrl/Cmd + Shift + A: Analytics
@@ -3643,7 +3635,6 @@ function setupEventListeners() {
             if (typeof showAnalyticsView === 'function') {
                 showAnalyticsView();
             }
-            console.log('[Shortcut] Analytics opened');
         }
 
         // Ctrl/Cmd + Shift + I: Insights
@@ -3652,7 +3643,6 @@ function setupEventListeners() {
             if (typeof showInsightsView === 'function') {
                 showInsightsView();
             }
-            console.log('[Shortcut] Insights opened');
         }
 
         // Ctrl/Cmd + Shift + G: Global analytics
@@ -3661,14 +3651,12 @@ function setupEventListeners() {
             if (typeof renderGlobalAnalytics === 'function') {
                 renderGlobalAnalytics();
             }
-            console.log('[Shortcut] Global analytics opened');
         }
 
         // Ctrl/Cmd + N: New Deck
         if (isMeta && (keyLower === 'n' || code === 'KeyN')) {
             e.preventDefault();
             showEditor();
-            console.log('[Shortcut] New deck');
         }
 
         // Ctrl/Cmd + S: Sync
@@ -3677,14 +3665,12 @@ function setupEventListeners() {
             if (isOnline && getStoredSession()) {
                 loadUserDataAndSync();
             }
-            console.log('[Shortcut] Sync triggered');
         }
 
         // Ctrl/Cmd + ,: Settings
         if (isMeta && e.key === ',') {
             e.preventDefault();
             showSettings();
-            console.log('[Shortcut] Settings opened');
         }
 
         // Escape: Close modals
@@ -3692,7 +3678,6 @@ function setupEventListeners() {
             document.querySelectorAll('.modal.show').forEach(modal => {
                 modal.classList.remove('show');
             });
-            console.log('[Shortcut] Closed modals');
         }
 
         // Study mode shortcuts are handled centrally in setupKeyboardControls.
@@ -3708,15 +3693,12 @@ document.addEventListener('click', async (e) => {
     if (logoutBtn) {
         e.preventDefault();
         e.stopPropagation();
-        console.log('[LOGOUT] Button clicked');
         const dropdown = document.getElementById('userProfileDropdown');
         if (dropdown) {
             dropdown.classList.add('hidden');
         }
         try {
-            console.log('[LOGOUT] Calling logout function');
             await logout();
-            console.log('[LOGOUT] Logout completed successfully');
         } catch (error) {
             console.error('[LOGOUT] Logout error:', error);
             showToast('Logout failed. Please try again.', 'error');
@@ -6193,8 +6175,6 @@ async function saveStudySettings() {
     await saveDataToDB('appData', { key: 'userSettings', ...globalSettings });
     showToast('Settings saved!');
 }
-
-function closeNameModal() { }
 
 async function toggleDarkMode() {
     const html = document.documentElement;
