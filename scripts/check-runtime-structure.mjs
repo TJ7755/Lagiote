@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import path from 'path';
 
 const root = process.cwd();
@@ -15,6 +15,7 @@ function read(filePath) {
 }
 
 function checkAssetsJs() {
+    assert.ok(existsSync(assetsJsDir), 'assets/js directory is missing');
     const files = readdirSync(assetsJsDir).sort();
     assert.deepStrictEqual(files, [...allowedAssetsJsFiles].sort(), 'assets/js contains unexpected first-party runtime files');
 }

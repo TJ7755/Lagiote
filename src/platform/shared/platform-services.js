@@ -2,6 +2,8 @@ import { isElectronRenderer } from './env.js';
 import * as authSession from './auth-session.js';
 import { generateDeck } from './ai.js';
 
+const DEFAULT_BACKEND_URL = 'https://tj7755-lagiote-proxy.hf.space';
+
 function createRuntimeService() {
     const electron = isElectronRenderer();
     return {
@@ -69,12 +71,51 @@ function createAiService() {
 }
 
 function createSyncService() {
+    function resolveSyncUrl() {
+        if (typeof window !== 'undefined') {
+            const base = (window.BACKEND_URL || DEFAULT_BACKEND_URL || '').toString().trim();
+            if (base) {
+                return `${base.replace(/\/$/, '')}/api/sync`;
+            }
+        }
+        return `${DEFAULT_BACKEND_URL}/api/sync`;
+    }
+
     return {
         async syncData(payload) {
             if (typeof window !== 'undefined' && window.electronAPI?.syncData) {
                 return window.electronAPI.syncData(payload);
             }
-            throw new Error('Sync service is not available in this runtime');
+
+            const { token, guestId, ...syncPayload } = payload || {};
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            } else if (guestId) {
+                headers['X-Guest-ID'] = guestId;
+            }
+
+            const response = await fetch(resolveSyncUrl(), {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(syncPayload)
+            });
+
+            if (!response.ok) {
+                let detail = '';
+                try {
+                    detail = (await response.text()).trim();
+                } catch (error) {
+                    detail = '';
+                }
+                const suffix = detail ? ` ${detail}` : '';
+                throw new Error(`Sync failed with status ${response.status}${suffix}`);
+            }
+
+            return response.json();
         }
     };
 }

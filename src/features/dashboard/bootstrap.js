@@ -13,30 +13,35 @@ export async function bootstrapDashboardApp({
     }
 
     bootPromise = (async () => {
-        const runtime = getAppRuntime();
-        const resolvedPlatformServices = platformServices || runtime.platformServices;
-        const resolvedAuthServices = authServices || resolvedPlatformServices.auth;
-        const resolvedAnalyticsServices = analyticsServices || {
-            gtag: typeof window !== 'undefined' ? window.gtag : null,
-            dataLayer: typeof window !== 'undefined' ? window.dataLayer : []
-        };
+        try {
+            const runtime = getAppRuntime();
+            const resolvedPlatformServices = platformServices || runtime.platformServices;
+            const resolvedAuthServices = authServices || resolvedPlatformServices.auth;
+            const resolvedAnalyticsServices = analyticsServices || {
+                gtag: typeof window !== 'undefined' ? window.gtag : null,
+                dataLayer: typeof window !== 'undefined' ? window.dataLayer : []
+            };
 
-        await import('../../../js/pages/bridge.js');
-        await import('../../../js/core/keyboard.js');
-        await import('../../../js/pages/dashboard.js');
-        await import('../../../js/pages/exam-mode-ui.js');
+            await import('../../../js/pages/bridge.js');
+            await import('../../../js/core/keyboard.js');
+            await import('../../../js/pages/dashboard.js');
+            await import('../../../js/pages/exam-mode-ui.js');
 
-        const facade = createLegacyDashboardFacade({
-            platformServices: resolvedPlatformServices,
-            authServices: resolvedAuthServices,
-            analyticsServices: resolvedAnalyticsServices
-        });
+            const facade = createLegacyDashboardFacade({
+                platformServices: resolvedPlatformServices,
+                authServices: resolvedAuthServices,
+                analyticsServices: resolvedAnalyticsServices
+            });
 
-        if (typeof window !== 'undefined') {
-            window.lagioteApp = facade;
+            if (typeof window !== 'undefined') {
+                window.lagioteApp = facade;
+            }
+
+            return facade;
+        } catch (error) {
+            bootPromise = null;
+            throw error;
         }
-
-        return facade;
     })();
 
     return bootPromise;
