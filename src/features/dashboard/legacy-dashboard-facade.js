@@ -11,6 +11,9 @@ export function createLegacyDashboardFacade({ platformServices, authServices, an
         authServices,
         analyticsServices,
         loadInitialState() {
+            if (typeof window === 'undefined') {
+                return false;
+            }
             return window.__APP_READY__ === true;
         },
         openDeck(deckId) {
