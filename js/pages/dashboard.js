@@ -1,5 +1,7 @@
 ﻿import { isTestMode, getTestConfig, getTestSession } from '../../src/platform/shared/test-mode.js';
 import { getTestFixtures } from '../../src/platform/shared/test-fixtures.js';
+import * as fsrsUtils from '../core/fsrs-utils.js';
+import { getAppRuntime } from '../../src/app/runtime/app-runtime.js';
 import {
     CARD_TYPES,
     CARD_TYPE_LABELS,
@@ -18,16 +20,17 @@ import {
 import { parseImportText } from '../core/import-utils.js';
 import { filterByCooldownWithId } from '../core/cortex.js';
 
-console.log('Test 1: Script is starting!');
+const appRuntime = getAppRuntime();
 const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
 if (pdfjsLib?.GlobalWorkerOptions) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 }
 
-const isElectron = typeof window.electronAPI !== 'undefined';
-const authApi = window.authSession || (window.lagiote && window.lagiote.authSession) || null;
-const learnModeAdapterFactory = window.createLearnModeAdapter || null;
-const reviewModeAdapterFactory = window.createReviewModeAdapter || null;
+const isElectron = appRuntime.platformServices.runtime.isElectron;
+const authApi = appRuntime.platformServices.auth;
+const learnModeAdapterFactory = appRuntime.modeAdapters.learn;
+const reviewModeAdapterFactory = appRuntime.modeAdapters.review;
+const sequenceModeAdapterFactory = appRuntime.modeAdapters.sequence;
 let toastQueue = [];
 let currentEditingPlanId = null;
 let dailyPriorityQueue = [];
@@ -232,9 +235,7 @@ function formatIntervalFromNow(dueDate, now = new Date()) {
 
 let cachedKnowledgeStateUtils = null;
 function getKnowledgeStateUtils() {
-    const globalUtils = (typeof window !== 'undefined' && window.lagiote && window.lagiote.knowledgeStateUtils)
-        ? window.lagiote.knowledgeStateUtils
-        : null;
+    const globalUtils = appRuntime.knowledgeStateUtils || fsrsUtils || null;
     if (globalUtils) {
         cachedKnowledgeStateUtils = globalUtils;
         return globalUtils;
@@ -411,12 +412,7 @@ async function applyTestModeSetup() {
     const config = getTestConfig();
     if (config.reset) await resetDatabaseForTests();
     if (config.seed) await seedTestData();
-    if (window.lagiote?.db?.initDB) {
-        try {
-            await window.lagiote.db.initDB();
-        } catch (error) {
-        }
-    }
+    await initDB();
     if (typeof window.Sortable !== 'function') {
         window.Sortable = class {
             constructor() {}
@@ -436,7 +432,7 @@ async function applyTestModeSetup() {
         localStorage.removeItem('guestMode');
         sessionStorage.removeItem('guestMode');
     }
-    window.generateDeckAdapter = async () => ({
+    appRuntime.ai.generateDeck = async () => ({
         type: 'flashcard',
         deckName: 'AI Test Deck',
         deckNotes: 'Generated in test mode',
@@ -447,6 +443,7 @@ async function applyTestModeSetup() {
             { question: 'AI Question 3', answer: 'AI Answer 3' }
         ]
     });
+    window.generateDeckAdapter = appRuntime.ai.generateDeck;
     window.__TEST_READY__ = true;
 }
 
@@ -11047,7 +11044,7 @@ function registerSpacedModeAdapter() {
 }
 
 function registerSequenceModeAdapter() {
-    const factory = window.createSequenceModeAdapter || (window.lagiote && window.lagiote.createSequenceModeAdapter);
+    const factory = sequenceModeAdapterFactory || (window.lagiote && window.lagiote.createSequenceModeAdapter);
     let adapter = null;
     if (factory) {
         adapter = factory({
@@ -16307,6 +16304,8 @@ window.showKeyboardShortcutsHelp = showKeyboardShortcutsHelp;
 window.closeKeyboardShortcutsHelp = closeKeyboardShortcutsHelp;
 window.showExamHubDeckSelector = showExamHubDeckSelector;
 window.closeExamHubDeckSelector = closeExamHubDeckSelector;
+window.showDeckDetail = showDeckDetail;
+window.logout = logout;
 
 window.toggleCortexDebug = async function () {
     studyState.cortexDebugEnabled = !studyState.cortexDebugEnabled;
