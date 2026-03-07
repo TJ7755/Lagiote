@@ -25,6 +25,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Check runtime structure
+        run: npm run check:structure
+
+      - name: Run legacy tests
+        run: npm test
+
+      - name: Run vitest suite
+        run: npx vitest run
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Smoke test web build
+        run: node tests/smoke.build.mjs
+
       - name: Build/make application
         run: npm run make -- --platform win32
 

@@ -1,4 +1,5 @@
 import './auth0-boot.js';
+import { bootstrapDashboardApp } from '../../features/dashboard/bootstrap.js';
 import { attachIndexGlobals } from '../../legacy/compat-globals.js';
 import { isTestMode } from '../shared/test-mode.js';
 
@@ -113,6 +114,11 @@ function bootstrap() {
     });
 
     bootstrapCdn(loadCDNScript);
+    bootstrapDashboardApp({
+        analyticsServices: { gtag, dataLayer: window.dataLayer }
+    }).catch((error) => {
+        console.error('Dashboard bootstrap failed:', error);
+    });
 }
 
 bootstrap();

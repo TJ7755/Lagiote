@@ -1,34 +1,15 @@
-import * as db from '../core/db.js';
-import { levenshteinDistance, calculateIQS, shuffleArray } from '../core/utils.js';
-import { FSRSAlgorithm } from '../core/fsrs.js';
 import * as studyModule from './study.js';
-import * as fsrsUtils from '../core/fsrs-utils.js';
-import * as mcqRemediation from '../core/mcq-remediation.js';
 import '../core/sequence-utils.js';
-import { isElectronRenderer } from '../../src/platform/shared/env.js';
-import { generateDeck as platformGenerateDeck } from '../../src/platform/shared/ai.js';
-import * as authSession from '../../src/platform/shared/auth-session.js';
-import '../../src/ui/modes/mode-registry.js';
-import createLearnModeAdapter from '../../src/ui/modes/learn-mode.js';
-import createReviewModeAdapter from '../../src/ui/modes/review-mode.js';
-import createSequenceModeAdapter from '../../src/ui/modes/sequence-mode.js';
+import { getAppRuntime } from '../../src/app/runtime/app-runtime.js';
 
+const runtime = getAppRuntime();
 const lagiote = window.lagiote || {};
-const fsrs = new FSRSAlgorithm();
 
-lagiote.db = db;
-lagiote.utils = { levenshteinDistance, calculateIQS, shuffleArray };
-lagiote.mcqRemediation = mcqRemediation;
-lagiote.fsrs = fsrs;
-lagiote.FSRSAlgorithm = FSRSAlgorithm;
+Object.assign(lagiote, runtime);
 lagiote.study = studyModule;
-lagiote.knowledgeStateUtils = fsrsUtils;
-lagiote.platform = { isElectronRenderer };
-lagiote.ai = { generateDeck: platformGenerateDeck };
-lagiote.authSession = authSession;
-lagiote.createLearnModeAdapter = createLearnModeAdapter;
-lagiote.createReviewModeAdapter = createReviewModeAdapter;
-lagiote.createSequenceModeAdapter = createSequenceModeAdapter;
+lagiote.createLearnModeAdapter = runtime.modeAdapters.learn;
+lagiote.createReviewModeAdapter = runtime.modeAdapters.review;
+lagiote.createSequenceModeAdapter = runtime.modeAdapters.sequence;
 
 if (!window.lagiote) {
     Object.defineProperty(window, 'lagiote', {
@@ -38,15 +19,15 @@ if (!window.lagiote) {
 }
 
 if (!window.generateDeckAdapter) {
-    window.generateDeckAdapter = platformGenerateDeck;
+    window.generateDeckAdapter = runtime.ai.generateDeck;
 }
 
 if (!window.isElectronRenderer) {
-    window.isElectronRenderer = isElectronRenderer;
+    window.isElectronRenderer = runtime.platform.isElectronRenderer;
 }
 
 if (!window.authSession) {
-    window.authSession = authSession;
+    window.authSession = runtime.authSession;
 }
 
 ['initDB', 'getDataFromDB', 'saveDataToDB', 'getAllDataFromDB'].forEach(fn => {
