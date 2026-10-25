@@ -5,9 +5,7 @@ module.exports = {
   packagerConfig: {
     asar: true,
     icon: './assets/logo/icon', // generic icon path, forge adds extension
-    extraResource: [
-      '.env.local'
-    ]
+    ignore: [/^\/\.env(?:\.|$)/, /^\/(?:tests|artifacts|test-results|docs|design)(?:\/|$)/]
   },
   rebuildConfig: {},
   makers: [
@@ -41,16 +39,6 @@ module.exports = {
         }
       },
       platforms: ['linux'],
-    },
-    {
-      name: '@electron-forge/maker-dmg',
-      config: {
-        name: 'Lagiote Revise',
-        icon: './assets/logo/icon.icns',
-        background: './assets/dmg-background.png',
-        format: 'ULFO'
-      },
-      platforms: ['darwin'],
     },
   ],
   plugins: [

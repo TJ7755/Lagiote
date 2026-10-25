@@ -13,7 +13,8 @@ export async function bootstrapStudyApp({ platformServices, deckRepository } = {
             const resolvedPlatformServices = platformServices || runtime.platformServices;
             const resolvedDeckRepository = deckRepository || runtime.db;
 
-            await import('../../../js/pages/study.js');
+            const { initialiseStudyPage } = await import('../../../js/pages/study.js');
+            await initialiseStudyPage();
 
             const app = {
                 platformServices: resolvedPlatformServices,

@@ -19,12 +19,14 @@ import {
 } from '../core/card-types.js';
 import { parseImportText } from '../core/import-utils.js';
 import { filterByCooldownWithId } from '../core/cortex.js';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import mammoth from 'mammoth/mammoth.browser.js';
+import Chart from 'chart.js/auto';
+import Sortable from 'sortablejs';
 
 const appRuntime = getAppRuntime();
-const pdfWorkerSrc = isTestMode() ? '' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
-if (pdfjsLib?.GlobalWorkerOptions) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-}
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
 const isElectron = appRuntime.platformServices.runtime.isElectron;
 const authApi = appRuntime.platformServices.auth;
@@ -1839,11 +1841,13 @@ let practiceTestState = {
     applyLearningInProgress: false
 };
 
-window.onload = async function () {
+export async function initialiseDashboard() {
+    assignTestIds();
     console.log('Script is starting! Online:', navigator.onLine);
 
     await initDB();
     await applyTestModeSetup();
+    await appRuntime.db.initDB();
     console.log('Database initialised.');
 
     // Initialise analytics manager
@@ -1916,7 +1920,7 @@ window.onload = async function () {
     // No session found, continue as guest
     console.log('No active session. Continuing as guest.');
     await handleOfflineOrGuest();
-};
+}
 
 registerPracticeTestModeAdapter();
 registerLearnModeAdapter();
@@ -6385,14 +6389,14 @@ async function startLearnModeWithSetup() {
 
     await saveDataToDB('decks', deck);
     closeLearnModeSetupModal();
-    startLearnMode(currentDeckId);
+    return startLearnMode(currentDeckId);
 }
 
 function configureStudy(mode, deckId) {
     currentDeckId = deckId || currentViewingDeckId;
     if (!currentDeckId) return;
 
-    startMode(mode, currentDeckId);
+    return startMode(mode, currentDeckId);
 }
 
 async function buildDeckKnowledgeMap(deck) {
@@ -12939,19 +12943,6 @@ function calculateCosineSimilarity(vecA, vecB) {
     }
 }
 
-class NlpPipeline {
-    static task = 'feature-extraction';
-    static model = 'Xenova/all-MiniLM-L6-v2';
-    static instance = null;
-
-    static async getInstance(progress_callback = null) {
-        if (this.instance === null) {
-            const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1');
-            this.instance = pipeline(this.task, this.model, { progress_callback });
-        }
-        return this.instance;
-    }
-}
 async function preGenerateAdaptiveQuestions(roundCards, progressCallback) {
     if (!isOnline) {
         console.log("Offline mode: Skipping pre-generation of distractors.");
@@ -13192,11 +13183,11 @@ function renderDocumentList() {
                         <div class="document-item-header">
                             <span class="document-name">
                                 <span class="document-status-icon">${doc.status === 'processing' ? '<div class="spinner"></div>' : (doc.status === 'done' ? 'Done' : 'FILE')}</span>
-                                ${doc.name}
+                                ${escapeHtml(doc.name)}
                             </span>
                             <button class="remove-doc-btn" onclick="removeDocument(${index})">&times;</button>
                         </div>
-                        <div class="document-info">${doc.type}</div>
+                        <div class="document-info">${escapeHtml(doc.type)}</div>
                     </div>
                 `).join('');
     }
@@ -13234,7 +13225,7 @@ function readFileContent(file) {
         reader.onload = async (e) => {
             try {
                 if (file.type === 'application/pdf') {
-                    const pdf = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+                    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(e.target.result), isEvalSupported: false }).promise;
                     let text = '';
                     for (let i = 1; i <= pdf.numPages; i++) {
                         const page = await pdf.getPage(i);
@@ -15587,6 +15578,29 @@ function toggleExamSettingsVisibility() {
     }
 }
 
+async function restoreFullBackup(input) {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+        const payload = JSON.parse(await file.text());
+        if (!payload || !Array.isArray(payload.decks)) throw new Error('Select a full Lagiote JSON backup.');
+        showConfirmModal('Merge this backup into local data? Matching decks and settings will be overwritten. Other decks will be kept.', async () => {
+            try {
+                await appRuntime.db.importFullData(payload);
+                await loadSavedData();
+                transitionView('dashboard');
+                showToast('Backup restored.', 'success');
+            } catch (error) {
+                showToast(`Could not restore backup: ${error.message}`, 'error');
+            }
+        });
+    } catch (error) {
+        showToast(`Could not read backup: ${error.message}`, 'error');
+    } finally {
+        input.value = '';
+    }
+}
+
 async function generateFullDataExport(evt) {
     // 1. Notify user it started
     const btn = evt?.target?.closest('button');
@@ -15599,40 +15613,10 @@ async function generateFullDataExport(evt) {
     try {
         showToast("Gathering all application data...", "info");
 
-        // 2. Fetch all data stores in parallel
-        const [
-            decks,
-            knowledgeStates,
-            interactionLogs,
-            examPlans,
-            userSettings,
-            analytics,
-            atoms,
-            errorAtoms,
-            questions,
-            markSchemes,
-            examSpecs,
-            examPapers,
-            examSittings,
-            markingRecords,
-            contentRevisions
-        ] = await Promise.all([
-            getAllDataFromDB('decks'),
-            getAllDataFromDB('userKnowledgeState'),
-            getAllDataFromDB('interactionLogs'), // This is the most valuable data for analysis
-            getAllDataFromDB('examPlans'),
-            getDataFromDB('appData', 'userSettings'),
-            getDataFromDB('appData', 'analytics'),
-            getAllDataFromDB('atoms'),
-            getAllDataFromDB('errorAtoms'),
-            getAllDataFromDB('questions'),
-            getAllDataFromDB('markSchemes'),
-            getAllDataFromDB('examSpecs'),
-            getAllDataFromDB('examPapers'),
-            getAllDataFromDB('examSittings'),
-            getAllDataFromDB('markingRecords'),
-            getAllDataFromDB('contentRevisions')
-        ]);
+        const {
+            decks, knowledgeStates, interactionLogs, examPlans, settings: userSettings, analytics,
+            examEngine: { atoms, errorAtoms, questions, markSchemes, examSpecs, examPapers, examSittings, markingRecords, contentRevisions }
+        } = await appRuntime.db.exportFullData();
 
         // 3. Construct the Research Object
         const researchData = {
@@ -15757,11 +15741,6 @@ async function resetSpecificDeck(deckId) {
         }
     });
 }
-
-// Fix: Add event listener for profile button
-document.addEventListener('DOMContentLoaded', () => {
-    assignTestIds();
-});
 
 async function renderGlobalAnalytics() {
     try {
@@ -16347,6 +16326,7 @@ const inlineHandlers = {
     endSession,
     endTest,
     generateFullDataExport,
+    restoreFullBackup,
     getClozeNumberForCard,
     gradeSpaced,
     handleCardTypeChange,

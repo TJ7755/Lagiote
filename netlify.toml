@@ -1,11 +1,30 @@
-# netlify.toml
-
 [build]
-  # This tells Netlify where your site's main files are.
-  # If your index.html is in the root, you can just use "."
-  publish = "."
+  command = "npm run build:web"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "26.12.1"
+  NPM_VERSION = "12.2.1"
 
 [functions]
-  # This tells Netlify where to find your serverless functions.
-  # This path must match the folder structure you created.
-  directory = "netlify/functions/"
+  directory = "netlify/functions"
+
+[[redirects]]
+  from = "/api/generate"
+  to = "/.netlify/functions/getAiCompletion"
+  status = 200
+
+[[redirects]]
+  from = "/api/distractors"
+  to = "/.netlify/functions/generateDistractors"
+  status = 200
+
+[[redirects]]
+  from = "/api/autocomplete"
+  to = "/.netlify/functions/gemini-autocomplete"
+  status = 200
+
+[[redirects]]
+  from = "/api/sync"
+  to = "/.netlify/functions/sync"
+  status = 200

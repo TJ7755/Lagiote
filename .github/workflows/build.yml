@@ -14,16 +14,16 @@ jobs:
 
     steps:
       - name: Check out git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: '18'
+          node-version-file: '.node-version'
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --global npm@12.2.1 && npm ci
 
       - name: Check runtime structure
         run: npm run check:structure
@@ -44,7 +44,7 @@ jobs:
         run: npm run make -- --platform win32
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: LagioteRevise-Windows
           path: out/make/**/*

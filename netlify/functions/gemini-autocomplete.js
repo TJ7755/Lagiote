@@ -1,6 +1,6 @@
 // netlify/functions/gemini-autocomplete.js
 
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenAI } = require("@google/genai");
 
 function stripCodeFences(text) {
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -13,8 +13,7 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const body = JSON.parse(event.body || '{}');
     const { deckContent = [], currentCard = {}, fieldType = 'question' } = body;
@@ -55,9 +54,8 @@ Return ONLY the suggested completion text (the part that should be added to fini
 
 Do not include any explanations, markdown, or additional text - just return the completion suggestion.`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = await response.text();
+    const result = await genAI.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+    const text = result.text || "";
     const cleaned = stripCodeFences(text).trim();
 
     return {

@@ -12,18 +12,18 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0  # Fetch all history for proper release notes
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 20
+          node-version-file: '.node-version'
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --global npm@12.2.1 && npm ci
 
       - name: Get version from package.json
         id: package_version
@@ -38,7 +38,7 @@ jobs:
         run: npm run make -- --publish
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: LagioteRevise-v${{ steps.package_version.outputs.version }}-Windows
           path: out/make/**/*

@@ -1,4 +1,4 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenAI } = require("@google/genai");
 
 function stripCodeFences(text) {
     return text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -10,8 +10,7 @@ exports.handler = async function (event, context) {
     }
 
     try {
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
         const body = JSON.parse(event.body || '{}');
         const { question, answer } = body;
@@ -29,9 +28,8 @@ Generate 3 plausible but incorrect answers (distractors) that are similar in len
 Return ONLY a JSON array of strings. Do not include any other text.
 Example: ["Distractor 1", "Distractor 2", "Distractor 3"]`;
 
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = await response.text();
+        const result = await genAI.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+        const text = result.text || "";
         const cleaned = stripCodeFences(text).trim();
 
         let distractors;

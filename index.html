@@ -8,9 +8,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lagiote Revise</title>
     <script type="module" src="./src/platform/web/index-boot.js"></script>
-    <script src="./assets/js/pdf.min.js"></script>
-    <script type="module" src="./assets/js/mammoth.browser.min.js"></script>
-    <script type="module" src="./assets/js/chart.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -2797,6 +2794,7 @@
 	                            <button class="btn learn-btn hidden" id="deckDetailSequenceBtn" onclick="configureStudy('sequence')">Sequence</button>
 	                            <button class="btn" id="deckDetailSpacedBtn" onclick="configureStudy('spaced')">Spaced Learning</button>
 	                            <button class="btn review-btn" id="deckDetailTestBtn" onclick="openPracticeTestModal(currentViewingDeckId)">Practice Test</button>
+                                <button class="btn" id="deckDetailExamHubBtn" onclick="openExamModeHub(currentViewingDeckId)">Exam Hub</button>
 	                            <button class="btn btn-secondary" id="deckDetailResetBtn"
 	                                style="border: 2px solid var(--border-color);" onclick="resetSpecificDeck(currentViewingDeckId)">Reset Progress</button>
 	                            <button class="btn btn-secondary" id="deckDetailSettingsBtn" onclick="openDeckSettingsModal(currentViewingDeckId)">Settings</button>
@@ -3667,10 +3665,9 @@
 
             </div>
             <div class="settings-section">
-                <h2>Data Contribution</h2>
+                <h2>Backup and recovery</h2>
                 <p style="color: var(--secondary-text); font-size: 0.9rem; margin-bottom: 15px;">
-                    Help improve Lagiote Revise by exporting your study data.
-                    You can email the generated file to the developer for analysis.
+                    Export your decks, learning progress and settings, or restore a previous JSON backup.
                 </p>
                 <button class="btn btn-secondary" onclick="generateFullDataExport(event)">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -3678,8 +3675,12 @@
                         <path stroke-linecap="round" stroke-linejoin="round"
                             d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
                     </svg>
-                    Export Research Data
+                    Export full backup
                 </button>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label for="restoreBackupInput">Restore full backup</label>
+                    <input id="restoreBackupInput" data-testid="settings-restore-backup" type="file" accept=".json,application/json" onchange="restoreFullBackup(this)">
+                </div>
             </div>
             <div class="settings-section">
                 <h2>Danger Zone</h2>

@@ -4,19 +4,14 @@ import path from 'path';
 
 const root = process.cwd();
 const assetsJsDir = path.join(root, 'assets', 'js');
-const allowedAssetsJsFiles = new Set([
-    'chart.js',
-    'mammoth.browser.min.js',
-    'pdf.min.js'
-]);
+const allowedAssetsJsFiles = new Set();
 
 function read(filePath) {
     return readFileSync(path.join(root, filePath), 'utf8');
 }
 
 function checkAssetsJs() {
-    assert.ok(existsSync(assetsJsDir), 'assets/js directory is missing');
-    const files = readdirSync(assetsJsDir).sort();
+    const files = existsSync(assetsJsDir) ? readdirSync(assetsJsDir).sort() : [];
     assert.deepStrictEqual(files, [...allowedAssetsJsFiles].sort(), 'assets/js contains unexpected first-party runtime files');
 }
 

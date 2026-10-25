@@ -17,10 +17,6 @@ These are the only runtime entrypoints that matter now:
 
 ### `index.html`
 
-- Loads vendor browser assets still required by the legacy dashboard:
-  - `assets/js/pdf.min.js`
-  - `assets/js/mammoth.browser.min.js`
-  - `assets/js/chart.js`
 - Loads `src/platform/web/index-boot.js`
 - Does not load page controllers directly anymore
 
@@ -28,10 +24,10 @@ These are the only runtime entrypoints that matter now:
 - Auth0 web bootstrapping
 - theme initialisation
 - analytics bootstrap
-- CDN dependency loading for legacy dashboard behaviour
+- analytics compatibility globals
 - dashboard application bootstrap
 
-The dashboard bootstrap then imports:
+The dashboard bootstrap imports the following modules, then explicitly awaits dashboard initialisation:
 - `js/pages/bridge.js`
 - `js/core/keyboard.js`
 - `js/pages/dashboard.js`
@@ -97,25 +93,8 @@ These remain temporary:
 - Remove DB global getters once no page or test reaches DB methods through `window`.
 - Remove inline handler globals when `index.html` no longer uses inline event attributes.
 
-## `assets/js` audit
+## Vendor dependencies
 
-Retained:
+PDF.js, Mammoth, Chart.js and Sortable are npm dependencies imported by the dashboard module. PDF.js uses a bundled local worker. The previous vendored files in `assets/js` and the startup CDN scripts have been removed. FSRS uses the bundled `ts-fsrs` engine on both platforms and in tests.
 
-- `chart.js`
-- `mammoth.browser.min.js`
-- `pdf.min.js`
-
-Removed as dead first-party files:
-
-- `auth0-auth.js`
-- `card-editor.js`
-- `db.js`
-- `main.js`
-- `prm.js`
-- `sequence-test.js`
-- `state.js`
-- `study.js`
-- `ui.js`
-- `utils.js`
-
-If someone reintroduces first-party runtime code into `assets/js`, they are rebuilding the mess on purpose.
+The standalone study bootstrap explicitly calls its controller after importing it. Neither page depends on receiving `load` or `DOMContentLoaded` after a dynamic import.

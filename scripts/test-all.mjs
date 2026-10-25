@@ -9,7 +9,6 @@ const scripts = pkgData.scripts || {};
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const steps = [
-    { label: 'npm test', args: ['test'], scriptKey: 'test' },
     { label: 'npm run test:unit', args: ['run', 'test:unit'], scriptKey: 'test:unit' },
     { label: 'npm run test:e2e:web', args: ['run', 'test:e2e:web'], scriptKey: 'test:e2e:web' },
     { label: 'npm run test:e2e:electron', args: ['run', 'test:e2e:electron'], scriptKey: 'test:e2e:electron', optional: true }

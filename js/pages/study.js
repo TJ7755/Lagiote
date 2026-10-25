@@ -824,12 +824,9 @@ async function init() {
     setupStudyKeyboard();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+export async function initialiseStudyPage() {
     const deckId = getQueryParam('deckId');
     if (!deckId) return;
 
-    init().catch(err => {
-        console.error('Failed to initialise study page', err);
-        showToast('Failed to start study session', 'error');
-    });
-});
+    await init();
+}

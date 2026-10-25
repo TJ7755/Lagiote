@@ -59,10 +59,11 @@ const examModeUIState = {
 // --- View Management ---
 
 function hideAllExamViews() {
-    document.getElementById('examModeHubView')?.classList.add('hidden');
-    document.getElementById('examModeSessionView')?.classList.add('hidden');
-    document.getElementById('examModePathMapView')?.classList.add('hidden');
-    document.getElementById('examModeEditorsView')?.classList.add('hidden');
+    for (const id of ['examModeHubView', 'examModeSessionView', 'examModePathMapView', 'examModeEditorsView']) {
+        const view = document.getElementById(id);
+        view?.classList.add('hidden');
+        view?.classList.remove('is-visible');
+    }
 }
 
 function showView(viewId) {
@@ -70,6 +71,7 @@ function showView(viewId) {
     const view = document.getElementById(viewId);
     if (view) {
         view.classList.remove('hidden');
+        view.classList.add('is-visible');
     }
 }
 
@@ -136,7 +138,7 @@ async function loadDeckData(deckId) {
     examModeUIState.examSpec = examSpec;
     
     // Load atoms for this deck
-    const allAtoms = await getAllDataFromDB('examAtoms') || [];
+    const allAtoms = await getAllDataFromDB('atoms') || [];
     examModeUIState.atoms = new Map(
         allAtoms
             .filter(a => a.deckId === deckId && !a.isDeleted)
@@ -144,7 +146,7 @@ async function loadDeckData(deckId) {
     );
     
     // Load error atoms
-    const allErrorAtoms = await getAllDataFromDB('examErrorAtoms') || [];
+    const allErrorAtoms = await getAllDataFromDB('errorAtoms') || [];
     examModeUIState.errorAtoms = new Map(
         allErrorAtoms
             .filter(a => a.deckId === deckId && !a.isDeleted)
@@ -152,11 +154,11 @@ async function loadDeckData(deckId) {
     );
     
     // Load questions
-    const allQuestions = await getAllDataFromDB('examQuestions') || [];
+    const allQuestions = await getAllDataFromDB('questions') || [];
     examModeUIState.questions = allQuestions.filter(q => q.deckId === deckId && !q.isDeleted);
     
     // Load mark schemes
-    const allSchemes = await getAllDataFromDB('examMarkSchemes') || [];
+    const allSchemes = await getAllDataFromDB('markSchemes') || [];
     examModeUIState.markSchemes = new Map(
         allSchemes
             .filter(s => s.deckId === deckId && !s.isDeleted)
@@ -776,7 +778,7 @@ async function updateAtomsFromResponse(questionId, score) {
         examModeUIState.atoms.set(atom.id, atom);
         
         // Save to database
-        await saveDataToDB('examAtoms', atom);
+        await saveDataToDB('atoms', atom);
     }
 }
 
@@ -1285,7 +1287,7 @@ window.deleteAtom = async function(atomId) {
     if (atom) {
         atom.isDeleted = true;
         atom.updatedAt = new Date().toISOString();
-        await saveDataToDB('examAtoms', atom);
+        await saveDataToDB('atoms', atom);
         examModeUIState.atoms.delete(atomId);
     }
     
@@ -1335,7 +1337,7 @@ document.getElementById('atomEditorForm')?.addEventListener('submit', async func
         atom.deckId = examModeUIState.deckId;
     }
     
-    await saveDataToDB('examAtoms', atom);
+    await saveDataToDB('atoms', atom);
     examModeUIState.atoms.set(atom.id, atom);
     
     closeAtomEditorModal();
@@ -1403,7 +1405,7 @@ window.deleteQuestion = async function(questionId) {
     if (question) {
         question.isDeleted = true;
         question.updatedAt = new Date().toISOString();
-        await saveDataToDB('examQuestions', question);
+        await saveDataToDB('questions', question);
         examModeUIState.questions = examModeUIState.questions.filter(q => q.id !== questionId);
     }
     
@@ -1453,7 +1455,7 @@ document.getElementById('questionEditorForm')?.addEventListener('submit', async 
         examModeUIState.questions.push(question);
     }
     
-    await saveDataToDB('examQuestions', question);
+    await saveDataToDB('questions', question);
     
     closeQuestionEditorModal();
     populateQuestionsEditor();
@@ -1547,7 +1549,7 @@ window.deleteMarkScheme = async function(schemeId) {
     if (scheme) {
         scheme.isDeleted = true;
         scheme.updatedAt = new Date().toISOString();
-        await saveDataToDB('examMarkSchemes', scheme);
+        await saveDataToDB('markSchemes', scheme);
         examModeUIState.markSchemes.delete(schemeId);
     }
     
@@ -1593,7 +1595,7 @@ document.getElementById('markSchemeEditorForm')?.addEventListener('submit', asyn
     });
     scheme.deckId = examModeUIState.deckId;
     
-    await saveDataToDB('examMarkSchemes', scheme);
+    await saveDataToDB('markSchemes', scheme);
     examModeUIState.markSchemes.set(scheme.id, scheme);
     
     closeMarkSchemeEditorModal();

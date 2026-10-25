@@ -11,10 +11,12 @@ import {
 
 test('electron app core flows', async ({}, testInfo) => {
     const userDataDir = createTempUserDataDir();
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
     const app = await electron.launch({
         args: ['.'],
         env: {
-            ...process.env,
+            ...env,
             TEST_MODE: '1',
             LAGIOTE_TEST_USER_DATA_DIR: userDataDir
         }
@@ -36,6 +38,8 @@ test('electron app core flows', async ({}, testInfo) => {
         if (await learnSetupStart.isVisible()) {
             await learnSetupStart.click();
         }
+        await expect(page.locator('#studyMode')).toBeVisible();
+        await expect(page.locator('#cardQuestion, #mcqQuestion').filter({ visible: true }).first()).not.toBeEmpty();
         if (await page.getByTestId('study-continue-round').isVisible().catch(() => false)) {
             await page.evaluate(() => document.querySelector('[data-testid="study-continue-round"]')?.click());
         }

@@ -34,7 +34,7 @@ async function setupDevice(page, server, loggerOptions = {}) {
     await applyTestMode(page, { allowSync: true });
     await setupNetworkMocks(page, { syncHandler: route => server.handleRoute(route), useContext: true });
     const logger = createTestLogger(page, loggerOptions);
-    await page.goto('http://127.0.0.1:4173/', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://127.0.0.1:4187/', { waitUntil: 'domcontentloaded' });
     await waitForTestReady(page);
     return logger;
 }

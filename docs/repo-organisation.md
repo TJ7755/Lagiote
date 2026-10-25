@@ -7,7 +7,7 @@
 | package.json | Config/runtime entry | Yes | Electron `main` points to `electron-main.cjs` |
 | package-lock.json | Lockfile | Yes | Used by npm |
 | netlify.toml | Deploy config | Yes | Netlify expects it at repo root |
-| vite.config.js | Build config | Yes | Multi-page entry config for Vite |
+| vite.config.mjs | Build config | Yes | Multi-page entry config for Vite |
 | forge.config.js | Packaging config | Yes | Consumed by electron-forge |
 | electron-main.cjs | Electron entry | Yes | Loaded via `package.json#main` and `npm start` |
 | main.js | Electron entry (legacy) | Implicit | Left at root to avoid changing shell wiring |
@@ -43,7 +43,7 @@
 ## Deferred/kept in place
 
 - Electron entry/preload files remain at the root to avoid touching runtime wiring (`electron-main.cjs`, `main.js`, `menu.js`, `preload.js`, `preload-auth.js`).
-- Build/deploy configs stay at root where tooling expects them (`vite.config.js`, `netlify.toml`, `forge.config.js`).
+- Build/deploy configs stay at root where tooling expects them (`vite.config.mjs`, `netlify.toml`, `forge.config.js`).
 - HTML entrypoints remain at root per Vite multi-page config and Electron fallbacks.
 - `.env.local` stays in the working tree for now; untrack it with `git rm --cached .env.local` when Git metadata writes are permitted.
 

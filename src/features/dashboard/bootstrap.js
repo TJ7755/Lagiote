@@ -24,7 +24,7 @@ export async function bootstrapDashboardApp({
 
             await import('../../../js/pages/bridge.js');
             await import('../../../js/core/keyboard.js');
-            await import('../../../js/pages/dashboard.js');
+            const { initialiseDashboard } = await import('../../../js/pages/dashboard.js');
             await import('../../../js/pages/exam-mode-ui.js');
 
             const facade = createLegacyDashboardFacade({
@@ -37,6 +37,7 @@ export async function bootstrapDashboardApp({
                 window.lagioteApp = facade;
             }
 
+            await initialiseDashboard();
             return facade;
         } catch (error) {
             bootPromise = null;

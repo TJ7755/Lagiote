@@ -400,91 +400,62 @@ function getStore(storeName, mode = 'readonly') {
     return db.transaction([storeName], mode).objectStore(storeName);
 }
 
-export async function saveDataToDB(storeName, data) {
+function writeTransaction(storeNames, enqueue) {
     return new Promise((resolve, reject) => {
+        if (!db) return reject(new Error('Database not initialised'));
+        let transaction;
+        let failure;
+        const abort = error => {
+            failure = error;
+            transaction.abort();
+        };
         try {
-            const store = getStore(storeName, 'readwrite');
-            if (storeName === 'userKnowledgeState') {
-                const payload = prepareKnowledgeRecord(data);
-                const request = store.put(payload);
-                request.onsuccess = () => resolve();
-                request.onerror = event => reject(event.target.error || new Error('Error saving data'));
-                return;
-            }
-            if (isExamEngineStore(storeName)) {
-                const id = data && typeof data === 'object' ? data.id : null;
-                if (id) {
-                    const getRequest = store.get(id);
-                    getRequest.onsuccess = () => {
-                        const payload = normalizeExamEngineRecord(storeName, data, getRequest.result);
-                        const putRequest = store.put(payload);
-                        putRequest.onsuccess = () => resolve();
-                        putRequest.onerror = event => reject(event.target.error || new Error('Error saving data'));
-                    };
-                    getRequest.onerror = event => reject(event.target.error || new Error('Error saving data'));
-                    return;
-                }
-                const payload = normalizeExamEngineRecord(storeName, data, null);
-                const request = store.put(payload);
-                request.onsuccess = () => resolve();
-                request.onerror = event => reject(event.target.error || new Error('Error saving data'));
-                return;
-            }
-            const request = store.put(data);
-            request.onsuccess = () => resolve();
-            request.onerror = event => reject(event.target.error || new Error('Error saving data'));
+            transaction = db.transaction(storeNames, 'readwrite');
+            transaction.oncomplete = () => resolve();
+            transaction.onabort = () => reject(failure || transaction.error || new Error('Database transaction aborted'));
+            transaction.onerror = () => { failure ||= transaction.error; };
+            enqueue(transaction, abort);
         } catch (error) {
-            reject(error);
+            if (transaction) abort(error);
+            else reject(error);
         }
+    });
+}
+
+function enqueueRecord(store, record, abort, importing = false) {
+    if (store.name === 'userKnowledgeState') {
+        store.put(prepareKnowledgeRecord(record));
+    } else if (isExamEngineStore(store.name)) {
+        const request = store.get(record.id);
+        request.onsuccess = () => {
+            try {
+                const existing = request.result;
+                if (importing && existing) {
+                    const incomingVersion = parseExamVersion(record.version);
+                    const existingVersion = parseExamVersion(existing.version);
+                    if (incomingVersion === null ? existingVersion !== null : incomingVersion <= (existingVersion || 0)) return;
+                }
+                store.put(normalizeExamEngineRecord(store.name, record, existing));
+            } catch (error) {
+                abort(error);
+            }
+        };
+    } else {
+        store.put(record);
+    }
+}
+
+export async function saveDataToDB(storeName, data) {
+    return writeTransaction([storeName], (transaction, abort) => {
+        enqueueRecord(transaction.objectStore(storeName), data, abort);
     });
 }
 
 export async function saveDataBatch(storeName, records) {
     if (!Array.isArray(records) || !records.length) return;
-    return new Promise((resolve, reject) => {
-        try {
-            const store = getStore(storeName, 'readwrite');
-            if (storeName === 'userKnowledgeState') {
-                records.forEach(record => {
-                    const payload = prepareKnowledgeRecord(record);
-                    store.put(payload);
-                });
-                store.transaction.oncomplete = () => resolve();
-                store.transaction.onerror = event => reject(event.target.error || new Error('Error saving batch'));
-                return;
-            }
-            if (isExamEngineStore(storeName)) {
-                const pending = records.map(record => new Promise((resolveEntry, rejectEntry) => {
-                    const id = record && typeof record === 'object' ? record.id : null;
-                    if (!id) {
-                        const payload = normalizeExamEngineRecord(storeName, record, null);
-                        const putRequest = store.put(payload);
-                        putRequest.onsuccess = () => resolveEntry();
-                        putRequest.onerror = event => rejectEntry(event.target.error || new Error('Error saving batch'));
-                        return;
-                    }
-                    const getRequest = store.get(id);
-                    getRequest.onsuccess = () => {
-                        const payload = normalizeExamEngineRecord(storeName, record, getRequest.result);
-                        const putRequest = store.put(payload);
-                        putRequest.onsuccess = () => resolveEntry();
-                        putRequest.onerror = event => rejectEntry(event.target.error || new Error('Error saving batch'));
-                    };
-                    getRequest.onerror = event => rejectEntry(event.target.error || new Error('Error saving batch'));
-                }));
-                Promise.all(pending).catch(reject);
-                store.transaction.oncomplete = () => resolve();
-                store.transaction.onerror = event => reject(event.target.error || new Error('Error saving batch'));
-                return;
-            }
-            records.forEach(record => {
-                store.put(record);
-            });
-            store.transaction.oncomplete = () => resolve();
-            store.transaction.onerror = event => reject(event.target.error || new Error('Error saving batch'));
-        } catch (error) {
-            reject(error);
-        }
+    return writeTransaction([storeName], (transaction, abort) => {
+        const store = transaction.objectStore(storeName);
+        records.forEach(record => enqueueRecord(store, record, abort));
     });
 }
 
@@ -548,28 +519,14 @@ export async function getDataByIndex(storeName, indexName, keyRange) {
 }
 
 export async function deleteDataFromDB(storeName, key) {
-    return new Promise((resolve, reject) => {
-        try {
-            const store = getStore(storeName, 'readwrite');
-            const request = store.delete(storeName === 'userKnowledgeState' ? resolveKnowledgeKey(key) || normalizeKey(key) : normalizeKey(key));
-            request.onsuccess = () => resolve();
-            request.onerror = event => reject(event.target.error || new Error('Error deleting data'));
-        } catch (error) {
-            reject(error);
-        }
+    return writeTransaction([storeName], transaction => {
+        transaction.objectStore(storeName).delete(storeName === 'userKnowledgeState' ? resolveKnowledgeKey(key) || normalizeKey(key) : normalizeKey(key));
     });
 }
 
 export async function clearStoreInDB(storeName) {
-    return new Promise((resolve, reject) => {
-        try {
-            const store = getStore(storeName, 'readwrite');
-            const request = store.clear();
-            request.onsuccess = () => resolve();
-            request.onerror = event => reject(event.target.error || new Error('Error clearing store'));
-        } catch (error) {
-            reject(error);
-        }
+    return writeTransaction([storeName], transaction => {
+        transaction.objectStore(storeName).clear();
     });
 }
 
@@ -580,6 +537,8 @@ export async function softDeleteRecord(storeName, id, overrides = {}) {
     return new Promise((resolve, reject) => {
         try {
             const store = getStore(storeName, 'readwrite');
+            store.transaction.oncomplete = () => resolve();
+            store.transaction.onabort = () => reject(store.transaction.error || new Error('Soft deletion aborted'));
             const getRequest = store.get(id);
             getRequest.onsuccess = () => {
                 const existing = getRequest.result || { id };
@@ -599,7 +558,6 @@ export async function softDeleteRecord(storeName, id, overrides = {}) {
                     deletedAt: now
                 };
                 const putRequest = store.put(payload);
-                putRequest.onsuccess = () => resolve();
                 putRequest.onerror = event => reject(event.target.error || new Error('Error soft deleting record'));
             };
             getRequest.onerror = event => reject(event.target.error || new Error('Error soft deleting record'));
@@ -610,39 +568,22 @@ export async function softDeleteRecord(storeName, id, overrides = {}) {
 }
 
 export async function exportFullData() {
-    const [
-        decks,
-        knowledgeStates,
-        interactionLogs,
-        examPlans,
-        userSettings,
-        analytics,
-        atoms,
-        errorAtoms,
-        questions,
-        markSchemes,
-        examSpecs,
-        examPapers,
-        examSittings,
-        markingRecords,
-        contentRevisions
-    ] = await Promise.all([
-        getAllDataFromDB('decks'),
-        getAllDataFromDB('userKnowledgeState'),
-        getAllDataFromDB('interactionLogs'),
-        getAllDataFromDB('examPlans'),
-        getDataFromDB('appData', 'userSettings'),
-        getDataFromDB('appData', 'analytics'),
-        getAllDataFromDB('atoms'),
-        getAllDataFromDB('errorAtoms'),
-        getAllDataFromDB('questions'),
-        getAllDataFromDB('markSchemes'),
-        getAllDataFromDB('examSpecs'),
-        getAllDataFromDB('examPapers'),
-        getAllDataFromDB('examSittings'),
-        getAllDataFromDB('markingRecords'),
-        getAllDataFromDB('contentRevisions')
-    ]);
+    if (!db) throw new Error('Database not initialised');
+    const names = ['decks', 'userKnowledgeState', 'interactionLogs', 'examPlans', 'appData', ...EXAM_ENGINE_STORES];
+    const snapshot = await new Promise((resolve, reject) => {
+        const transaction = db.transaction(names, 'readonly');
+        const data = {};
+        transaction.oncomplete = () => resolve(data);
+        transaction.onabort = () => reject(transaction.error || new Error('Backup snapshot aborted'));
+        for (const name of names) {
+            const request = transaction.objectStore(name).getAll();
+            request.onsuccess = () => { data[name] = request.result; };
+        }
+    });
+    const { decks, interactionLogs, examPlans, atoms, errorAtoms, questions, markSchemes, examSpecs, examPapers, examSittings, markingRecords, contentRevisions } = snapshot;
+    const knowledgeStates = snapshot.userKnowledgeState;
+    const userSettings = snapshot.appData.find(record => record.key === 'userSettings');
+    const analytics = snapshot.appData.find(record => record.key === 'analytics');
 
     return {
         exportSchemaVersion: 1,
@@ -668,54 +609,29 @@ export async function exportFullData() {
 }
 
 export async function importFullData(payload) {
-    if (!payload || typeof payload !== 'object') {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error('Invalid backup payload');
     }
-
-    if (Array.isArray(payload.decks)) {
-        await saveDataBatch('decks', payload.decks);
-    }
-    if (Array.isArray(payload.knowledgeStates)) {
-        await saveDataBatch('userKnowledgeState', payload.knowledgeStates);
-    }
-    if (Array.isArray(payload.interactionLogs)) {
-        await saveDataBatch('interactionLogs', payload.interactionLogs);
-    }
-    if (Array.isArray(payload.examPlans)) {
-        await saveDataBatch('examPlans', payload.examPlans);
-    }
-    if (payload.settings) {
-        await saveDataToDB('appData', { key: 'userSettings', ...payload.settings });
-    }
-    if (payload.analytics) {
-        await saveDataToDB('appData', { key: 'analytics', ...payload.analytics });
-    }
-
-    const examEngine = payload.examEngine && typeof payload.examEngine === 'object' ? payload.examEngine : {};
-    const storeNames = Array.from(EXAM_ENGINE_STORES);
-
-    for (const storeName of storeNames) {
-        const entries = Array.isArray(examEngine[storeName]) ? examEngine[storeName] : [];
-        for (const entry of entries) {
-            if (!entry || typeof entry !== 'object') continue;
-            const incomingVersion = parseExamVersion(entry.version) || 1;
-            const hasIncomingVersion = parseExamVersion(entry.version) !== null;
-            const existing = entry.id ? await getDataFromDB(storeName, entry.id) : null;
-            if (!existing) {
-                await saveDataToDB(storeName, entry);
-                continue;
-            }
-            const existingVersion = parseExamVersion(existing.version);
-            let shouldWrite = false;
-            if (hasIncomingVersion) {
-                const existingCompare = existingVersion || 0;
-                shouldWrite = incomingVersion > existingCompare;
-            } else {
-                shouldWrite = existingVersion === null;
-            }
-            if (shouldWrite) {
-                await saveDataToDB(storeName, entry);
-            }
+    const collections = {
+        decks: payload.decks,
+        userKnowledgeState: payload.knowledgeStates,
+        interactionLogs: payload.interactionLogs,
+        examPlans: payload.examPlans
+    };
+    const examEngine = payload.examEngine || {};
+    for (const storeName of EXAM_ENGINE_STORES) collections[storeName] = examEngine[storeName];
+    for (const [name, records] of Object.entries(collections)) {
+        if (records !== undefined && (!Array.isArray(records) || records.some(record => !record || typeof record !== 'object' || Array.isArray(record)))) {
+            throw new Error(`Invalid backup collection: ${name}`);
         }
     }
+    return writeTransaction([...Object.keys(collections), 'appData'], (transaction, abort) => {
+        for (const [name, records] of Object.entries(collections)) {
+            const store = transaction.objectStore(name);
+            for (const record of records || []) enqueueRecord(store, record, abort, true);
+        }
+        const appData = transaction.objectStore('appData');
+        if (payload.settings) appData.put({ ...payload.settings, key: 'userSettings' });
+        if (payload.analytics) appData.put({ ...payload.analytics, key: 'analytics' });
+    });
 }

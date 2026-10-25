@@ -11,7 +11,7 @@ if (process.env.LAGIOTE_TEST_USER_DATA_DIR) {
     app.setPath('userData', process.env.LAGIOTE_TEST_USER_DATA_DIR);
 }
 
-const VITE_CONFIG_PATH = path.join(__dirname, 'vite.config.js');
+const VITE_CONFIG_PATH = path.join(__dirname, 'vite.config.mjs');
 const DEV_SERVER_DEFAULT_PORT = 5173;
 const DEV_SERVER_DEFAULT_HOST = '127.0.0.1';
 const SYNC_TIMEOUT_MS = 90000;
@@ -50,20 +50,10 @@ function loadEnvFile() {
         }
       }
     });
-  } else {
-    console.error('[Env] .env.local file not found!');
-    console.error('[Env] Current directory:', __dirname);
-    if (app.isPackaged) {
-      console.error('[Env] Resources path:', process.resourcesPath);
-      try {
-        const files = fs.readdirSync(process.resourcesPath);
-        console.error('[Env] Files in resources directory:', files.slice(0, 10));
-      } catch (e) {
-        console.error('[Env] Could not read resources directory:', e.message);
-      }
-    }
   }
 }
+
+loadEnvFile();
 
 function safeSend(window, channel, ...args) {
   try {
@@ -122,7 +112,7 @@ async function getDevServerUrl() {
   }
 
   try {
-    const { createServer } = require('vite');
+    const { createServer } = await import('vite');
     const server = await createServer({
       configFile: VITE_CONFIG_PATH,
       logLevel: 'warn',
@@ -168,7 +158,9 @@ async function resolveRendererTargets() {
     targets.push({ type: 'file', value: distIndex });
   }
 
-  targets.push({ type: 'file', value: path.join(__dirname, 'index.html') });
+  if (!targets.length) {
+    throw new Error('Renderer unavailable. Run npm run build:web before launching the desktop app.');
+  }
   rendererTargetsCache = targets;
   return targets;
 }
@@ -617,8 +609,6 @@ function setupAutoUpdater() {
 }
 
 app.whenReady().then(async () => {
-  loadEnvFile();
-
   if (app.isPackaged && (!process.env.ELECTRON_AUTH0_DOMAIN || !process.env.ELECTRON_AUTH0_CLIENT_ID)) {
     console.warn('[Env] Auth0 credentials not found in .env.local for packaged app, using fallback');
     process.env.ELECTRON_AUTH0_DOMAIN = process.env.ELECTRON_AUTH0_DOMAIN || 'dev-tn0gt5rtacrg1qdw.uk.auth0.com';

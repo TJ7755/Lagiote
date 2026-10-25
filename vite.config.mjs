@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import { resolve, join } from 'path';
 import { cpSync, existsSync, lstatSync } from 'fs';
 
-const staticDirs = ['assets', 'css', 'js', 'services', 'netlify'];
+const staticDirs = ['assets', 'css'];
 
 function copyStaticDirectories() {
     let resolvedConfig = null;
@@ -39,9 +39,9 @@ export default defineConfig({
         emptyOutDir: true,
         rollupOptions: {
             input: {
-                index: resolve(__dirname, 'index.html'),
-                study: resolve(__dirname, 'study.html'),
-                auth: resolve(__dirname, 'auth.html')
+                index: resolve(import.meta.dirname, 'index.html'),
+                study: resolve(import.meta.dirname, 'study.html'),
+                auth: resolve(import.meta.dirname, 'auth.html')
             }
         }
     },

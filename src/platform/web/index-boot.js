@@ -62,41 +62,6 @@ function bootstrapAnalytics() {
     return { gtag };
 }
 
-function createLoadCdnScript() {
-    return function loadCDNScript(src, onload) {
-        if (!navigator.onLine) {
-            console.warn('Offline: Skipping CDN script', src);
-            if (onload) onload();
-            return;
-        }
-        const script = document.createElement('script');
-        script.src = src;
-        script.onerror = () => {
-            console.warn('Failed to load CDN script:', src);
-            if (onload) onload();
-        };
-        if (onload && !src.includes('module')) {
-            script.onload = onload;
-        }
-        document.head.appendChild(script);
-    };
-}
-
-function bootstrapCdn(loadCDNScript) {
-    if (isTestMode()) return;
-    loadCDNScript('https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js', () => {
-        console.log('Sortable.js loaded or skipped');
-    });
-
-    if (navigator.onLine) {
-        const transformersScript = document.createElement('script');
-        transformersScript.type = 'module';
-        transformersScript.src = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-        transformersScript.onerror = () => console.warn('Failed to load Transformers library');
-        document.head.appendChild(transformersScript);
-    }
-}
-
 function bootstrap() {
     // Process Auth0 callback first to populate session storage.
     // Intentionally not awaited so the rest of boot can proceed.
@@ -105,15 +70,12 @@ function bootstrap() {
     applyThemeFromSystem();
 
     const { gtag } = bootstrapAnalytics();
-    const loadCDNScript = createLoadCdnScript();
 
     attachIndexGlobals({
-        loadCDNScript,
         gtag,
         dataLayer: window.dataLayer
     });
 
-    bootstrapCdn(loadCDNScript);
     bootstrapDashboardApp({
         analyticsServices: { gtag, dataLayer: window.dataLayer }
     }).catch((error) => {

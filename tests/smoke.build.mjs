@@ -40,7 +40,6 @@ function checkAuth() {
 function main() {
     requireFile('assets');
     requireFile('css');
-    requireFile('js');
     checkIndex();
     checkStudy();
     checkAuth();

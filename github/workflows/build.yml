@@ -16,16 +16,16 @@ jobs:
 
     steps:
       - name: 1. Check out git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7.0.1
 
       - name: 2. Install Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: '18'
+          node-version-file: '.node-version'
           cache: 'npm'
 
       - name: 3. Install dependencies
-        run: npm install
+        run: npm install --global npm@12.2.1 && npm ci
 
       - name: 4. Build/make application
         run: |
@@ -36,7 +36,7 @@ jobs:
           fi
 
       - name: 5. Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: LagioteRevise-${{ matrix.os }}
           path: out/make
