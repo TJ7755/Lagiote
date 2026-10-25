@@ -43,14 +43,14 @@ test('electron app core flows', async ({}, testInfo) => {
         if (await page.getByTestId('study-continue-round').isVisible().catch(() => false)) {
             await page.evaluate(() => document.querySelector('[data-testid="study-continue-round"]')?.click());
         }
-        const mcqAvailable = await page.evaluate(() => {
+        const mcqAvailable = await page.evaluate(async () => {
             const pool = window.studyState?.activeLearningPool;
             if (!Array.isArray(pool)) return false;
             const mcqCard = pool.find(card => card.questionTypeToShow === 'MultipleChoice');
             if (mcqCard) {
                 window.studyState.currentCard = mcqCard;
                 if (typeof window.showNextCard === 'function') {
-                    window.showNextCard();
+                    await window.showNextCard();
                 }
                 return true;
             }
@@ -58,8 +58,22 @@ test('electron app core flows', async ({}, testInfo) => {
         });
 
         const seen = new Set();
-        for (let i = 0; i < 6; i += 1) {
+        for (let i = 0; i < 12; i += 1) {
+            await page.waitForFunction(() => {
+                const visible = element => element && element.offsetParent !== null;
+                if (visible(document.getElementById('completeView'))) return true;
+                if (visible(document.querySelector('[data-testid="answer-next"]'))) return true;
+                if (visible(document.getElementById('mcqView'))) {
+                    return Boolean(document.querySelector('[data-testid^="mcq-option-"]:enabled'));
+                }
+                return visible(document.querySelector('[data-testid="answer-input"]:enabled'))
+                    || visible(document.querySelector('[data-testid="answer-show"]'));
+            });
             if (await page.locator('#completeView').isVisible()) break;
+            if (await page.getByTestId('answer-next').isVisible()) {
+                await page.getByTestId('answer-next').click();
+                continue;
+            }
             const mcqVisible = await page.locator('#mcqView').isVisible();
             const inputVisible = await page.getByTestId('answer-input').isVisible().catch(() => false);
             if (mcqVisible) {
